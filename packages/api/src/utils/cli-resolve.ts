@@ -10,8 +10,11 @@ import { resolve } from 'node:path';
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/** Common install directories for CLI tools (non-Windows). */
+/** Common install directories for CLI tools (non-Windows), relative to HOME. */
 const UNIX_SEARCH_DIRS = ['.local/bin', '.claude/bin', '.claude/local/bin'];
+
+/** macOS app bundle locations where CLI binaries may be bundled. */
+const MACOS_APP_DIRS = ['/Applications/Codex.app/Contents/Resources'];
 
 const resolvedCache = new Map<string, string>();
 
@@ -52,6 +55,14 @@ export function resolveCliCommand(command: string): string | null {
           resolvedCache.set(command, candidate);
           return candidate;
         }
+      }
+    }
+    // Search macOS app bundle directories (absolute paths)
+    for (const dir of MACOS_APP_DIRS) {
+      const candidate = resolve(dir, command);
+      if (existsSync(candidate)) {
+        resolvedCache.set(command, candidate);
+        return candidate;
       }
     }
   }

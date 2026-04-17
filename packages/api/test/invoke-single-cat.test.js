@@ -3403,6 +3403,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       clientId: 'opencode',
       accountRef: customProfile.id,
       defaultModel: 'maas/glm-5',
+      provider: undefined,
     });
 
     const optionsSeen = [];
@@ -3530,6 +3531,89 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig?.model, 'minimax/MiniMax-M2.7');
     assert.equal(seenRuntimeConfig?.provider?.minimax?.npm, '@ai-sdk/openai-compatible');
     assert.ok(seenRuntimeConfig?.provider?.minimax?.models?.['MiniMax-M2.7']);
+    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+  });
+
+  it('F189-P1-4: Xiaomi MiMo provider is normalized to anthropic runtime config', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f189-mimo-runtime-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const mimoProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'xiaomi-mimo',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+      apiKey: 'sk-mimo-key',
+      models: ['MiMo-V2-Pro', 'MiMo-V2-Lite'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-mimo-runtime';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: mimoProfile.id,
+      defaultModel: 'MiMo-V2-Pro',
+      provider: 'MiMo',
+    });
+
+    let seenConfigPath;
+    let seenRuntimeConfig;
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        assert.ok(seenConfigPath, 'MiMo provider should receive OPENCODE_CONFIG');
+        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test xiaomi mimo runtime config',
+          userId: 'user-f189-mimo',
+          threadId: 'thread-f189-mimo',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(messages.some((m) => m.type === 'done'));
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'anthropic/mimo-v2-pro');
+    assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-mimo-key');
+    assert.equal(callbackEnv.CAT_CAFE_OC_BASE_URL, 'https://token-plan-cn.xiaomimimo.com/anthropic/v1');
+    assert.equal(seenRuntimeConfig?.model, 'anthropic/mimo-v2-pro');
+    assert.equal(seenRuntimeConfig?.provider?.anthropic?.npm, '@ai-sdk/anthropic');
+    assert.deepStrictEqual(seenRuntimeConfig?.provider?.anthropic?.models, {
+      'mimo-v2-pro': { name: 'mimo-v2-pro' },
+      'mimo-v2-lite': { name: 'mimo-v2-lite' },
+    });
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
 
@@ -3726,6 +3810,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       clientId: 'opencode',
       accountRef: anthropicProfile.id,
       defaultModel: 'anthropic/claude-opus-4-6',
+      provider: undefined,
     });
 
     const optionsSeen = [];

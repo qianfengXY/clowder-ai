@@ -111,6 +111,31 @@ describe('transformOpenCodeEvent', () => {
     assert.ok(result.error.includes('Rate limit exceeded'));
   });
 
+  test('explains upstream auth/access failures for 403 Illegal access', () => {
+    const event = {
+      type: 'error',
+      timestamp: 1773298718314,
+      sessionID: 'ses_xxx',
+      error: {
+        name: 'APIError',
+        data: {
+          message: 'Illegal access',
+          statusCode: 403,
+          metadata: {
+            url: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+          },
+        },
+      },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.type, 'error');
+    assert.ok(result.error.includes('Upstream provider rejected the request'));
+    assert.ok(result.error.includes('403'));
+    assert.ok(result.error.includes('Illegal access'));
+    assert.ok(result.error.includes('API key'));
+  });
+
   // ── unknown → null ──
   test('returns null for unknown event type', () => {
     const event = { type: 'heartbeat', timestamp: 123456, sessionID: 'ses_xxx' };

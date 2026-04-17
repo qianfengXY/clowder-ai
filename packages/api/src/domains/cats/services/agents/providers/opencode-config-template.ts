@@ -81,6 +81,61 @@ const NPM_ADAPTER_FOR_API_TYPE: Record<string, string> = {
   google: '@ai-sdk/google',
 };
 
+const XIAOMI_MIMO_PROVIDER_ALIASES = new Set(['mimo']);
+
+function isXiaomiMiMoBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase().includes('xiaomimimo.com');
+  } catch {
+    return baseUrl.toLowerCase().includes('xiaomimimo.com');
+  }
+}
+
+function isXiaomiMiMoRuntime(providerName: string | undefined, baseUrl: string | undefined): boolean {
+  const normalizedProvider = providerName?.trim().toLowerCase();
+  return Boolean(normalizedProvider && XIAOMI_MIMO_PROVIDER_ALIASES.has(normalizedProvider)) || isXiaomiMiMoBaseUrl(baseUrl);
+}
+
+export function normalizeOpenCodeProviderName(providerName: string | undefined, baseUrl?: string): string | undefined {
+  const trimmed = providerName?.trim();
+  if (!trimmed) return trimmed;
+  return isXiaomiMiMoRuntime(trimmed, baseUrl) ? 'anthropic' : trimmed;
+}
+
+export function normalizeOpenCodeModelName(
+  model: string | undefined,
+  providerName?: string,
+  baseUrl?: string,
+): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return trimmed;
+  if (!isXiaomiMiMoRuntime(providerName, baseUrl)) return trimmed;
+  const parsed = parseOpenCodeModel(trimmed);
+  const normalizedModel = (parsed?.modelName ?? trimmed).trim().toLowerCase();
+  return `anthropic/${normalizedModel}`;
+}
+
+export function normalizeOpenCodeBaseUrl(baseUrl: string | undefined, providerName?: string): string | undefined {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) return trimmed;
+  if (!isXiaomiMiMoRuntime(providerName, trimmed)) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    const path = url.pathname.replace(/\/+$/, '');
+    if (path === '/anthropic/v1') return url.toString().replace(/\/+$/, '');
+    if (path === '/anthropic' || path === '/v1' || path === '') {
+      url.pathname = '/anthropic/v1';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    if (trimmed.endsWith('/anthropic/v1')) return trimmed;
+    if (trimmed.endsWith('/anthropic')) return `${trimmed}/v1`;
+    if (trimmed.endsWith('/v1')) return `${trimmed.slice(0, -3)}/anthropic/v1`;
+    return `${trimmed.replace(/\/+$/, '')}/anthropic/v1`;
+  }
+}
+
 /**
  * Derive the OpenCode API type from the member's provider name binding.
  *
@@ -89,7 +144,7 @@ const NPM_ADAPTER_FOR_API_TYPE: Record<string, string> = {
  * which the user explicitly sets in the member editor "Provider 名称" field.
  */
 export function deriveOpenCodeApiType(providerName: string | undefined): OpenCodeApiType {
-  const normalized = providerName?.toLowerCase();
+  const normalized = normalizeOpenCodeProviderName(providerName)?.toLowerCase();
   if (normalized === 'openai-responses') return 'openai-responses';
   if (normalized === 'anthropic') return 'anthropic';
   if (normalized === 'google') return 'google';

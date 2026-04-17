@@ -36,6 +36,9 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import {
   deriveOpenCodeApiType,
+  normalizeOpenCodeBaseUrl,
+  normalizeOpenCodeModelName,
+  normalizeOpenCodeProviderName,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
@@ -864,6 +867,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       effectiveProviderName = modelProviderName;
       effectiveModel = `${modelProviderName}/${trimmedDefaultModel}`;
     }
+    const normalizedOpenCodeProviderName =
+      provider === 'opencode' ? normalizeOpenCodeProviderName(effectiveProviderName, resolvedAccount?.baseUrl) : undefined;
+    const normalizedOpenCodeModel =
+      provider === 'opencode'
+        ? normalizeOpenCodeModelName(effectiveModel, effectiveProviderName, resolvedAccount?.baseUrl)
+        : undefined;
+    const normalizedOpenCodeBaseUrl =
+      provider === 'opencode' ? normalizeOpenCodeBaseUrl(resolvedAccount?.baseUrl, effectiveProviderName) : undefined;
 
     if (provider === 'opencode') {
       log.debug(
@@ -885,6 +896,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           parsedOpenCodeModel,
           effectiveProviderName: effectiveProviderName ?? null,
           effectiveModel: effectiveModel ?? null,
+          normalizedOpenCodeProviderName: normalizedOpenCodeProviderName ?? null,
+          normalizedOpenCodeModel: normalizedOpenCodeModel ?? null,
+          normalizedOpenCodeBaseUrl: normalizedOpenCodeBaseUrl ?? null,
         },
         'Resolved OpenCode runtime inputs',
       );
@@ -898,27 +912,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       provider === 'opencode' &&
       resolvedAccount != null &&
       resolvedAccount.authType === 'api_key' &&
-      effectiveModel &&
-      effectiveProviderName &&
-      (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel))
+      normalizedOpenCodeModel &&
+      normalizedOpenCodeProviderName &&
+      (hasExplicitOcProvider || !getOpenCodeKnownModels().has(normalizedOpenCodeModel))
     ) {
       // Remap model prefix when provider name collides with OpenCode builtins
       // (e.g. 'openai/gpt-4o' → 'openai-compat/gpt-4o') so the CLI -m arg
       // matches the remapped provider key in opencode.json.
-      const safeProvider = safeProviderName(effectiveProviderName);
+      const safeProvider = safeProviderName(normalizedOpenCodeProviderName);
       const safeModel =
-        safeProvider !== effectiveProviderName && effectiveModel.startsWith(`${effectiveProviderName}/`)
-          ? `${safeProvider}/${effectiveModel.slice(effectiveProviderName.length + 1)}`
-          : effectiveModel;
+        safeProvider !== normalizedOpenCodeProviderName &&
+        normalizedOpenCodeModel.startsWith(`${normalizedOpenCodeProviderName}/`)
+          ? `${safeProvider}/${normalizedOpenCodeModel.slice(normalizedOpenCodeProviderName.length + 1)}`
+          : normalizedOpenCodeModel;
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = safeModel;
-      const apiType = deriveOpenCodeApiType(effectiveProviderName);
-      const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      const apiType = deriveOpenCodeApiType(normalizedOpenCodeProviderName);
+      const rawModels = (resolvedAccount.models?.length ? resolvedAccount.models : [normalizedOpenCodeModel]).map(
+        (model) => normalizeOpenCodeModelName(model, effectiveProviderName, resolvedAccount.baseUrl) ?? model,
+      );
       const runtimeConfigOptions = {
-        providerName: effectiveProviderName,
+        providerName: normalizedOpenCodeProviderName,
         models: rawModels,
-        defaultModel: effectiveModel,
+        defaultModel: normalizedOpenCodeModel,
         apiType,
-        hasBaseUrl: Boolean(resolvedAccount.baseUrl),
+        hasBaseUrl: Boolean(normalizedOpenCodeBaseUrl),
       } as const;
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
         projectRoot,
@@ -928,7 +945,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
-      if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+      if (normalizedOpenCodeBaseUrl) callbackEnv[OC_BASE_URL_ENV] = normalizedOpenCodeBaseUrl;
       log.debug(
         {
           catId,

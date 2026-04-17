@@ -148,6 +148,43 @@ describe('global accounts (F340)', () => {
     );
   });
 
+  it('heals conflicting rollback account copies to match global truth source', async () => {
+    const { writeCatalogAccount, readCatalogAccounts, resetMigrationState } = await import(
+      '../dist/config/catalog-accounts.js'
+    );
+    resetMigrationState();
+
+    writeCatalogAccount(projectRoot, 'mimo', {
+      authType: 'api_key',
+      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+      displayName: '小米 MiMo',
+    });
+    resetMigrationState();
+
+    const catalog = {
+      version: 2,
+      breeds: [],
+      roster: {},
+      reviewPolicy: {},
+      accounts: {
+        mimo: {
+          authType: 'api_key',
+          baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+          displayName: '小米 MiMo (新加坡)',
+        },
+      },
+    };
+    await writeFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2), 'utf-8');
+
+    const result = readCatalogAccounts(projectRoot);
+    assert.equal(result.mimo.baseUrl, 'https://token-plan-cn.xiaomimimo.com/v1');
+    assert.equal(result.mimo.displayName, '小米 MiMo');
+
+    const healedCatalog = JSON.parse(await readFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    assert.equal(healedCatalog.accounts.mimo.baseUrl, 'https://token-plan-cn.xiaomimimo.com/v1');
+    assert.equal(healedCatalog.accounts.mimo.displayName, '小米 MiMo');
+  });
+
   it('migrates project-level legacy provider-profiles.json into global accounts', async () => {
     const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
@@ -484,6 +521,43 @@ describe('global accounts (F340)', () => {
 
     const globalFile = join(globalRoot, '.cat-cafe', 'accounts.json');
     assert.ok(!existsSync(globalFile), 'accounts.json should NOT be in globalRoot when env unset');
+  });
+
+  it('writeCatalogAccount and deleteCatalogAccount keep rollback copy in sync when it exists', async () => {
+    const { writeCatalogAccount, deleteCatalogAccount, resetMigrationState } = await import(
+      '../dist/config/catalog-accounts.js'
+    );
+    resetMigrationState();
+
+    const catalog = {
+      version: 2,
+      breeds: [],
+      roster: {},
+      reviewPolicy: {},
+      accounts: {
+        mimo: {
+          authType: 'api_key',
+          baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+          displayName: '小米 MiMo (新加坡)',
+        },
+      },
+    };
+    await writeFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2), 'utf-8');
+
+    writeCatalogAccount(projectRoot, 'mimo', {
+      authType: 'api_key',
+      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+      displayName: '小米 MiMo',
+    });
+
+    let updatedCatalog = JSON.parse(await readFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    assert.equal(updatedCatalog.accounts.mimo.baseUrl, 'https://token-plan-cn.xiaomimimo.com/v1');
+    assert.equal(updatedCatalog.accounts.mimo.displayName, '小米 MiMo');
+
+    deleteCatalogAccount(projectRoot, 'mimo');
+
+    updatedCatalog = JSON.parse(await readFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    assert.equal(updatedCatalog.accounts.mimo, undefined);
   });
 
   it('fails before attaching a legacy secret to a different-source api_key account with colliding ID', async () => {

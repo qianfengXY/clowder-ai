@@ -183,6 +183,8 @@ describe('deriveOpenCodeApiType', () => {
       { ocProviderName: 'anthropic', expected: 'anthropic' },
       { ocProviderName: 'google', expected: 'google' },
       { ocProviderName: 'openai-responses', expected: 'openai-responses' },
+      { ocProviderName: 'MiMo', expected: 'anthropic' },
+      { ocProviderName: 'mimo', expected: 'anthropic' },
       { ocProviderName: 'maas', expected: 'openai' },
       { ocProviderName: 'deepseek', expected: 'openai' },
       { ocProviderName: 'minimax', expected: 'openai' },

@@ -15,6 +15,7 @@ import type { AccountConfig } from '@cat-cafe/shared';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const ACCOUNTS_FILENAME = 'accounts.json';
+const CAT_CATALOG_FILENAME = 'cat-catalog.json';
 
 function resolveGlobalRoot(projectRoot?: string): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -67,6 +68,42 @@ function writeAllGlobal(accounts: Record<string, AccountConfig>, projectRoot?: s
   const accountsPath = resolveAccountsPath(projectRoot);
   mkdirSync(resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR), { recursive: true });
   writeFileAtomic(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`);
+}
+
+function resolveProjectCatalogPath(projectRoot: string): string {
+  return resolve(projectRoot, CONFIG_SUBDIR, CAT_CATALOG_FILENAME);
+}
+
+function syncProjectRollbackAccounts(
+  projectRoot: string,
+  updater: (accounts: Record<string, AccountConfig>) => boolean,
+): boolean {
+  const catalogPath = resolveProjectCatalogPath(projectRoot);
+  if (!existsSync(catalogPath)) return false;
+
+  let catalog: Record<string, unknown>;
+  try {
+    const raw = readFileSync(catalogPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+    catalog = parsed as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+
+  if (typeof catalog.accounts !== 'object' || catalog.accounts === null || Array.isArray(catalog.accounts)) {
+    return false;
+  }
+
+  const nextAccounts = {
+    ...(catalog.accounts as Record<string, AccountConfig>),
+  };
+  const changed = updater(nextAccounts);
+  if (!changed) return false;
+
+  catalog.accounts = nextAccounts;
+  writeFileAtomic(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
+  return true;
 }
 
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
@@ -312,7 +349,7 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
   const key = resolve(projectRoot);
   if (migratedProjects.has(key)) return;
   try {
-    const catalogPath = resolve(projectRoot, CONFIG_SUBDIR, 'cat-catalog.json');
+    const catalogPath = resolveProjectCatalogPath(projectRoot);
     if (!existsSync(catalogPath)) return;
     const raw = readFileSync(catalogPath, 'utf-8');
     const catalog = JSON.parse(raw);
@@ -329,6 +366,20 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
     // unnecessary writes to the project catalog file.
     if (merged.length > 0) {
       console.error(`[catalog-accounts] project ${key}: ${merged.length} account(s) merged into global`);
+    }
+    const globalAccounts = readAllGlobal(projectRoot);
+    const synced = syncProjectRollbackAccounts(projectRoot, (accounts) => {
+      let changed = false;
+      for (const [ref, account] of Object.entries(accounts)) {
+        const global = globalAccounts[ref];
+        if (!global || accountsEquivalent(global, account)) continue;
+        accounts[ref] = global;
+        changed = true;
+      }
+      return changed;
+    });
+    if (synced) {
+      console.error(`[catalog-accounts] project ${key}: synced rollback account copy from global`);
     }
     migratedProjects.add(key);
   } catch (err) {
@@ -463,6 +514,12 @@ export function writeCatalogAccount(projectRoot: string, ref: string, account: A
   const accounts = readAllGlobal(projectRoot);
   accounts[ref] = account;
   writeAllGlobal(accounts, projectRoot);
+  syncProjectRollbackAccounts(projectRoot, (catalogAccounts) => {
+    if (!(ref in catalogAccounts)) return false;
+    if (accountsEquivalent(catalogAccounts[ref], account)) return false;
+    catalogAccounts[ref] = account;
+    return true;
+  });
 }
 
 export function deleteCatalogAccount(projectRoot: string, ref: string): void {
@@ -471,6 +528,11 @@ export function deleteCatalogAccount(projectRoot: string, ref: string): void {
   if (!(ref in accounts)) return;
   delete accounts[ref];
   writeAllGlobal(accounts, projectRoot);
+  syncProjectRollbackAccounts(projectRoot, (catalogAccounts) => {
+    if (!(ref in catalogAccounts)) return false;
+    delete catalogAccounts[ref];
+    return true;
+  });
 }
 
 /** Check if legacy provider-profiles.json exists in any known location. */

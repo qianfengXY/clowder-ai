@@ -38,6 +38,9 @@ interface OpenCodeEvent {
     data?: {
       message?: string;
       statusCode?: number;
+      metadata?: {
+        url?: string;
+      };
       [key: string]: unknown;
     };
   };
@@ -47,6 +50,19 @@ function isOpenCodeEvent(event: unknown): event is OpenCodeEvent {
   if (typeof event !== 'object' || event === null) return false;
   const e = event as Record<string, unknown>;
   return typeof e.type === 'string';
+}
+
+function formatOpenCodeError(error: OpenCodeEvent['error']): string {
+  const message = error?.data?.message ?? error?.name ?? 'opencode error';
+  const statusCode = error?.data?.statusCode;
+  const requestUrl = error?.data?.metadata?.url;
+
+  if (statusCode === 401 || statusCode === 403) {
+    const urlHint = requestUrl ? ` ${requestUrl}` : '';
+    return `Upstream provider rejected the request (${statusCode} ${message}). Check API key, endpoint binding, and model access.${urlHint}`;
+  }
+
+  return message;
 }
 
 export function transformOpenCodeEvent(event: unknown, catId: CatId | string): AgentMessage | null {
@@ -88,7 +104,7 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
     }
 
     case 'error': {
-      const errorMsg = event.error?.data?.message ?? event.error?.name ?? 'opencode error';
+      const errorMsg = formatOpenCodeError(event.error);
       return {
         type: 'error',
         catId: catId as CatId,
