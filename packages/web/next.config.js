@@ -40,6 +40,13 @@ function buildContentSecurityPolicy() {
 const nextConfig = {
   reactStrictMode: true,
   experimental: { proxyTimeout: 120_000 },
+  // Explicitly expose the configured public API URL to browser bundles.
+  // Reading process.env through Next's browser shim leaves this value undefined
+  // unless it is declared here, causing tunneled clients to fall back to the
+  // frontend origin and send Socket.IO traffic through the HTTP rewrite.
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? '',
+  },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
   async headers() {

@@ -227,6 +227,33 @@ test(
   },
 );
 
+test(
+  'resolveCliCommand finds Kimi CLI in HOME/.kimi-code/bin (Unix)',
+  { skip: process.platform === 'win32' && 'Unix-only (HOME fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-kimi-home-'));
+    const kimiBin = join(tempRoot, '.kimi-code', 'bin');
+    mkdirSync(kimiBin, { recursive: true });
+
+    const cmdName = 'fake-kimi-cli-home-test';
+    const fakeBin = join(kimiBin, cmdName);
+    writeFileSync(fakeBin, '#!/bin/sh\necho ok\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRoot;
+      invalidateCliCommand(cmdName);
+      const result = resolveCliCommand(cmdName, { skipPathProbe: true });
+      assert.equal(result, fakeBin, 'should find binary in HOME/.kimi-code/bin');
+    } finally {
+      invalidateCliCommand(cmdName);
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 // --- #894: skipPathProbe skips PATH and goes straight to fallback dirs ---
 
 test(
