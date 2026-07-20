@@ -23,6 +23,8 @@ const UNIX_SEARCH_DIRS = [
   '.fnm/aliases/default/bin',
   '.volta/bin',
   '.nix-profile/bin',
+  // kimi CLI installer puts the binary at ~/.kimi-code/bin/kimi
+  '.kimi-code/bin',
 ];
 
 /** Official Kimi Code installer layout (macOS / Linux). Kept command-specific
