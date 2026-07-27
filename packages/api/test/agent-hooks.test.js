@@ -565,6 +565,63 @@ describe('agent hook routes', () => {
     }
   });
 
+  it('GET rejects remote access before validating an explicit projectPath', async () => {
+    const implicitApp = Fastify();
+    addSessionTestHook(implicitApp);
+    await implicitApp.register(agentHooksRoutes, { projectRoot });
+    await implicitApp.ready();
+    const uninitDir = await mkdtemp(join(tmpdir(), 'agent-hooks-remote-uninit-'));
+
+    try {
+      const res = await implicitApp.inject({
+        method: 'GET',
+        url: `/api/agent-hooks/status?projectPath=${encodeURIComponent(uninitDir)}`,
+        headers: {
+          ...SESSION_HEADERS,
+          host: 'skycat-api.cpolar.top',
+          origin: 'https://skycat.cpolar.top',
+        },
+        remoteAddress: '127.0.0.1',
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.match(res.payload, /local API host/);
+      assert.doesNotMatch(res.payload, /Project not initialized|missing \.cat-cafe/);
+    } finally {
+      await implicitApp.close();
+      await rm(uninitDir, { recursive: true, force: true });
+    }
+  });
+
+  it('POST rejects remote access before validating an explicit projectPath', async () => {
+    const implicitApp = Fastify();
+    addSessionTestHook(implicitApp);
+    await implicitApp.register(agentHooksRoutes, { projectRoot });
+    await implicitApp.ready();
+    const uninitDir = await mkdtemp(join(tmpdir(), 'agent-hooks-remote-uninit-sync-'));
+
+    try {
+      const res = await implicitApp.inject({
+        method: 'POST',
+        url: '/api/agent-hooks/sync',
+        headers: {
+          ...SESSION_HEADERS,
+          host: 'skycat-api.cpolar.top',
+          origin: 'https://skycat.cpolar.top',
+        },
+        payload: { projectPath: uninitDir },
+        remoteAddress: '127.0.0.1',
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.match(res.payload, /local API host/);
+      assert.doesNotMatch(res.payload, /Project not initialized|missing \.cat-cafe/);
+    } finally {
+      await implicitApp.close();
+      await rm(uninitDir, { recursive: true, force: true });
+    }
+  });
+
   it('allows implicit status checks for local browser hosts', async () => {
     const implicitApp = Fastify();
     addSessionTestHook(implicitApp);

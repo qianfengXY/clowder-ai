@@ -83,6 +83,46 @@ interface ChatContainerProps {
   threadId: string;
 }
 
+interface ThreadDetailSyncPayload {
+  projectPath?: string;
+  bootcampState?: Thread['bootcampState'];
+  firstRunQuestState?: { phase: string; firstCatName?: string };
+}
+
+function syncThreadDetailToLocalState(
+  threadId: string,
+  thread: ThreadDetailSyncPayload,
+  setCurrentProject: (projectPath: string) => void,
+) {
+  const store = useChatStore.getState();
+  const local = store.threads.find((candidate) => candidate.id === threadId);
+  const projectPath =
+    typeof thread.projectPath === 'string' && thread.projectPath.trim().length > 0 ? thread.projectPath : null;
+
+  if (projectPath && projectPath !== local?.projectPath) {
+    useChatStore.setState((state) => ({
+      threads: state.threads.map((candidate) =>
+        candidate.id === threadId ? { ...candidate, projectPath } : candidate,
+      ),
+    }));
+  }
+  if (projectPath && store.currentThreadId === threadId) {
+    setCurrentProject(projectPath);
+  }
+  if (thread.bootcampState || local?.bootcampState) {
+    syncLocalBootcampState(threadId, thread.bootcampState);
+  }
+
+  const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
+  if (thread.firstRunQuestState || localQuest) {
+    useChatStore.setState((state) => ({
+      threads: state.threads.map((candidate) =>
+        candidate.id === threadId ? { ...candidate, firstRunQuestState: thread.firstRunQuestState } : candidate,
+      ),
+    }));
+  }
+}
+
 export function ChatContainer({ threadId }: ChatContainerProps) {
   const bottomChromeRef = useRef<HTMLDivElement | null>(null);
   const bottomChromeObserverRef = useRef<ResizeObserver | null>(null);
@@ -455,31 +495,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // thread ensures the store stays in sync.
   const syncThreadState = useCallback(() => {
     apiFetch(`/api/threads/${threadId}`)
-      .then((res) =>
-        res.ok
-          ? (res.json() as Promise<{
-              bootcampState?: Thread['bootcampState'];
-              firstRunQuestState?: { phase: string; firstCatName?: string };
-            }>)
-          : null,
-      )
+      .then((res) => (res.ok ? (res.json() as Promise<ThreadDetailSyncPayload>) : null))
       .then((thread) => {
         if (!thread) return;
-        const local = useChatStore.getState().threads.find((t) => t.id === threadId);
-        if (thread.bootcampState || local?.bootcampState) {
-          syncLocalBootcampState(threadId, thread.bootcampState);
-        }
-        const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
-        if (thread.firstRunQuestState || localQuest) {
-          useChatStore.setState((state) => ({
-            threads: state.threads.map((t) =>
-              t.id === threadId ? { ...t, firstRunQuestState: thread.firstRunQuestState } : t,
-            ),
-          }));
-        }
+        syncThreadDetailToLocalState(threadId, thread, setCurrentProject);
       })
       .catch(() => {});
-  }, [threadId]);
+  }, [threadId, setCurrentProject]);
 
   // Sync on invocation end (active → inactive transition)
   const prevInvocationRef = useRef(hasActiveInvocation);
@@ -997,7 +1019,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                       onSyncAgentHooks={agentHookHealth.sync}
                       onComplete={() => {
                         setSetupDone(true);
-                        govRefetch();
+                        void govRefetch();
+                        void agentHookHealth.refresh();
                       }}
                     />
                   </div>

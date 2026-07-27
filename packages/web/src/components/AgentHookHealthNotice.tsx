@@ -125,6 +125,42 @@ function previewTargets(health: AgentHookStatusResponse | null): AgentHookTarget
     .slice(0, 5);
 }
 
+function canSyncAgentHooks(
+  health: AgentHookStatusResponse | null,
+  syncing: boolean,
+  currentStatus: AgentHookHealthStatus | 'syncing' | 'synced' | 'error',
+): boolean {
+  return health?.syncAllowed !== false && !syncing && currentStatus !== 'synced';
+}
+
+function shouldShowTargetStatus(health: AgentHookStatusResponse | null): boolean {
+  return health?.syncAllowed !== false || targetsFor(health).length > 0;
+}
+
+function AgentHookTargetStatusBadges({ health }: { health: AgentHookStatusResponse | null }) {
+  if (!shouldShowTargetStatus(health)) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+      <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+        Claude：{statusText(groupStatus(health, 'claude'))}
+      </span>
+      <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+        Codex：{statusText(groupStatus(health, 'codex'))}
+      </span>
+      <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+        Gemini：{statusText(groupStatus(health, 'gemini'))}
+      </span>
+      <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+        Skills：{statusText(groupStatus(health, 'skills'))}
+      </span>
+      <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+        MCP：{statusText(groupStatus(health, 'mcp'))}
+      </span>
+    </div>
+  );
+}
+
 export function AgentHookHealthNotice({
   health,
   error,
@@ -138,7 +174,7 @@ export function AgentHookHealthNotice({
   const currentStatus = error ? 'error' : syncing ? 'syncing' : synced ? 'synced' : health ? health.status : 'error';
   const tone = toneFor(currentStatus);
   const problematicTargets = previewTargets(health);
-  const canSync = !syncing && currentStatus !== 'synced';
+  const canSync = canSyncAgentHooks(health, syncing, currentStatus);
 
   return (
     <div data-testid="agent-hook-health-notice" className={`rounded-lg border p-3 ${tone.classes} ${className}`}>
@@ -148,7 +184,7 @@ export function AgentHookHealthNotice({
           <div className="flex flex-wrap items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{tone.title}</p>
-              <p className="mt-1 text-xs opacity-85">{error ?? tone.body}</p>
+              <p className="mt-1 text-xs opacity-85">{error ?? health?.message ?? tone.body}</p>
             </div>
             {canSync && (
               <button
@@ -162,23 +198,7 @@ export function AgentHookHealthNotice({
             {syncing && <span className="text-xs font-medium">同步中...</span>}
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
-              Claude：{statusText(groupStatus(health, 'claude'))}
-            </span>
-            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
-              Codex：{statusText(groupStatus(health, 'codex'))}
-            </span>
-            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
-              Gemini：{statusText(groupStatus(health, 'gemini'))}
-            </span>
-            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
-              Skills：{statusText(groupStatus(health, 'skills'))}
-            </span>
-            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
-              MCP：{statusText(groupStatus(health, 'mcp'))}
-            </span>
-          </div>
+          <AgentHookTargetStatusBadges health={health} />
 
           {problematicTargets.length > 0 && (
             <details className="mt-2 text-xs">

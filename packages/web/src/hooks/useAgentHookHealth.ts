@@ -22,6 +22,8 @@ export interface AgentHookTargetHealth {
 export interface AgentHookStatusResponse {
   status: AgentHookHealthStatus;
   targets: AgentHookTargetHealth[];
+  syncAllowed?: boolean;
+  message?: string;
 }
 
 interface UseAgentHookHealthOptions {
@@ -47,12 +49,41 @@ let inFlightProjectPath: string | undefined;
 let inFlightStatus: Promise<AgentHookStatusResponse> | null = null;
 
 function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResponse {
+  const response = value as { status?: unknown; targets?: unknown; syncAllowed?: unknown; message?: unknown } | null;
   return (
-    !!value &&
-    typeof value === 'object' &&
-    typeof (value as { status?: unknown }).status === 'string' &&
-    Array.isArray((value as { targets?: unknown }).targets)
+    !!response &&
+    typeof response === 'object' &&
+    typeof response.status === 'string' &&
+    Array.isArray(response.targets) &&
+    (response.syncAllowed === undefined || typeof response.syncAllowed === 'boolean') &&
+    (response.message === undefined || typeof response.message === 'string')
   );
+}
+
+async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: unknown; message?: unknown };
+    if (typeof payload.error === 'string' && payload.error.trim()) return payload.error.trim();
+    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+async function clientErrorHealth(response: Response): Promise<AgentHookStatusResponse | null> {
+  if (response.status < 400 || response.status >= 500) return null;
+
+  const serverMessage = await readApiErrorMessage(response, `agent hook status failed (${response.status})`);
+  return {
+    status: response.status === 403 ? 'unsupported' : 'error',
+    targets: [],
+    syncAllowed: false,
+    message:
+      response.status === 403
+        ? '为保护本机 Agent 配置，环境检测和一键同步仅支持通过 localhost Hub 操作。'
+        : serverMessage,
+  };
 }
 
 async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatusResponse> {
@@ -66,7 +97,11 @@ async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatu
   inFlightProjectPath = projectPath;
   inFlightStatus = apiFetch(url)
     .then(async (res) => {
-      if (!res.ok) throw new Error(`agent hook status failed (${res.status})`);
+      if (!res.ok) {
+        const blockedHealth = await clientErrorHealth(res);
+        if (blockedHealth) return blockedHealth;
+        throw new Error(await readApiErrorMessage(res, `agent hook status failed (${res.status})`));
+      }
       const status = await res.json();
       if (!isAgentHookStatusResponse(status)) throw new Error('agent hook status response is invalid');
       return status;
@@ -90,7 +125,7 @@ async function postAgentHookSync(projectPath?: string): Promise<AgentHookStatusR
     headers: projectPath ? { 'Content-Type': 'application/json' } : undefined,
     body: projectPath ? JSON.stringify({ projectPath }) : undefined,
   });
-  if (!res.ok) throw new Error(`agent hook sync failed (${res.status})`);
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, `agent hook sync failed (${res.status})`));
   const status = await res.json();
   if (!isAgentHookStatusResponse(status)) throw new Error('agent hook sync response is invalid');
   cachedHealth = status;

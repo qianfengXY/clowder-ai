@@ -33,6 +33,13 @@ function Probe({ onStatus }: { onStatus: (status: string | null) => void }) {
   return null;
 }
 
+let latestResult: ReturnType<typeof useAgentHookHealth> | null = null;
+
+function ResultProbe() {
+  latestResult = useAgentHookHealth({ enabled: true, projectPath: '/workspace/project' });
+  return null;
+}
+
 describe('useAgentHookHealth', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -49,6 +56,7 @@ describe('useAgentHookHealth', () => {
 
   beforeEach(() => {
     resetAgentHookHealthCacheForTests();
+    latestResult = null;
     vi.mocked(apiFetch).mockReset();
     vi.mocked(apiFetch).mockResolvedValue({
       ok: true,
@@ -85,5 +93,66 @@ describe('useAgentHookHealth', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(apiFetch).toHaveBeenCalledWith('/api/agent-hooks/status');
     expect(statuses).toContain('configured');
+  });
+
+  it('surfaces an uninitialized project as a non-syncable health result', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'Project not initialized (missing .cat-cafe/): /workspace/project' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(latestResult?.error).toBeNull();
+    expect(latestResult?.health).toMatchObject({
+      status: 'error',
+      targets: [],
+      syncAllowed: false,
+      message: 'Project not initialized (missing .cat-cafe/): /workspace/project',
+    });
+  });
+
+  it('surfaces remote host protection as unsupported and non-syncable', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'Agent hook health requires an explicit targetRoot or a local API host' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(latestResult?.error).toBeNull();
+    expect(latestResult?.health).toMatchObject({
+      status: 'unsupported',
+      targets: [],
+      syncAllowed: false,
+      message: '为保护本机 Agent 配置，环境检测和一键同步仅支持通过 localhost Hub 操作。',
+    });
+  });
+
+  it('rejects malformed optional health metadata', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'configured', targets: [], syncAllowed: 'yes' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(latestResult?.health).toBeNull();
+    expect(latestResult?.error).toBe('agent hook status response is invalid');
   });
 });
