@@ -108,8 +108,8 @@ function resolveOptions(options: AgentHooksRouteOptions, targetRoot: string, cap
   return {
     projectRoot: options.projectRoot ?? findMonorepoRoot(process.cwd()),
     targetRoot,
-    // When the thread targets an external project, skill/MCP checks use
-    // that project's config.  Hook templates always come from projectRoot.
+    // Explicit external projects override the persistent host capability scope.
+    // Hook templates always come from projectRoot.
     ...(capabilityProjectRoot ? { capabilityProjectRoot } : {}),
   };
 }
