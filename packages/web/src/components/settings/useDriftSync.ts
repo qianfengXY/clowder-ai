@@ -1,10 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { DriftCheckResult, DriftIssue, DriftType, ScopeIssues } from './drift-types';
 
 const GLOBAL_SCOPE_KEY = 'global';
+const subscribeToLocation = () => () => undefined;
+
+export function isDirectLocalHubHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === 'localhost' || normalized === '::1' || normalized === '[::1]' || normalized.startsWith('127.');
+}
+
+function getLocalHubSnapshot(): boolean {
+  return typeof window !== 'undefined' && isDirectLocalHubHostname(window.location.hostname);
+}
 
 interface UseDriftSyncOptions {
   /** Capability type: 'skill' or 'mcp'. */
@@ -47,7 +57,7 @@ export function useDriftSync({
   // driftFor(undefined) → checkGlobal. Including it again would duplicate global
   // issues (mount-missing, unregistered) as project-level sync issues, making
   // every skill badge show "待同步" even when projects are correctly synced.
-  const projectPaths = useMemo(() => {
+  const candidateProjectPaths = useMemo(() => {
     const normalize = (p: string) => p.replace(/\/+$/, '');
     const resolvedNorm = resolvedProjectPath ? normalize(resolvedProjectPath) : null;
     const paths = new Set<string>();
@@ -58,7 +68,8 @@ export function useDriftSync({
     }
     return Array.from(paths);
   }, [rawProjectPaths, resolvedProjectPath]);
-  const projectPathsKey = projectPaths.join('\0');
+  const projectPathsKey = candidateProjectPaths.join('\0');
+  const canSync = useSyncExternalStore(subscribeToLocation, getLocalHubSnapshot, () => false);
 
   /** Call /api/drift/check for one scope. */
   const driftFor = useCallback(
@@ -118,6 +129,11 @@ export function useDriftSync({
     });
   }, [fetchScopeReports, projectPathsKey, enabled, refreshToken]);
 
+  const projectPaths = useMemo(
+    () => candidateProjectPaths.filter((path) => scopeDrift[path]?.initialized !== false),
+    [candidateProjectPaths, scopeDrift],
+  );
+
   /** Scope tree: global first, then each project. */
   const scopeIssues: ScopeIssues[] = useMemo(() => {
     const projectName = (path: string) => {
@@ -164,14 +180,14 @@ export function useDriftSync({
       setSyncAllError(null);
       try {
         await resolveScope('sync', projectPath);
-        await fetchScopeReports(projectPaths);
+        await fetchScopeReports(candidateProjectPaths);
       } catch (err) {
         setSyncAllError(err instanceof Error ? err.message : '同步失败');
       } finally {
         setSyncing(false);
       }
     },
-    [fetchScopeReports, projectPaths, resolveScope],
+    [candidateProjectPaths, fetchScopeReports, resolveScope],
   );
 
   const handleSyncAllScopes = useCallback(async () => {
@@ -183,17 +199,18 @@ export function useDriftSync({
       for (const path of projectPaths) {
         await resolveScope('sync', path);
       }
-      await fetchScopeReports(projectPaths);
+      await fetchScopeReports(candidateProjectPaths);
     } catch (err) {
       setSyncAllError(err instanceof Error ? err.message : '全部同步失败');
     } finally {
       setSyncing(false);
     }
-  }, [fetchScopeReports, projectPaths, resolveScope, type]);
+  }, [candidateProjectPaths, fetchScopeReports, projectPaths, resolveScope, type]);
 
   return {
     syncing,
     syncAllError,
+    canSync,
     projectPaths,
     projectConsistency,
     scopeIssues,

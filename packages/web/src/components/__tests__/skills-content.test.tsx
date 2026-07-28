@@ -125,8 +125,11 @@ const DEFAULT_CONFLICT_ISSUE = {
   message: 'claude 存在同名目录占用（立即同步会覆盖和清理已有内容，请先确认是否需要进行备份）',
 };
 
-function driftResponse(projectPath: string | undefined, issues: unknown[] = []): Response {
-  return jsonResponse({ result: { issues, driftHash: `hash:${projectPath ?? 'global'}` }, projectPath });
+function driftResponse(projectPath: string | undefined, issues: unknown[] = [], initialized = true): Response {
+  return jsonResponse({
+    result: { issues, driftHash: `hash:${projectPath ?? 'global'}`, initialized },
+    projectPath,
+  });
 }
 
 /** Default drift routing: an anomaly in the global scope, projects clean. */
@@ -138,6 +141,7 @@ function mockBothApis(
   skillsOverride?: unknown,
   capOverride?: unknown,
   driftIssuesFor: (projectPath?: string) => unknown[] = defaultDriftIssues,
+  driftInitializedFor: (projectPath?: string) => boolean = () => true,
 ) {
   mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -154,7 +158,9 @@ function mockBothApis(
     }
     if (url === '/api/drift/check') {
       const body = JSON.parse(String(init?.body ?? '{}')) as { type?: string; projectPath?: string };
-      return Promise.resolve(driftResponse(body.projectPath, driftIssuesFor(body.projectPath)));
+      return Promise.resolve(
+        driftResponse(body.projectPath, driftIssuesFor(body.projectPath), driftInitializedFor(body.projectPath)),
+      );
     }
     if (url === '/api/drift/resolve' && init?.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true }));
@@ -176,6 +182,7 @@ describe('SkillsContent', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    mockGetProjectPaths.mockReturnValue([]);
     mockFetch.mockReset();
     mockBothApis();
   });
@@ -210,7 +217,7 @@ describe('SkillsContent', () => {
     expect(container.textContent).toContain('cross-cat-handoff');
     expect(container.textContent).toContain('browser-preview');
     expect(container.textContent).toContain('missing-browser:missing');
-    expect(container.textContent).toContain('检测到 1 处 Skill 异常');
+    expect(container.textContent).toContain('1 个作用域存在 Skill 待同步');
     expect(container.textContent).toContain('查看详情');
 
     const frontendFilter = Array.from(container.querySelectorAll('button')).find(
@@ -624,7 +631,7 @@ describe('SkillsContent', () => {
     const scopeTabs = container.querySelector('[data-testid="skills-scope-tabs"]');
     expect(scopeTabs?.textContent).toContain('全部 Skill');
     expect(scopeTabs?.textContent).toContain('项目 Skill');
-    expect(container.textContent).toContain('检测到 1 处 Skill 异常');
+    expect(container.textContent).toContain('1 个作用域存在 Skill 待同步');
     expect(container.textContent).toContain('查看详情');
 
     const skillsList = container.querySelector('[data-testid="skills-list"]');
@@ -981,7 +988,7 @@ describe('SkillsContent', () => {
     expect(driftScopes.has('global')).toBe(true);
     expect(driftScopes.has(projectA)).toBe(false);
     expect(driftScopes.has(projectB)).toBe(true);
-    expect(container.textContent).toContain('检测到 1 处 Skill 异常');
+    expect(container.textContent).toContain('1 个作用域存在 Skill 待同步');
 
     const detail = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('查看详情'));
     await act(async () => {
@@ -989,7 +996,7 @@ describe('SkillsContent', () => {
     });
 
     const dialog = container.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain('项目 Skill 异常详情');
+    expect(dialog?.textContent).toContain('Skill 待同步详情');
     expect(String(dialog?.className)).toContain('fixed');
     expect(String(dialog?.className)).toContain('inset-0');
     // Only project-b scope (with the conflict) appears, showing the verbatim backend message.
@@ -1015,6 +1022,67 @@ describe('SkillsContent', () => {
     );
     expect(collapsedToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(dialog?.textContent).not.toContain('存在同名目录占用');
+  });
+
+  it('"全部 Skill" excludes uninitialized historical project paths from anomalies and sync', async () => {
+    const mainProject = '/workspace/cat-cafe';
+    const staleProject = '/workspace/old-thread-project';
+    const initializedProject = '/workspace/traqen';
+    mockGetProjectPaths.mockReturnValue([mainProject, staleProject, initializedProject]);
+    mockBothApis(
+      skillsPayload,
+      {
+        ...capabilitiesPayload,
+        projectPath: mainProject,
+        knownProjectPaths: [mainProject, staleProject, initializedProject],
+      },
+      (projectPath) =>
+        projectPath === staleProject || projectPath === initializedProject ? [DEFAULT_CONFLICT_ISSUE] : [],
+      (projectPath) => projectPath !== staleProject,
+    );
+
+    await render(React.createElement(SkillsContent));
+    await flushEffects();
+    await flushEffects();
+
+    expect(container.textContent).toContain('1 个作用域存在 Skill 待同步');
+    expect(container.textContent).not.toContain('2 个作用域存在 Skill 待同步');
+
+    const detail = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看详情'),
+    );
+    await act(async () => {
+      detail?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('traqen');
+    expect(dialog?.textContent).not.toContain('old-thread-project');
+
+    mockFetch.mockClear();
+    const syncAll = Array.from(dialog?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('同步全部'),
+    );
+    await act(async () => {
+      syncAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const syncedProjectPaths = mockFetch.mock.calls
+      .filter(
+        (call: unknown[]) =>
+          String(call[0]) === '/api/drift/resolve' && (call[1] as { method?: string } | undefined)?.method === 'POST',
+      )
+      .map((call: unknown[]) => {
+        const body = JSON.parse(String((call[1] as { body?: string } | undefined)?.body ?? '{}')) as {
+          projectPath?: string;
+        };
+        return body.projectPath;
+      })
+      .filter(Boolean);
+    expect(syncedProjectPaths).toEqual([initializedProject]);
+
+    mockGetProjectPaths.mockReturnValue([]);
   });
 
   it('opens one unified issue dialog rendering backend project issues verbatim', async () => {

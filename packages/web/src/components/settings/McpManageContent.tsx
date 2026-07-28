@@ -221,6 +221,7 @@ export function McpManageContent() {
           scopesWithIssues={driftSync.scopesWithIssues}
           syncing={driftSync.syncing}
           error={driftSync.syncAllError}
+          canSync={driftSync.canSync}
           onSyncAll={driftSync.handleSyncAllScopes}
           onSyncScope={driftSync.handleSyncScope}
         />

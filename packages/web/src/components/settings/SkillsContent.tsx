@@ -216,6 +216,7 @@ export function SkillsContent() {
                 scopesWithIssues={sync.scopesWithIssues}
                 syncing={sync.syncing}
                 error={sync.syncAllError}
+                canSync={sync.canSync}
                 onSyncAll={sync.handleSyncAllScopes}
                 onSyncScope={sync.handleSyncScope}
               />

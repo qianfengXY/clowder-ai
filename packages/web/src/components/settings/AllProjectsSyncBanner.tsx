@@ -21,6 +21,7 @@ export function AllProjectsSyncBanner({
   scopesWithIssues,
   syncing,
   error,
+  canSync,
   onSyncAll,
   onSyncScope,
 }: {
@@ -30,6 +31,8 @@ export function AllProjectsSyncBanner({
   scopesWithIssues: ScopeIssues[];
   syncing: boolean;
   error: string | null;
+  /** Capability writes are intentionally limited to direct localhost Hub access. */
+  canSync: boolean;
   onSyncAll: () => void;
   onSyncScope?: (projectPath?: string) => void;
 }) {
@@ -48,7 +51,7 @@ export function AllProjectsSyncBanner({
     <div className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-bold text-conn-amber-text">
-          检测到 {issueScopeCount} 处 {label} 异常
+          {issueScopeCount} 个作用域存在 {label} 待同步
         </p>
         <button
           type="button"
@@ -59,6 +62,9 @@ export function AllProjectsSyncBanner({
         </button>
       </div>
 
+      {!canSync && (
+        <p className="mt-1 text-xs text-cafe-muted">远程访问仅支持查看；同步需在 Mac Mini 的 localhost Hub 执行。</p>
+      )}
       {error && <p className="mt-1 text-xs text-conn-red-text">⚠ {error}</p>}
 
       {showDetail && (
@@ -66,6 +72,7 @@ export function AllProjectsSyncBanner({
           type={type}
           scopes={scopesWithIssues}
           syncing={syncing}
+          canSync={canSync}
           onClose={() => setShowDetail(false)}
           onSyncAll={onSyncAll}
           onSyncScope={onSyncScope}
@@ -79,6 +86,7 @@ function AllProjectsIssueDetailDialog({
   type,
   scopes,
   syncing,
+  canSync,
   onClose,
   onSyncAll,
   onSyncScope,
@@ -86,6 +94,7 @@ function AllProjectsIssueDetailDialog({
   type: DriftType;
   scopes: ScopeIssues[];
   syncing: boolean;
+  canSync: boolean;
   onClose: () => void;
   onSyncAll: () => void;
   onSyncScope?: (projectPath?: string) => void;
@@ -105,7 +114,7 @@ function AllProjectsIssueDetailDialog({
   return (
     <ModalOverlay onClose={onClose} maxWidthClass="max-w-2xl">
       <div className="flex shrink-0 items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-cafe">项目 {label} 异常详情</h3>
+        <h3 className="text-sm font-bold text-cafe">{label} 待同步详情</h3>
         <button
           type="button"
           aria-label="关闭"
@@ -134,7 +143,7 @@ function AllProjectsIssueDetailDialog({
                   {scope.label}
                   <span className="text-cafe-muted">（{scope.issues.length}）</span>
                 </button>
-                {onSyncScope && (
+                {canSync && onSyncScope && (
                   <button
                     type="button"
                     onClick={() => onSyncScope(scope.path)}
@@ -155,16 +164,18 @@ function AllProjectsIssueDetailDialog({
         })}
       </div>
 
-      <div className="mt-4 shrink-0">
-        <button
-          type="button"
-          onClick={onSyncAll}
-          disabled={syncing}
-          className="rounded-lg bg-cafe-accent px-3 py-1 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:opacity-40"
-        >
-          {syncing ? '同步中…' : '同步全部'}
-        </button>
-      </div>
+      {canSync && (
+        <div className="mt-4 shrink-0">
+          <button
+            type="button"
+            onClick={onSyncAll}
+            disabled={syncing}
+            className="rounded-lg bg-cafe-accent px-3 py-1 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:opacity-40"
+          >
+            {syncing ? '同步中…' : '同步全部'}
+          </button>
+        </div>
+      )}
     </ModalOverlay>
   );
 }

@@ -10,6 +10,8 @@
  * one component, and one endpoint for both capability types.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
@@ -66,6 +68,10 @@ function parseType(body: Record<string, unknown>): DriftType | null {
   return null;
 }
 
+function isInitializedProjectScope(projectPath: string | undefined, effectiveRoot: string): boolean {
+  return !projectPath || existsSync(join(effectiveRoot, '.cat-cafe'));
+}
+
 export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /api/drift/check ──
   app.post('/api/drift/check', async (request, reply) => {
@@ -97,7 +103,11 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
         mountPoint: i.mountPointId,
       }));
       return {
-        result: { issues, driftHash: ctx.drift.driftHash },
+        result: {
+          issues,
+          driftHash: ctx.drift.driftHash,
+          initialized: isInitializedProjectScope(projectPath, ctx.effectiveRoot),
+        },
         projectRoot: ctx.effectiveRoot,
       };
     }
@@ -118,7 +128,11 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
       hasOverride: i.hasOverride,
     }));
     return {
-      result: { issues, driftHash: drift.driftHash },
+      result: {
+        issues,
+        driftHash: drift.driftHash,
+        initialized: isInitializedProjectScope(projectPath, effectiveRoot),
+      },
       projectRoot: effectiveRoot,
     };
   });
