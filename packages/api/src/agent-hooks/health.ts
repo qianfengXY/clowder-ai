@@ -5,6 +5,7 @@ import { checkMcpProject, type McpDriftResult, type McpIssue } from '../mcp/mcp-
 import { syncMcpDrift } from '../mcp/mcp-drift-resolver.js';
 import { computeSkillDrift } from '../routes/skills-drift.js';
 import { syncDrift } from '../skills/drift-resolver.js';
+import { redirectRuntimeProjectPath } from '../utils/persistent-project-path.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { claudeSettingsHealth, syncClaudeSettings } from './claude-settings.js';
 import {
@@ -242,6 +243,12 @@ function filterOrphanIssues(drift: McpDriftResult, globalConfigValid: boolean): 
   });
 }
 
+export async function resolveAgentHookGlobalRoot(
+  startupRoot: string = resolveStartupProjectRoot(),
+): Promise<string | null> {
+  return redirectRuntimeProjectPath(startupRoot);
+}
+
 async function checkMcpHealth(projectRoot: string): Promise<HealthResult> {
   try {
     // Skip MCP drift check if the project has no capabilities.json —
@@ -249,9 +256,18 @@ async function checkMcpHealth(projectRoot: string): Promise<HealthResult> {
     if (!existsSync(join(projectRoot, '.cat-cafe', 'capabilities.json'))) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'no project capabilities' };
     }
-    const startupRoot = resolveStartupProjectRoot();
-    const globalConfig = await readCapabilitiesConfig(startupRoot);
-    const drift = await checkMcpProject(projectRoot, startupRoot, globalConfig);
+    const globalRoot = await resolveAgentHookGlobalRoot();
+    if (!globalRoot) {
+      return {
+        name: 'mcp',
+        drifted: false,
+        status: 'error',
+        targetPath: '',
+        reason: 'persistent global MCP root is unavailable',
+      };
+    }
+    const globalConfig = await readCapabilitiesConfig(globalRoot);
+    const drift = await checkMcpProject(projectRoot, globalRoot, globalConfig);
     const actionableIssues = filterOrphanIssues(drift, globalConfig !== null);
     if (actionableIssues.length === 0) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'configured' };
@@ -266,6 +282,46 @@ async function checkMcpHealth(projectRoot: string): Promise<HealthResult> {
   } catch {
     return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'configured' };
   }
+}
+
+async function syncSkillCapabilities(projectRoot: string): Promise<void> {
+  try {
+    const ctx = await computeSkillDrift(projectRoot);
+    if (!ctx) return;
+
+    const { newSkills, stale, conflicts } = ctx.drift;
+    if (newSkills.length + stale.length + conflicts.length === 0) return;
+
+    await syncDrift(ctx.effectiveRoot, ctx.skillsSource, ctx.mountRules, ctx.drift, ctx.syncOpts, 'keep-project');
+  } catch {
+    /* skill sync failure should not block hook sync result */
+  }
+}
+
+async function syncMcpCapabilities(
+  projectRoot: string,
+  globalRoot: string,
+  globalConfig: Awaited<ReturnType<typeof readCapabilitiesConfig>>,
+): Promise<void> {
+  try {
+    const drift = await checkMcpProject(projectRoot, globalRoot, globalConfig);
+    const nonDestructiveIssues = filterOrphanIssues(drift, globalConfig !== null);
+    if (nonDestructiveIssues.length === 0) return;
+
+    const safeDrift = { ...drift, issues: nonDestructiveIssues };
+    await syncMcpDrift(projectRoot, globalRoot, safeDrift, undefined, 'keep-project');
+  } catch {
+    /* MCP sync failure should not block hook sync result */
+  }
+}
+
+async function syncCapabilities(projectRoot: string): Promise<void> {
+  const globalRoot = await resolveAgentHookGlobalRoot();
+  if (!globalRoot) return;
+
+  const globalConfig = await readCapabilitiesConfig(globalRoot);
+  if (globalConfig !== null) await syncSkillCapabilities(projectRoot);
+  await syncMcpCapabilities(projectRoot, globalRoot, globalConfig);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -308,46 +364,10 @@ export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHo
   const projectConfig = options.ownerAuthorized === true ? await readCapabilitiesConfig(capRoot) : null;
   const hasCapabilities = projectConfig !== null;
 
-  if (hasCapabilities) {
-    // Read global config once — both skill and MCP sync compare project
-    // against global.  When global is unreadable (missing / malformed),
-    // every project entry looks like an orphan; skip destructive sync
-    // paths to avoid wiping valid project config.
-    const startupRoot = resolveStartupProjectRoot();
-    const globalConfig = await readCapabilitiesConfig(startupRoot);
-
-    if (globalConfig !== null) {
-      try {
-        const ctx = await computeSkillDrift(capRoot);
-        if (ctx) {
-          const { newSkills, stale, conflicts } = ctx.drift;
-          if (newSkills.length + stale.length + conflicts.length > 0) {
-            await syncDrift(
-              ctx.effectiveRoot,
-              ctx.skillsSource,
-              ctx.mountRules,
-              ctx.drift,
-              ctx.syncOpts,
-              'keep-project',
-            );
-          }
-        }
-      } catch {
-        /* skill sync failure should not block hook sync result */
-      }
-    }
-
-    try {
-      const drift = await checkMcpProject(capRoot, startupRoot, globalConfig);
-      const nonDestructiveIssues = filterOrphanIssues(drift, globalConfig !== null);
-      if (nonDestructiveIssues.length > 0) {
-        const safeDrift = { ...drift, issues: nonDestructiveIssues };
-        await syncMcpDrift(capRoot, startupRoot, safeDrift, undefined, 'keep-project');
-      }
-    } catch {
-      /* MCP sync failure should not block hook sync result */
-    }
-  }
+  // Read global config once — both skill and MCP sync compare project
+  // against global. When it is missing or malformed, skill sync is skipped
+  // and MCP orphan removal remains disabled.
+  if (hasCapabilities) await syncCapabilities(capRoot);
 
   const status = await getAgentHookStatus(options);
   // `hooks.json` semantic equality is canonicalized in health checks; preserve

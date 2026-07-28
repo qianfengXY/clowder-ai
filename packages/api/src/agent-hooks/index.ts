@@ -5,6 +5,7 @@ export {
   type AgentHookStatusResponse,
   getAgentHookStatus,
   type HealthResult,
+  resolveAgentHookGlobalRoot,
   syncAgentHooks,
 } from './health.js';
 export {

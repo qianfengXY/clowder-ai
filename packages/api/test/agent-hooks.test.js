@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import Fastify from 'fastify';
-import { buildAgentHookTargets, getAgentHookStatus, syncAgentHooks } from '../dist/agent-hooks/index.js';
+import {
+  buildAgentHookTargets,
+  getAgentHookStatus,
+  resolveAgentHookGlobalRoot,
+  syncAgentHooks,
+} from '../dist/agent-hooks/index.js';
 import { agentHooksRoutes } from '../dist/routes/agent-hooks.js';
 import { resolveStartupProjectRoot } from '../dist/utils/startup-root.js';
 
@@ -43,6 +48,27 @@ describe('agent hook sync targets', () => {
   afterEach(async () => {
     await rm(projectRoot, { recursive: true, force: true });
     await rm(targetRoot, { recursive: true, force: true });
+  });
+
+  it('maps the runtime MCP baseline to the persistent workspace root', async () => {
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-runtime-'));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-workspace-'));
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    try {
+      assert.equal(await resolveAgentHookGlobalRoot(runtimeRoot), await realpath(workspaceRoot));
+    } finally {
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it('selects only user-level hook targets and renders Codex/Gemini paths per target home', () => {
