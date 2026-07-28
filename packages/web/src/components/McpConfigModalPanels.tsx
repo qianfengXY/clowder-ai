@@ -12,6 +12,10 @@ const STATUS_LABELS: Record<ConnectionStatus, { text: string; tone: string }> = 
   unknown: { text: '未探测', tone: 'text-cafe-muted' },
 };
 
+function emptyToolsMessage(canProbe: boolean): string {
+  return canProbe ? '未探测到工具（点击刷新按钮探测）' : '当前未提供工具探测结果';
+}
+
 export function McpToolsSection({
   tools,
   loading,
@@ -69,7 +73,7 @@ export function McpToolsSection({
           </div>
         ) : (
           <div className="rounded-xl bg-[var(--console-panel-bg)] px-3 py-2.5 text-xs text-cafe-muted">
-            未探测到工具（点击刷新按钮探测）
+            {emptyToolsMessage(Boolean(onProbe))}
           </div>
         )}
       </FormItem>

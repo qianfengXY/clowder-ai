@@ -122,7 +122,7 @@ export function McpManageContent() {
       setModal({
         editId: item.id,
         readOnly,
-        // Modal auto-probes on mount (McpConfigModal.handleProbeTools); no parent fetch needed.
+        // Local modal auto-probes on mount; remote read-only access must not trigger localhost-only probes.
         tools: undefined,
         editData: buildEditData(item),
       });
@@ -385,6 +385,7 @@ export function McpManageContent() {
           editId={modal.editId}
           editData={modal.editData}
           readOnly={modal.readOnly}
+          allowLocalActions={driftSync.canSync}
           tools={modal.tools}
           onSaved={handleSaved}
           onClose={() => setModal(null)}

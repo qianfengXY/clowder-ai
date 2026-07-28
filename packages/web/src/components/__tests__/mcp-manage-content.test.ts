@@ -204,9 +204,18 @@ describe('McpManageContent', () => {
       await act(async () => {
         buttonByText('custom-mcp').click();
       });
+      await flushEffects();
       expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
       expect(document.body.textContent).toContain('只读预览');
       expect(document.body.textContent).not.toContain('保存');
+      expect(document.body.querySelector('button[title="探测工具列表"]')).toBeNull();
+      expect(document.body.textContent).not.toContain('点击刷新按钮探测');
+      expect(
+        mockFetch.mock.calls.some(
+          ([input]) => String(input).startsWith('/api/mcp/') && String(input).endsWith('/tools'),
+        ),
+      ).toBe(false);
+      expect(document.body.textContent).not.toContain('恢复全局配置');
     } finally {
       Object.defineProperty(window, 'location', {
         configurable: true,
@@ -249,6 +258,26 @@ describe('McpManageContent', () => {
     expect(document.body.textContent).toContain('只读预览');
     expect(document.body.textContent).not.toContain('保存');
     expect(document.body.textContent).toContain('关闭');
+  });
+
+  it('keeps local project restore and probe actions available', async () => {
+    await renderContent();
+    await act(async () => {
+      buttonByText('项目 MCP').click();
+    });
+    await flushEffects();
+    mockFetch.mockClear();
+
+    await act(async () => {
+      buttonByText('custom-mcp').click();
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('恢复全局配置');
+    expect(document.body.querySelector('button[title="探测工具列表"]')).toBeTruthy();
+    expect(
+      mockFetch.mock.calls.some(([input]) => String(input).startsWith('/api/mcp/') && String(input).endsWith('/tools')),
+    ).toBe(true);
   });
 
   it('opens plugin-owned MCP in readOnly modal (managed by plugin)', async () => {
