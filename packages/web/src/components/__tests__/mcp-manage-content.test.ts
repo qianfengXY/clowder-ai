@@ -160,6 +160,61 @@ describe('McpManageContent', () => {
     expect(container.textContent).not.toContain('cross-cat-handoff');
   });
 
+  it('renders every MCP capability write control as read-only on remote hosts', async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, hostname: 'skycat.cpolar.top' },
+    });
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/drift/check') {
+        return {
+          ok: true,
+          json: async () => ({
+            result: {
+              issues: [{ id: 'custom-mcp', issueType: 'missing-in-project', message: 'Needs sync' }],
+              driftHash: 'remote-drift',
+            },
+          }),
+        };
+      }
+      return ITEMS_RESPONSE;
+    });
+
+    try {
+      await renderContent();
+      await flushEffects();
+
+      expect(container.textContent).not.toContain('同步系统配置');
+      expect(container.textContent).not.toContain('新增 MCP');
+      expect(container.querySelector('button[title="禁用"]')).toBeNull();
+      expect(container.querySelector('button[title="卸载此 MCP"]')).toBeNull();
+
+      await act(async () => {
+        buttonByText('项目 MCP').click();
+      });
+      await flushEffects();
+      await act(async () => {
+        buttonByText('查看详情').click();
+      });
+
+      expect(document.body.querySelector('[role="dialog"]')?.textContent).not.toContain('立即同步');
+
+      await act(async () => {
+        buttonByText('custom-mcp').click();
+      });
+      expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
+      expect(document.body.textContent).toContain('只读预览');
+      expect(document.body.textContent).not.toContain('保存');
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
   it('uses the settings section header without duplicating MCP titles', async () => {
     await renderSettingsContent();
 

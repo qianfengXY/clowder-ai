@@ -20,6 +20,7 @@ export function SkillRow({
   scope,
   syncSummary,
   toggling,
+  canManage,
   expandedMounts,
   onPreview,
   onToggle,
@@ -30,6 +31,7 @@ export function SkillRow({
   scope: SkillScope;
   syncSummary?: SkillProjectSyncSummary;
   toggling: string | null;
+  canManage: boolean;
   expandedMounts: string | null;
   onPreview: () => void;
   onToggle: (skill: SettingsSkillItem, enabled: boolean) => void;
@@ -86,7 +88,7 @@ export function SkillRow({
         )
       }
       actions={
-        skill.controls ? (
+        canManage && skill.controls ? (
           <>
             <SettingsResourceToggleSwitch
               enabled={effectiveEnabled}
@@ -124,7 +126,7 @@ export function SkillRow({
               ))}
             </div>
           )}
-          {isMountExpanded && skill.controls && (
+          {canManage && isMountExpanded && skill.controls && (
             <PerMountPointToggles
               skillId={skill.id}
               scope={scope}

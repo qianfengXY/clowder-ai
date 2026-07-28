@@ -72,7 +72,7 @@ async function readApiErrorMessage(response: Response, fallback: string): Promis
 }
 
 async function clientErrorHealth(response: Response): Promise<AgentHookStatusResponse | null> {
-  if (response.status < 400 || response.status >= 500) return null;
+  if (response.status !== 400 && response.status !== 403) return null;
 
   const serverMessage = await readApiErrorMessage(response, `agent hook status failed (${response.status})`);
   return {

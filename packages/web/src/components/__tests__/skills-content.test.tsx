@@ -165,6 +165,9 @@ function mockBothApis(
     if (url === '/api/drift/resolve' && init?.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true }));
     }
+    if (url.startsWith('/api/mount-rules') && init?.method !== 'PUT') {
+      return Promise.resolve(jsonResponse(mountRulesPayload));
+    }
     return Promise.resolve(jsonResponse(skillsOverride ?? skillsPayload));
   });
 }
@@ -232,6 +235,77 @@ describe('SkillsContent', () => {
     const skillsList = container.querySelector('[data-testid="skills-list"]');
     expect(skillsList?.textContent).toContain('browser-preview');
     expect(skillsList?.textContent).not.toContain('cross-cat-handoff');
+  });
+
+  it('renders every Skill capability write control as read-only on remote hosts', async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, hostname: 'skycat.cpolar.top' },
+    });
+    mockGetProjectPaths.mockReturnValue(['/workspace/project']);
+    mockBothApis(undefined, undefined, () => [DEFAULT_CONFLICT_ISSUE]);
+
+    try {
+      await render(React.createElement(SkillsContent));
+
+      expect(container.querySelector('button[title="全局禁用"]')).toBeNull();
+      expect(container.querySelector('button[title="批量禁用当前筛选的 Skill"]')).toBeNull();
+
+      const defaultMountRules = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('全局默认 Mount Rules'),
+      );
+      await act(async () => {
+        defaultMountRules?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flushEffects();
+      expect(
+        Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).every(
+          (input) => input.disabled,
+        ),
+      ).toBe(true);
+      expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === '添加')).toBe(
+        false,
+      );
+
+      const projectTab = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('项目 Skill'),
+      );
+      await act(async () => {
+        projectTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flushEffects();
+
+      const projectMountRules = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.startsWith('Mount Rules'),
+      );
+      await act(async () => {
+        projectMountRules?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flushEffects();
+      expect(
+        Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).every(
+          (input) => input.disabled,
+        ),
+      ).toBe(true);
+      await act(async () => {
+        const detail = Array.from(container.querySelectorAll('button')).find((button) =>
+          button.textContent?.includes('查看详情'),
+        );
+        detail?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(
+        Array.from(document.body.querySelectorAll('[role="dialog"] button')).some(
+          (button) => button.textContent === '立即同步',
+        ),
+      ).toBe(false);
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it('opens a read-only SKILL.md preview from the card', async () => {

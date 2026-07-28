@@ -139,6 +139,44 @@ describe('useAgentHookHealth', () => {
     });
   });
 
+  it('does not cache transient client errors as permanent health', async () => {
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'Too many requests' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(configuredResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(latestResult?.health).toBeNull();
+    expect(latestResult?.error).toBe('Too many requests');
+
+    await act(async () => {
+      root.unmount();
+    });
+    root = createRoot(container);
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(latestResult?.health?.status).toBe('configured');
+    expect(latestResult?.error).toBeNull();
+  });
+
   it('rejects malformed optional health metadata', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'configured', targets: [], syncAllowed: 'yes' }), {
