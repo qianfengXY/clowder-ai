@@ -5,11 +5,17 @@ import { AllProjectsSyncBanner } from '../settings/AllProjectsSyncBanner';
 import { isDirectLocalHubHostname } from '../settings/useDriftSync';
 
 describe('isDirectLocalHubHostname', () => {
-  it.each(['localhost', '127.0.0.1', '127.2.3.4', '::1', '[::1]'])('accepts direct loopback host %s', (hostname) => {
+  it.each(['localhost', '127.0.0.1', '::1', '[::1]'])('accepts direct loopback host %s', (hostname) => {
     expect(isDirectLocalHubHostname(hostname)).toBe(true);
   });
 
-  it.each(['skycat.cpolar.top', '192.168.1.10', 'localhost.example.com'])('rejects remote host %s', (hostname) => {
+  it.each([
+    'skycat.cpolar.top',
+    '192.168.1.10',
+    'localhost.example.com',
+    '127.2.3.4',
+    '127.example.com',
+  ])('rejects remote host %s', (hostname) => {
     expect(isDirectLocalHubHostname(hostname)).toBe(false);
   });
 });
