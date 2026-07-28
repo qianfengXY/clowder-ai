@@ -72,6 +72,16 @@ function isInitializedProjectScope(projectPath: string | undefined, effectiveRoo
   return !projectPath || existsSync(join(effectiveRoot, '.cat-cafe'));
 }
 
+function rejectUninitializedProjectScope(
+  projectPath: string | undefined,
+  effectiveRoot: string,
+  reply: FastifyReply,
+): boolean {
+  if (isInitializedProjectScope(projectPath, effectiveRoot)) return false;
+  reply.status(400);
+  return true;
+}
+
 export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /api/drift/check ──
   app.post('/api/drift/check', async (request, reply) => {
@@ -180,6 +190,9 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
         reply.status(400);
         return { error: 'Invalid project path' };
       }
+      if (rejectUninitializedProjectScope(projectPath, targetRoot, reply)) {
+        return { error: 'Project not initialized (missing .cat-cafe)' };
+      }
       return withCapabilityLock(targetRoot, async () => {
         const ctx = await computeSkillDrift(projectPath);
         if (!ctx) {
@@ -237,6 +250,9 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
     const globalRoot = await resolveGlobalProjectRoot();
     const effectiveRoot = projectRoot ?? globalRoot;
+    if (rejectUninitializedProjectScope(projectPath, effectiveRoot, reply)) {
+      return { error: 'Project not initialized (missing .cat-cafe)' };
+    }
     const drift = await checkMcpProject(effectiveRoot, globalRoot);
     if (drift.issues.length === 0) {
       return {

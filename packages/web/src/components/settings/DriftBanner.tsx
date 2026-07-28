@@ -163,6 +163,8 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, canSync = tru
   }, [fetchDrift, refreshToken]);
 
   const sync = useCallback(async () => {
+    if (!canSync || drift?.initialized === false) return;
+
     // MCP-specific: confirm orphan removal before syncing
     if (type === 'mcp') {
       const orphans = (drift?.issues ?? []).filter((i) => i.issueType === 'project-orphan');
@@ -193,10 +195,12 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, canSync = tru
     } finally {
       setBusy(false);
     }
-  }, [type, projectPath, fetchDrift, onResolved, drift]);
+  }, [type, projectPath, fetchDrift, onResolved, drift, canSync]);
 
   const label = driftTypeLabel(type);
   const issues = drift?.issues ?? [];
+  const initialized = drift?.initialized !== false;
+  const canResolve = canSync && initialized;
 
   if (loading && !drift && issues.length === 0) {
     return <p className="text-xs text-cafe-muted">{label} 配置检测中…</p>;
@@ -224,13 +228,16 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, canSync = tru
       {!canSync && (
         <p className="mt-1 text-xs text-cafe-muted">远程访问仅支持查看；同步需在 Mac Mini 的 localhost Hub 执行。</p>
       )}
+      {canSync && !initialized && (
+        <p className="mt-1 text-xs text-cafe-muted">该历史项目尚未初始化；请先初始化项目后再同步。</p>
+      )}
       {error && <p className="mt-1 text-xs text-conn-red-text">⚠ {error}</p>}
       {showDetail && (
         <DriftIssueDetailDialog
           type={type}
           issues={issues}
           syncing={busy}
-          canSync={canSync}
+          canSync={canResolve}
           onSync={sync}
           onClose={() => setShowDetail(false)}
         />

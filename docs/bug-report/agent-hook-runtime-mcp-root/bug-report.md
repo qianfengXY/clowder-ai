@@ -1,3 +1,12 @@
+---
+topics: [agent-hooks, mcp, runtime, cpolar, drift]
+doc_kind: bug-report
+created: 2026-07-28
+updated: 2026-07-28
+tips_exempt:
+  reason: Correctness and safety fixes for existing Agent Hook and Skill/MCP drift workflows; no new user-facing capability.
+---
+
 # Agent Hook runtime MCP root bug
 
 ## Bug 诊断胶囊
@@ -12,6 +21,19 @@
 | **6. 预警策略** | 任何方案若需要复制 runtime `.cat-cafe/capabilities.json`、删除项目 MCP 或增加第二套配置真相源，立即停止。 |
 | **7. 用户可见交互修正** | 七类健康状态应全部 configured；本机同步不会删除核心 MCP。远程 localhost 门禁保持不变。 |
 | **8. 验收** | 新测试证明 runtime root 映射到持久 workspace；Agent Hook API 测试全绿；使用实际两套根目录复查 MCP drift 为 0，核心 MCP 数量保持 6。 |
+
+### 补充诊断胶囊：未初始化项目 Drift 同步边界
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 历史项目目录缺少 `.cat-cafe` 时，单项目 Drift 页面仍展示同步入口，`POST /api/drift/resolve` 也会接受写入。期望未初始化项目只读，且服务端拒绝 Skill/MCP 同步。 |
+| **2. 证据** | 精确 HEAD `2488428aa` 上，Skill 与 MCP resolve 对临时未初始化目录均返回 200；`DriftBanner` 忽略 check 响应中的 `initialized=false`。 |
+| **3. 根因** | 全项目同步已过滤未初始化路径，但单项目共用组件和 resolve 写边界没有复用“显式项目必须已有 `.cat-cafe`”这一不变量。 |
+| **4. 诊断策略** | 用临时目录分别调用 Skill/MCP resolve，并对共用 `DriftBanner` 注入 `initialized=false`，验证服务端与 UI 两层边界。 |
+| **5. 超时策略** | 若两种 resolver 的根解析语义不同，停止抽象共用路径，分别验证解析后的 effective root 再收敛边界。 |
+| **6. 预警策略** | 若修复需要创建 `.cat-cafe`、补默认配置或静默跳过写入，说明仍在掩盖未初始化状态，应维持显式 400。 |
+| **7. 用户可见交互修正** | 未初始化历史项目仍可查看异常详情，但会显示初始化提示且不再提供同步按钮。 |
+| **8. 验收** | API 回归验证 Skill/MCP 均返回 400 且不创建 `.cat-cafe`；前端回归验证 localhost 下也隐藏同步入口；完整门禁通过。 |
 
 ## Bug report 五件套
 
