@@ -14,7 +14,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
-import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
+import {
+  isLocalCapabilityWriteRequest,
+  requireLocalCapabilityWriteRequest,
+} from '../config/capabilities/capability-write-guards.js';
 import { checkMcpProject } from '../mcp/mcp-drift-detector.js';
 import type { McpDriftResolution } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpDrift, VALID_MCP_DRIFT_DECISIONS } from '../mcp/mcp-drift-resolver.js';
@@ -99,6 +102,7 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : undefined;
+    const syncAllowed = isLocalCapabilityWriteRequest(request);
 
     if (type === 'skill') {
       const ctx = await computeSkillDrift(projectPath);
@@ -117,6 +121,7 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
           issues,
           driftHash: ctx.drift.driftHash,
           initialized: isInitializedProjectScope(projectPath, ctx.effectiveRoot),
+          syncAllowed,
         },
         projectRoot: ctx.effectiveRoot,
       };
@@ -142,6 +147,7 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
         issues,
         driftHash: drift.driftHash,
         initialized: isInitializedProjectScope(projectPath, effectiveRoot),
+        syncAllowed,
       },
       projectRoot: effectiveRoot,
     };

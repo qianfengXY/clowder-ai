@@ -35,6 +35,19 @@ tips_exempt:
 | **7. 用户可见交互修正** | 未初始化历史项目仍可查看异常详情，但会显示初始化提示且不再提供同步按钮。 |
 | **8. 验收** | API 回归验证 Skill/MCP 均返回 400 且不创建 `.cat-cafe`；前端回归验证 localhost 下也隐藏同步入口；完整门禁通过。 |
 
+### 补充诊断胶囊：Capability 写权限的服务端权威性
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 页面 hostname 为 localhost 时，`useDriftSync` 会展示全部 Skill/MCP 写控件；但若请求带 forwarding headers 或 API 绑定非 loopback，服务端仍返回 403。期望 UI 与服务端使用同一个可写性判据。 |
+| **2. 证据** | 精确 HEAD `97c4a716b` 上，客户端只检查 `window.location.hostname`；`isLocalCapabilityWriteRequest()` 还会检查 API bind host、socket peer、Host、Origin 和八类 proxy forwarding headers。 |
+| **3. 根因** | `canSync` 在客户端重新实现了服务端安全策略的一个子集，形成第二个权限真相源；反向代理的同源 localhost 页面因此可误判为可写。 |
+| **4. 诊断策略** | 用同一 `/api/drift/check` 请求验证 direct localhost、forwarded localhost 与 non-loopback API bind 三种状态，并让 Skill/MCP 共用 hook 只消费服务端返回值。 |
+| **5. 超时策略** | 若 check 与 resolve 请求无法共享同一门禁函数，停止添加客户端例外，改为独立的权限探测端点并由服务端复用门禁。 |
+| **6. 预警策略** | 若实现仍读取 `window.location`、复制 loopback host 列表或为不同控件分别探测，说明第二真相源尚未消除。 |
+| **7. 用户可见交互修正** | 只要服务端判定当前请求不可写，Skill/MCP 页面立即进入完整只读态，不再出现点击后必然 403 的操作。 |
+| **8. 验收** | API 回归覆盖三种权威状态；Web 回归证明 localhost hostname 不能覆盖服务端 `syncAllowed=false`，且 `syncAllowed=true` 时本地动作仍可用。 |
+
 ## Bug report 五件套
 
 1. **报告人**：co-creator 在 cpolar 远程使用时发现 Agent 同步状态异常。

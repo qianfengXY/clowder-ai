@@ -1,20 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { DriftCheckResult, DriftIssue, DriftType, ScopeIssues } from './drift-types';
 
 const GLOBAL_SCOPE_KEY = 'global';
-const subscribeToLocation = () => () => undefined;
-
-export function isDirectLocalHubHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]';
-}
-
-function getLocalHubSnapshot(): boolean {
-  return typeof window !== 'undefined' && isDirectLocalHubHostname(window.location.hostname);
-}
 
 interface UseDriftSyncOptions {
   /** Capability type: 'skill' or 'mcp'. */
@@ -69,7 +59,7 @@ export function useDriftSync({
     return Array.from(paths);
   }, [rawProjectPaths, resolvedProjectPath]);
   const projectPathsKey = candidateProjectPaths.join('\0');
-  const canSync = useSyncExternalStore(subscribeToLocation, getLocalHubSnapshot, () => false);
+  const canSync = scopeDrift[GLOBAL_SCOPE_KEY]?.syncAllowed === true;
 
   /** Call /api/drift/check for one scope. */
   const driftFor = useCallback(

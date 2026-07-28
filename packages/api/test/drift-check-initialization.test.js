@@ -22,11 +22,14 @@ describe('/api/drift — project initialization boundary', () => {
   /** @type {string} */
   let projectRoot;
   let previousOwner;
+  let previousApiServerHost;
 
   beforeEach(async () => {
     projectRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-drift-check-'));
     previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    previousApiServerHost = process.env.API_SERVER_HOST;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
+    delete process.env.API_SERVER_HOST;
     app = Fastify({ logger: false });
     app.addHook('preHandler', async (request) => {
       const raw = request.headers['x-test-session-user'];
@@ -43,6 +46,8 @@ describe('/api/drift — project initialization boundary', () => {
     await rm(projectRoot, { recursive: true, force: true });
     if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
     else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    if (previousApiServerHost === undefined) delete process.env.API_SERVER_HOST;
+    else process.env.API_SERVER_HOST = previousApiServerHost;
   });
 
   it('marks existing directories without .cat-cafe as uninitialized', async () => {
@@ -69,6 +74,49 @@ describe('/api/drift — project initialization boundary', () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().result.initialized, true);
+  });
+
+  it('reports direct-local capability writes as allowed', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/drift/check',
+      headers: { 'x-cat-cafe-user': 'you', host: 'localhost:3004', origin: 'http://localhost:3003' },
+      payload: { type: 'skill' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().result.syncAllowed, true);
+  });
+
+  it('reports forwarded localhost requests as read-only', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/drift/check',
+      headers: {
+        'x-cat-cafe-user': 'you',
+        host: 'localhost:3004',
+        origin: 'http://localhost:3003',
+        'x-forwarded-for': '127.0.0.1',
+      },
+      payload: { type: 'skill' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().result.syncAllowed, false);
+  });
+
+  it('reports a non-loopback API bind as read-only', async () => {
+    process.env.API_SERVER_HOST = '0.0.0.0';
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/drift/check',
+      headers: { 'x-cat-cafe-user': 'you', host: 'localhost:3004', origin: 'http://localhost:3003' },
+      payload: { type: 'mcp' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().result.syncAllowed, false);
   });
 
   for (const type of ['skill', 'mcp']) {

@@ -106,7 +106,17 @@ describe('McpManageContent', () => {
     root = createRoot(container);
     mockThreads = [];
     mockFetch.mockReset();
-    mockFetch.mockResolvedValue(ITEMS_RESPONSE);
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/drift/check') {
+        return {
+          ok: true,
+          json: async () => ({
+            result: { issues: [], driftHash: 'local-drift', syncAllowed: true },
+          }),
+        };
+      }
+      return ITEMS_RESPONSE;
+    });
   });
 
   afterEach(() => {
@@ -160,12 +170,7 @@ describe('McpManageContent', () => {
     expect(container.textContent).not.toContain('cross-cat-handoff');
   });
 
-  it('renders every MCP capability write control as read-only on remote hosts', async () => {
-    const originalLocation = window.location;
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      value: { ...originalLocation, hostname: 'skycat.cpolar.top' },
-    });
+  it('renders every MCP capability write control as read-only when the server denies writes', async () => {
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === '/api/drift/check') {
@@ -175,6 +180,7 @@ describe('McpManageContent', () => {
             result: {
               issues: [{ id: 'custom-mcp', issueType: 'missing-in-project', message: 'Needs sync' }],
               driftHash: 'remote-drift',
+              syncAllowed: false,
             },
           }),
         };
@@ -182,46 +188,37 @@ describe('McpManageContent', () => {
       return ITEMS_RESPONSE;
     });
 
-    try {
-      await renderContent();
-      await flushEffects();
+    await renderContent();
+    await flushEffects();
 
-      expect(container.textContent).not.toContain('同步系统配置');
-      expect(container.textContent).not.toContain('新增 MCP');
-      expect(container.querySelector('button[title="禁用"]')).toBeNull();
-      expect(container.querySelector('button[title="卸载此 MCP"]')).toBeNull();
+    expect(container.textContent).not.toContain('同步系统配置');
+    expect(container.textContent).not.toContain('新增 MCP');
+    expect(container.querySelector('button[title="禁用"]')).toBeNull();
+    expect(container.querySelector('button[title="卸载此 MCP"]')).toBeNull();
 
-      await act(async () => {
-        buttonByText('项目 MCP').click();
-      });
-      await flushEffects();
-      await act(async () => {
-        buttonByText('查看详情').click();
-      });
+    await act(async () => {
+      buttonByText('项目 MCP').click();
+    });
+    await flushEffects();
+    await act(async () => {
+      buttonByText('查看详情').click();
+    });
 
-      expect(document.body.querySelector('[role="dialog"]')?.textContent).not.toContain('立即同步');
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).not.toContain('立即同步');
 
-      await act(async () => {
-        buttonByText('custom-mcp').click();
-      });
-      await flushEffects();
-      expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
-      expect(document.body.textContent).toContain('只读预览');
-      expect(document.body.textContent).not.toContain('保存');
-      expect(document.body.querySelector('button[title="探测工具列表"]')).toBeNull();
-      expect(document.body.textContent).not.toContain('点击刷新按钮探测');
-      expect(
-        mockFetch.mock.calls.some(
-          ([input]) => String(input).startsWith('/api/mcp/') && String(input).endsWith('/tools'),
-        ),
-      ).toBe(false);
-      expect(document.body.textContent).not.toContain('恢复全局配置');
-    } finally {
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: originalLocation,
-      });
-    }
+    await act(async () => {
+      buttonByText('custom-mcp').click();
+    });
+    await flushEffects();
+    expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('只读预览');
+    expect(document.body.textContent).not.toContain('保存');
+    expect(document.body.querySelector('button[title="探测工具列表"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('点击刷新按钮探测');
+    expect(
+      mockFetch.mock.calls.some(([input]) => String(input).startsWith('/api/mcp/') && String(input).endsWith('/tools')),
+    ).toBe(false);
+    expect(document.body.textContent).not.toContain('恢复全局配置');
   });
 
   it('uses the settings section header without duplicating MCP titles', async () => {
@@ -331,6 +328,14 @@ describe('McpManageContent', () => {
 
   it('shows configured-owner errors from MCP preview', async () => {
     mockFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/drift/check') {
+        return {
+          ok: true,
+          json: async () => ({
+            result: { issues: [], driftHash: 'local-drift', syncAllowed: true },
+          }),
+        };
+      }
       if (url === '/api/capabilities/mcp/preview') {
         return {
           ok: false,
@@ -393,6 +398,7 @@ describe('McpManageContent', () => {
             result: {
               issues: [{ id: 'custom-mcp', issueType: 'missing-in-project', message: 'Needs sync' }],
               driftHash: `hash:${body.projectPath ?? 'global'}`,
+              syncAllowed: true,
             },
           }),
         };
@@ -434,7 +440,7 @@ describe('McpManageContent', () => {
   });
 
   it('renders plugin-owned MCP with normal controls but no delete button', async () => {
-    mockFetch.mockResolvedValue({
+    const pluginItemsResponse = {
       ok: true,
       json: async () => ({
         items: [
@@ -450,6 +456,17 @@ describe('McpManageContent', () => {
         projectPath: '/test/project',
         skillHealth: null,
       }),
+    };
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/drift/check') {
+        return {
+          ok: true,
+          json: async () => ({
+            result: { issues: [], driftHash: 'local-drift', syncAllowed: true },
+          }),
+        };
+      }
+      return pluginItemsResponse;
     });
 
     await renderContent();
@@ -474,7 +491,6 @@ describe('McpManageContent', () => {
     // Ad-hoc probe body would strip redacted env values (all MCP env is redacted
     // in API responses), breaking MCPs that conditionally register tools based
     // on env — e.g. protocol-server for plugin MCPs (F205 -32601 fix).
-    mockFetch.mockResolvedValue(ITEMS_RESPONSE);
     await renderContent();
 
     mockFetch.mockClear();
