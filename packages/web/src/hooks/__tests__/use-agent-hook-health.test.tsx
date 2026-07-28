@@ -25,6 +25,14 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 function Probe({ onStatus }: { onStatus: (status: string | null) => void }) {
   const { health } = useAgentHookHealth({ enabled: true });
   useEffect(() => {
@@ -174,6 +182,117 @@ describe('useAgentHookHealth', () => {
 
     expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(latestResult?.health?.status).toBe('configured');
+    expect(latestResult?.error).toBeNull();
+  });
+
+  it('forces a fresh status request after setup and ignores the older in-flight result', async () => {
+    const beforeSetup = deferred<Response>();
+    const afterSetup = deferred<Response>();
+    vi.mocked(apiFetch).mockReturnValueOnce(beforeSetup.promise).mockReturnValueOnce(afterSetup.promise);
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await Promise.resolve();
+    });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+
+    const refresh = latestResult?.refresh;
+    if (!refresh) throw new Error('Missing hook refresh action');
+    let refreshPromise = Promise.resolve();
+    act(() => {
+      refreshPromise = refresh();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      afterSetup.resolve(
+        new Response(JSON.stringify(configuredResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await refreshPromise;
+    });
+    expect(latestResult?.health?.status).toBe('configured');
+
+    await act(async () => {
+      beforeSetup.resolve(
+        new Response(JSON.stringify({ error: 'Project not initialized (missing .cat-cafe/)' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await flushPromises();
+    });
+
+    expect(latestResult?.health?.status).toBe('configured');
+    expect(latestResult?.error).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(latestResult?.health?.status).toBe('configured');
+  });
+
+  it('keeps a successful sync authoritative when an older status request finishes later', async () => {
+    const beforeSync = deferred<Response>();
+    const syncRequest = deferred<Response>();
+    vi.mocked(apiFetch).mockReturnValueOnce(beforeSync.promise).mockReturnValueOnce(syncRequest.promise);
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await Promise.resolve();
+    });
+
+    const sync = latestResult?.sync;
+    if (!sync) throw new Error('Missing hook sync action');
+    let syncPromise = Promise.resolve();
+    act(() => {
+      syncPromise = sync();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiFetch).toHaveBeenLastCalledWith('/api/agent-hooks/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPath: '/workspace/project' }),
+    });
+
+    await act(async () => {
+      syncRequest.resolve(
+        new Response(JSON.stringify(configuredResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await syncPromise;
+    });
+    expect(latestResult?.health?.status).toBe('configured');
+    expect(latestResult?.synced).toBe(true);
+
+    await act(async () => {
+      beforeSync.resolve(
+        new Response(JSON.stringify({ error: 'Project not initialized (missing .cat-cafe/)' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await flushPromises();
+    });
+
+    expect(latestResult?.health?.status).toBe('configured');
+    expect(latestResult?.synced).toBe(true);
     expect(latestResult?.error).toBeNull();
   });
 

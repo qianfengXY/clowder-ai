@@ -48,6 +48,32 @@ tips_exempt:
 | **7. 用户可见交互修正** | 只要服务端判定当前请求不可写，Skill/MCP 页面立即进入完整只读态，不再出现点击后必然 403 的操作。 |
 | **8. 验收** | API 回归覆盖三种权威状态；Web 回归证明 localhost hostname 不能覆盖服务端 `syncAllowed=false`，且 `syncAllowed=true` 时本地动作仍可用。 |
 
+### 补充诊断胶囊：Capability 写权限探测生命周期
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | Capability 列表仍在加载时切到项目 Skill/MCP，页面可能永久隐藏本地写控件。期望标签页只控制完整 Drift 报告，不能阻止服务端写权限首次定案。 |
+| **2. 证据** | 精确 HEAD `d1eef245c` 上，两个页面都在项目标签或列表 loading 时传入 `enabled=false`；`useDriftSync` 因此不发首次全局 check，`scopeDrift.global` 缺失使 `canSync` 永久为 false。 |
+| **3. 根因** | `enabled` 同时承担“是否加载所有项目报告”和“是否解析全局写权限”两个生命周期不同的职责，标签页优化意外关闭了权限真相源。 |
+| **4. 诊断策略** | 直接以 `enabled=false` 挂载共用 hook，验证仍只发一次 global check，并在服务端返回 `syncAllowed=true` 后开放写权限。 |
+| **5. 超时策略** | 若初始 global check 与后续完整报告发生覆盖竞态，停止在消费者层加例外，拆分 hook 内的 authority/report generation。 |
+| **6. 预警策略** | 若修复读取 `window.location`、在 Skill/MCP 两处复制探测逻辑或项目标签触发全部项目扫描，说明仍未分离职责。 |
+| **7. 用户可见交互修正** | 本机用户即使在加载期间切换标签，也会在服务端确认后正常看到 Skill/MCP 写控件；远程仍保持只读。 |
+| **8. 验收** | 共用 hook 回归证明 disabled report mode 仍解析 global `syncAllowed`，且不会请求项目范围；既有 Skill/MCP 只读与本地可写测试保持通过。 |
+
+### 补充诊断胶囊：Agent Hook 初始化后刷新竞态
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 项目初始化完成后，Agent Hook 刷新可能继续显示初始化前的 400，直到用户再次刷新或重载页面。 |
+| **2. 证据** | 精确 HEAD `d1eef245c` 上，`refresh()` 只清 cache；同项目 `inFlightStatus` 仍被 `readAgentHookStatus()` 复用。旧请求还会在新状态之后写回模块 cache 和 hook state。 |
+| **3. 根因** | 模块缓存与组件状态都没有“最新请求获胜”的世代标识；cache invalidation 没有使在途请求失效，`.finally()` 也无条件清理共享请求槽。 |
+| **4. 诊断策略** | 让初始化前 GET 保持 pending，触发 refresh 后先返回 configured，再返回旧 400；断言确实发出第二次 GET，最终 UI/cache 都保持 configured。并审计项目切换与 sync 的同类覆盖路径。 |
+| **5. 超时策略** | 若单个 generation 无法同时保护 cache 与组件 state，停止追加布尔标志，统一所有 read/refresh/sync 走一个带 request id 的加载入口。 |
+| **6. 预警策略** | 若修复只是把 `inFlightStatus=null`、只 await 旧请求或只保护 cache，旧结果仍可能覆盖 UI；必须同时保护共享状态和 hook state。 |
+| **7. 用户可见交互修正** | 初始化完成立即以新请求复检，初始化前错误即使晚到也不会重新出现。 |
+| **8. 验收** | Red→Green 竞态测试验证 refresh 强制新请求且旧响应无法覆盖；项目切换、缓存、400/403、sync 测试全绿。 |
+
 ## Bug report 五件套
 
 1. **报告人**：co-creator 在 cpolar 远程使用时发现 Agent 同步状态异常。
