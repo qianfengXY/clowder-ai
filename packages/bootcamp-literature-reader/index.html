@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="一个在浏览器本地运行的结构化文献阅读助手。"
+    />
+    <meta name="theme-color" content="#f4efe5" />
+    <title>文献灯 · Literature Reader</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="文献灯首页">
+          <span class="brand-mark" aria-hidden="true">灯</span>
+          <span>
+            <strong>文献灯</strong>
+            <small>Paper Lantern</small>
+          </span>
+        </a>
+        <div class="local-badge">
+          <span class="status-dot" aria-hidden="true"></span>
+          内容只在当前浏览器中分析
+        </div>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow">READ WITH QUESTIONS, NOT JUST HIGHLIGHTERS</p>
+          <h1 id="page-title">把一篇摘要，读成一张<br /><em>可追问的研究地图</em></h1>
+          <p class="intro-copy">
+            粘贴标题与摘要。我们会标出研究问题、方法、发现与局限，
+            再给你一组适合精读时继续追问的问题。
+          </p>
+          <div class="intro-footnote">
+            <span>01</span>
+            <p>这是快速导读，不替代阅读全文、核查图表与追溯原始数据。</p>
+          </div>
+        </section>
+
+        <div class="workspace">
+          <section class="panel input-panel" aria-labelledby="input-title">
+            <div class="panel-heading">
+              <div>
+                <p class="section-index">INPUT / 01</p>
+                <h2 id="input-title">放入文献线索</h2>
+              </div>
+              <button class="text-button" id="sample-button" type="button">
+                填入示例
+                <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+
+            <form id="reader-form" novalidate>
+              <label class="field">
+                <span class="field-label">
+                  文献标题
+                  <small>可选</small>
+                </span>
+                <input
+                  id="paper-title"
+                  name="title"
+                  type="text"
+                  maxlength="180"
+                  placeholder="例如：城市绿地与夏季地表温度"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="field abstract-field">
+                <span class="field-label">
+                  摘要
+                  <small id="character-count">0 字符</small>
+                </span>
+                <textarea
+                  id="paper-abstract"
+                  name="abstract"
+                  rows="13"
+                  placeholder="在这里粘贴摘要，至少 80 个字符……"
+                  aria-describedby="input-help form-status"
+                  required
+                ></textarea>
+              </label>
+
+              <p class="input-help" id="input-help">
+                支持中英文。分析规则完全在本地运行，不会上传内容。
+              </p>
+
+              <div class="form-actions">
+                <button class="secondary-button" id="clear-button" type="button">
+                  清空
+                </button>
+                <button class="primary-button" type="submit">
+                  <span>生成阅读简报</span>
+                  <span class="button-arrow" aria-hidden="true">→</span>
+                </button>
+              </div>
+              <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+
+          <section class="panel result-panel" aria-labelledby="result-panel-title">
+            <div class="panel-heading">
+              <div>
+                <p class="section-index">BRIEF / 02</p>
+                <h2 id="result-panel-title">结构化阅读简报</h2>
+              </div>
+              <button class="copy-button" id="copy-button" type="button" disabled>
+                复制 Markdown
+              </button>
+            </div>
+
+            <div class="empty-state" id="empty-state">
+              <div class="empty-illustration" aria-hidden="true">
+                <span class="orbit orbit-one"></span>
+                <span class="orbit orbit-two"></span>
+                <span class="paper-shape">
+                  <i></i>
+                  <i></i>
+                  <i></i>
+                </span>
+              </div>
+              <p>等待一段摘要</p>
+              <span>你的研究地图会在这里展开</span>
+            </div>
+
+            <article class="brief" id="brief" hidden>
+              <header class="brief-header">
+                <div>
+                  <p class="brief-kicker">QUICK READING NOTE</p>
+                  <h3 id="result-title"></h3>
+                </div>
+                <div class="confidence" id="confidence">
+                  <span>阅读把握</span>
+                  <strong id="confidence-label"></strong>
+                </div>
+              </header>
+
+              <div class="brief-meta">
+                <span><strong id="word-count">0</strong> 个词元</span>
+                <span><strong id="signal-count">0</strong> 条证据线索</span>
+                <span>本地分析</span>
+              </div>
+
+              <section class="insight-card question-card">
+                <p class="card-label">核心研究问题</p>
+                <p class="question-text" id="research-question"></p>
+              </section>
+
+              <div class="evidence-grid">
+                <section class="insight-card">
+                  <p class="card-label">
+                    <span class="card-number">A</span>
+                    方法
+                  </p>
+                  <ul id="methods-list"></ul>
+                </section>
+
+                <section class="insight-card accent-card">
+                  <p class="card-label">
+                    <span class="card-number">B</span>
+                    主要发现
+                  </p>
+                  <ul id="findings-list"></ul>
+                </section>
+              </div>
+
+              <section class="insight-card limitation-card">
+                <p class="card-label">
+                  <span class="card-number">C</span>
+                  局限与适用边界
+                </p>
+                <ul id="limitations-list"></ul>
+              </section>
+
+              <section class="keyword-section">
+                <p class="card-label">关键词</p>
+                <div class="keyword-list" id="keyword-list"></div>
+              </section>
+
+              <section class="questions-section">
+                <div class="questions-heading">
+                  <p class="section-index">NEXT / 精读清单</p>
+                  <h3>带着这些问题，继续读正文</h3>
+                </div>
+                <ol id="follow-up-list"></ol>
+              </section>
+            </article>
+          </section>
+        </div>
+      </main>
+
+      <footer class="site-footer">
+        <span>文献灯 · Bootcamp Edition</span>
+        <span>Evidence before confidence.</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

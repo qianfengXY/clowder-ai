@@ -1,0 +1,12 @@
+{
+  "name": "@cat-cafe/bootcamp-literature-reader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "lint": "node --check src/analyze.js && node --check src/app.js && node --check scripts/dev-server.mjs && node --check scripts/build.mjs",
+    "test": "node --test test/*.test.js"
+  }
+}
