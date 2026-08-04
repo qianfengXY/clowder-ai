@@ -184,7 +184,7 @@ function truncateEvidenceString(value: string, maxChars: number, additionalHomeP
 function redactNonHomePaths(input: string): string {
   return input
     .replace(/\b[A-Za-z]:\\(?:[^\s"'`<>|]+\\)*[^\s"'`<>|]+/g, '[PATH_REDACTED]')
-    .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
+    .replace(/(^|[\s"'`(=:[{,])\/(?!\/|tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
 }
 
 function truncateSilentEvidenceString(
@@ -205,8 +205,9 @@ function extractSafeExcerpt(
   reasonCode: CliErrorReasonCode,
   additionalHomePaths?: readonly string[],
 ): string {
-  // KD-2: sanitize entire blob first; truncation happens on sanitized output.
-  const sanitized = sanitizeCliStderr(rawText, childHomeSanitizerOptions(additionalHomePaths));
+  // KD-2: sanitize the entire blob before truncation. Classifier excerpts are public too,
+  // so apply the same non-HOME path redaction as unknown_raw and silent evidence.
+  const sanitized = redactNonHomePaths(sanitizeCliStderr(rawText, childHomeSanitizerOptions(additionalHomePaths)));
   const allLines = sanitized.split('\n');
   // Keep meaningful lines (non-empty after trim) but preserve original line content (don't trim away whitespace details).
   const lines = allLines.filter((l) => l.trim().length > 0);
