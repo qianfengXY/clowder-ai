@@ -64,6 +64,7 @@ function DriftIssueDetailDialog({
   issues,
   syncing,
   error,
+  canSync,
   onSync,
   onClose,
 }: {
@@ -71,6 +72,7 @@ function DriftIssueDetailDialog({
   issues: DriftIssue[];
   syncing: boolean;
   error: DriftError | null;
+  canSync: boolean;
   onSync: () => void;
   onClose: () => void;
 }) {
@@ -93,16 +95,18 @@ function DriftIssueDetailDialog({
         {error && <CriticalText summary={error.summary} details={error.details} className="mt-3" />}
       </section>
 
-      <div className="mt-4 flex shrink-0 gap-2">
-        <button
-          type="button"
-          onClick={onSync}
-          disabled={syncing}
-          className="rounded-lg bg-cafe-accent px-3 py-1 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:opacity-40"
-        >
-          {syncing ? '同步中…' : '立即同步'}
-        </button>
-      </div>
+      {canSync && (
+        <div className="mt-4 flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={onSync}
+            disabled={syncing}
+            className="rounded-lg bg-cafe-accent px-3 py-1 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:opacity-40"
+          >
+            {syncing ? '同步中…' : '立即同步'}
+          </button>
+        </div>
+      )}
     </ModalOverlay>
   );
 }
@@ -114,6 +118,8 @@ interface DriftBannerProps {
   type: DriftType;
   projectPath?: string;
   refreshToken?: number;
+  /** Capability writes are intentionally limited to direct localhost Hub access. */
+  canSync?: boolean;
   onResolved?: () => void | Promise<void>;
 }
 
@@ -121,7 +127,7 @@ interface DriftBannerProps {
  * Unified single-project drift banner — replaces both SkillsDriftBanner and
  * McpDriftBanner. Same endpoint, same UI, parameterized by `type`.
  */
-export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }: DriftBannerProps) {
+export function DriftBanner({ type, projectPath, refreshToken = 0, canSync = true, onResolved }: DriftBannerProps) {
   const [drift, setDrift] = useState<DriftCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -169,6 +175,8 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
   }, [fetchDrift, refreshToken]);
 
   const sync = useCallback(async () => {
+    if (!canSync || drift?.initialized === false) return;
+
     // MCP-specific: confirm orphan removal before syncing
     if (type === 'mcp') {
       const orphans = (drift?.issues ?? []).filter((i) => i.issueType === 'project-orphan');
@@ -206,10 +214,12 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
     } finally {
       setBusy(false);
     }
-  }, [type, projectPath, fetchDrift, onResolved, drift]);
+  }, [type, projectPath, fetchDrift, onResolved, drift, canSync]);
 
   const label = driftTypeLabel(type);
   const issues = drift?.issues ?? [];
+  const initialized = drift?.initialized !== false;
+  const canResolve = canSync && initialized;
 
   if (loading && !drift && issues.length === 0) {
     return <p className="text-xs text-cafe-muted">{label} 配置检测中…</p>;
@@ -237,12 +247,20 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
           查看详情
         </button>
       </div>
+      {!canSync && (
+        <p className="mt-1 text-xs text-cafe-muted">远程访问仅支持查看；同步需在 Mac Mini 的 localhost Hub 执行。</p>
+      )}
+      {canSync && !initialized && (
+        <p className="mt-1 text-xs text-cafe-muted">该历史项目尚未初始化；请先初始化项目后再同步。</p>
+      )}
+      {error && <p className="mt-1 text-xs text-conn-red-text">⚠ {error.summary}</p>}
       {showDetail && (
         <DriftIssueDetailDialog
           type={type}
           issues={issues}
           syncing={busy}
           error={error}
+          canSync={canResolve}
           onSync={sync}
           onClose={() => setShowDetail(false)}
         />

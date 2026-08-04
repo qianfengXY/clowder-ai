@@ -222,13 +222,15 @@ export function SkillsContent() {
               void fetchSkills(path);
             }}
           />
-          <MountRulesPanel projectPath={selectedProjectPath} onSaved={handleMountRulesSaved} />
+          <MountRulesPanel projectPath={selectedProjectPath} readOnly={!sync.canSync} onSaved={handleMountRulesSaved} />
         </>
       )}
 
       {combinedError && <SettingsStatusStrip tone="error">{combinedError}</SettingsStatusStrip>}
 
-      {scope === SCOPE_ALL && <MountRulesPanel scope="default" onSaved={handleMountRulesSaved} />}
+      {scope === SCOPE_ALL && (
+        <MountRulesPanel scope="default" readOnly={!sync.canSync} onSaved={handleMountRulesSaved} />
+      )}
 
       {data && (
         <SkillsFilterToolbar
@@ -250,6 +252,7 @@ export function SkillsContent() {
                 scopesWithIssues={sync.scopesWithIssues}
                 syncing={sync.syncing}
                 error={sync.syncAllError}
+                canSync={sync.canSync}
                 onSyncAll={sync.handleSyncAllScopes}
                 onSyncScope={sync.handleSyncScope}
               />
@@ -259,11 +262,12 @@ export function SkillsContent() {
                 type="skill"
                 projectPath={selectedProjectPath}
                 refreshToken={driftRefreshToken}
+                canSync={sync.canSync}
                 onResolved={refreshSelectedSkills}
               />
             )}
           </div>
-          {filteredSkills.some((s) => s.controls) && (
+          {sync.canSync && filteredSkills.some((s) => s.controls) && (
             <SettingsResourceToggleSwitch
               enabled={batchEnabled}
               busy={controls.toggling === '__batch__'}
@@ -285,6 +289,7 @@ export function SkillsContent() {
             scope={scope}
             syncSummary={sync.skillProjectSync.get(skill.name)}
             toggling={controls.toggling}
+            canManage={sync.canSync}
             expandedMounts={expandedMounts}
             onPreview={() => setPreviewSkill(skill)}
             onToggle={handleToggle}

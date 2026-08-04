@@ -117,17 +117,20 @@ export function McpManageContent() {
     enabled: activeTab === 'global' && !cap.loading,
   });
 
-  const handleCardClick = useCallback((item: CapabilityBoardItem) => {
-    const readOnly = item.source !== 'external' || !!item.pluginId;
-    setModal({
-      editId: item.id,
-      readOnly,
-      hasProjectOverride: item.source === 'external' && !item.pluginId && item.hasOverride === true,
-      // Modal auto-probes on mount (McpConfigModal.handleProbeTools); no parent fetch needed.
-      tools: undefined,
-      editData: buildEditData(item),
-    });
-  }, []);
+  const handleCardClick = useCallback(
+    (item: CapabilityBoardItem) => {
+      const readOnly = !driftSync.canSync || item.source !== 'external' || !!item.pluginId;
+      setModal({
+        editId: item.id,
+        readOnly,
+        hasProjectOverride: item.source === 'external' && !item.pluginId && item.hasOverride === true,
+        // Local modal auto-probes on mount; remote read-only access must not trigger localhost-only probes.
+        tools: undefined,
+        editData: buildEditData(item),
+      });
+    },
+    [driftSync.canSync],
+  );
 
   const handleCreate = useCallback(() => setModal({}), []);
 
@@ -198,12 +201,14 @@ export function McpManageContent() {
           }
         }}
         actions={
-          <>
-            <SettingsSecondaryButton onClick={handleDiscover} disabled={discovering}>
-              {discovering ? '同步中…' : '同步系统配置'}
-            </SettingsSecondaryButton>
-            <SettingsPrimaryButton onClick={handleCreate}>新增 MCP</SettingsPrimaryButton>
-          </>
+          driftSync.canSync ? (
+            <>
+              <SettingsSecondaryButton onClick={handleDiscover} disabled={discovering}>
+                {discovering ? '同步中…' : '同步系统配置'}
+              </SettingsSecondaryButton>
+              <SettingsPrimaryButton onClick={handleCreate}>新增 MCP</SettingsPrimaryButton>
+            </>
+          ) : undefined
         }
       />
 
@@ -223,6 +228,7 @@ export function McpManageContent() {
           scopesWithIssues={driftSync.scopesWithIssues}
           syncing={driftSync.syncing}
           error={driftSync.syncAllError}
+          canSync={driftSync.canSync}
           onSyncAll={driftSync.handleSyncAllScopes}
           onSyncScope={driftSync.handleSyncScope}
         />
@@ -239,6 +245,7 @@ export function McpManageContent() {
             type="mcp"
             projectPath={cap.projectPath ?? undefined}
             refreshToken={refreshToken}
+            canSync={driftSync.canSync}
             onResolved={handleDriftResolved}
           />
         </>
@@ -274,7 +281,7 @@ export function McpManageContent() {
             </span>
           }
           title="暂无已安装的 MCP"
-          description="点击上方按钮手动新增 MCP 配置"
+          description={driftSync.canSync ? '点击上方按钮手动新增 MCP 配置' : '当前没有可查看的 MCP 配置'}
         />
       )}
 
@@ -314,51 +321,53 @@ export function McpManageContent() {
                 </>
               }
               actions={
-                <>
-                  <ToggleSwitch
-                    enabled={effectiveEnabled}
-                    busy={busy}
-                    disabled={false}
-                    title={effectiveEnabled ? '禁用' : '启用'}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      cap.handleToggle(item, !effectiveEnabled);
-                    }}
-                  />
-                  {cap.catFamilies.length > 0 && (
-                    <SettingsResourceIconButton
-                      onClick={() => setExpandedId(expanded ? null : item.id)}
-                      title="按猫开关"
-                      aria-label="按猫开关"
-                      className={expanded ? 'bg-[var(--console-hover-bg)] text-cafe-accent' : undefined}
-                    >
-                      <HubIcon name="users" className="h-4 w-4" />
-                    </SettingsResourceIconButton>
-                  )}
-                  {editable && (
-                    <SettingsResourceIconButton
-                      disabled={removing}
-                      onClick={async (event) => {
+                driftSync.canSync ? (
+                  <>
+                    <ToggleSwitch
+                      enabled={effectiveEnabled}
+                      busy={busy}
+                      disabled={false}
+                      title={effectiveEnabled ? '禁用' : '启用'}
+                      onClick={(event) => {
                         event.stopPropagation();
-                        const ok = await confirm({
-                          title: '卸载 MCP',
-                          message: `确认卸载 MCP "${item.id}"？配置将被移除，不可撤销。`,
-                          confirmLabel: '卸载',
-                          variant: 'danger',
-                        });
-                        if (ok) cap.handleRemoveMcp(item);
+                        cap.handleToggle(item, !effectiveEnabled);
                       }}
-                      title="卸载此 MCP"
-                      aria-label="卸载此 MCP"
-                      tone="danger"
-                    >
-                      <HubIcon name="trash" className="h-4 w-4" />
-                    </SettingsResourceIconButton>
-                  )}
-                </>
+                    />
+                    {cap.catFamilies.length > 0 && (
+                      <SettingsResourceIconButton
+                        onClick={() => setExpandedId(expanded ? null : item.id)}
+                        title="按猫开关"
+                        aria-label="按猫开关"
+                        className={expanded ? 'bg-[var(--console-hover-bg)] text-cafe-accent' : undefined}
+                      >
+                        <HubIcon name="users" className="h-4 w-4" />
+                      </SettingsResourceIconButton>
+                    )}
+                    {editable && (
+                      <SettingsResourceIconButton
+                        disabled={removing}
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          const ok = await confirm({
+                            title: '卸载 MCP',
+                            message: `确认卸载 MCP "${item.id}"？配置将被移除，不可撤销。`,
+                            confirmLabel: '卸载',
+                            variant: 'danger',
+                          });
+                          if (ok) cap.handleRemoveMcp(item);
+                        }}
+                        title="卸载此 MCP"
+                        aria-label="卸载此 MCP"
+                        tone="danger"
+                      >
+                        <HubIcon name="trash" className="h-4 w-4" />
+                      </SettingsResourceIconButton>
+                    )}
+                  </>
+                ) : undefined
               }
               expandedContent={
-                expanded ? (
+                driftSync.canSync && expanded ? (
                   <PerCatToggles
                     item={item}
                     catFamilies={cap.catFamilies}
@@ -379,6 +388,7 @@ export function McpManageContent() {
           editData={modal.editData}
           readOnly={modal.readOnly}
           hasProjectOverride={modal.hasProjectOverride}
+          allowLocalActions={driftSync.canSync}
           tools={modal.tools}
           onSaved={handleSaved}
           onClose={() => setModal(null)}

@@ -61,6 +61,13 @@ const partialSyncHealth: AgentHookStatusResponse = {
   ],
 };
 
+const remoteBlockedHealth: AgentHookStatusResponse = {
+  status: 'unsupported',
+  targets: [],
+  syncAllowed: false,
+  message: '为保护本机配置，一键同步仅支持 localhost Hub。',
+};
+
 describe('AgentHookHealthNotice', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -139,6 +146,15 @@ describe('AgentHookHealthNotice', () => {
     expect(html).toContain('同步已执行');
     expect(html).toContain('Skills：1 stale, 196 conflicts');
     expect(html).toContain('MCP：6 drift issues');
+  });
+
+  it('explains a blocked remote check without offering sync', () => {
+    const html = renderToStaticMarkup(<AgentHookHealthNotice health={remoteBlockedHealth} onSync={() => {}} />);
+
+    expect(html).toContain('Agent 运行环境支持待确认');
+    expect(html).toContain('为保护本机配置，一键同步仅支持 localhost Hub。');
+    expect(html).not.toContain('<button');
+    expect(html).not.toContain('Claude：未知');
   });
 });
 

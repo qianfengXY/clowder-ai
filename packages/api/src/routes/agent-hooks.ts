@@ -100,18 +100,16 @@ async function validateExplicitProjectPath(
   return { ok: true, path: validated };
 }
 
-function resolveOptions(
-  options: AgentHooksRouteOptions,
-  request: FastifyRequest,
-  capabilityProjectRoot?: string | null,
-) {
-  const targetRoot = options.targetRoot ?? (isTrustedLocalApiRequest(request) ? homedir() : null);
-  if (!targetRoot) return null;
+function resolveTargetRoot(options: AgentHooksRouteOptions, request: FastifyRequest): string | null {
+  return options.targetRoot ?? (isTrustedLocalApiRequest(request) ? homedir() : null);
+}
+
+function resolveOptions(options: AgentHooksRouteOptions, targetRoot: string, capabilityProjectRoot?: string | null) {
   return {
     projectRoot: options.projectRoot ?? findMonorepoRoot(process.cwd()),
     targetRoot,
-    // When the thread targets an external project, skill/MCP checks use
-    // that project's config.  Hook templates always come from projectRoot.
+    // Explicit external projects override the persistent host capability scope.
+    // Hook templates always come from projectRoot.
     ...(capabilityProjectRoot ? { capabilityProjectRoot } : {}),
   };
 }
@@ -124,17 +122,19 @@ export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = asyn
       return { error: 'Session identity required for browser requests' };
     }
 
+    const targetRoot = resolveTargetRoot(options, request);
+    if (!targetRoot) {
+      reply.status(403);
+      return { error: 'Agent hook health requires an explicit targetRoot or a local API host' };
+    }
+
     const query = request.query as Record<string, unknown>;
     const projectValidation = await validateExplicitProjectPath(nonEmptyString(query.projectPath));
     if (!projectValidation.ok) {
       reply.status(400);
       return { error: projectValidation.error };
     }
-    const resolved = resolveOptions(options, request, projectValidation.path);
-    if (!resolved) {
-      reply.status(403);
-      return { error: 'Agent hook health requires an explicit targetRoot or a local API host' };
-    }
+    const resolved = resolveOptions(options, targetRoot, projectValidation.path);
 
     return getAgentHookStatus(resolved);
   });
@@ -146,17 +146,19 @@ export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = asyn
       return { error: 'Session identity required for browser requests' };
     }
 
+    const targetRoot = resolveTargetRoot(options, request);
+    if (!targetRoot) {
+      reply.status(403);
+      return { error: 'Agent hook sync requires an explicit targetRoot or a local API host' };
+    }
+
     const body = request.body as Record<string, unknown> | null;
     const projectValidation = await validateExplicitProjectPath(nonEmptyString(body?.projectPath));
     if (!projectValidation.ok) {
       reply.status(400);
       return { error: projectValidation.error };
     }
-    const resolved = resolveOptions(options, request, projectValidation.path);
-    if (!resolved) {
-      reply.status(403);
-      return { error: 'Agent hook sync requires an explicit targetRoot or a local API host' };
-    }
+    const resolved = resolveOptions(options, targetRoot, projectValidation.path);
 
     // Capability-level mutations (skill/MCP sync) require owner authorization.
     // Hook file sync (writing to targetRoot) always runs for any session user.

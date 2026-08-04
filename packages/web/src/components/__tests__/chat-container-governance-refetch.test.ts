@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { apiFetch } from '@/utils/api-client';
 
 type StoreState = {
   messages: [];
@@ -20,6 +21,7 @@ type StoreState = {
   setTargetCats: ReturnType<typeof vi.fn>;
   clearCatStatuses: ReturnType<typeof vi.fn>;
   setCurrentThread: ReturnType<typeof vi.fn>;
+  currentThreadId: string;
   updateThreadTitle: ReturnType<typeof vi.fn>;
   setCurrentGame: ReturnType<typeof vi.fn>;
   currentGame: null;
@@ -56,6 +58,16 @@ type StoreState = {
 
 const mockGovRefetch = vi.fn();
 const mockUseAgentHookHealth = vi.fn();
+const mockAgentHookRefresh = vi.fn();
+
+let governanceStatus = {
+  ready: true,
+  needsBootstrap: false,
+  needsConfirmation: false,
+  isEmptyDir: false,
+  isGitRepo: true,
+  gitAvailable: true,
+};
 
 const staleAgentHookHealth = {
   status: 'missing',
@@ -88,6 +100,7 @@ const makeStoreState = (): StoreState => ({
   setTargetCats: vi.fn(),
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
+  currentThreadId: 'thread-a',
   updateThreadTitle: vi.fn(),
   setCurrentGame: vi.fn(),
   currentGame: null,
@@ -139,6 +152,13 @@ vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: StoreState) => unknown) => {
     const state = storeState;
     return selector ? selector(state) : state;
+  };
+  hook.getState = () => storeState;
+  hook.setState = (update: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => {
+    storeState = {
+      ...storeState,
+      ...(typeof update === 'function' ? update(storeState) : update),
+    };
   };
   return { useChatStore: hook };
 });
@@ -229,14 +249,7 @@ vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/hooks/useGovernanceStatus', () => ({
   useGovernanceStatus: () => ({
-    status: {
-      ready: true,
-      needsBootstrap: false,
-      needsConfirmation: false,
-      isEmptyDir: false,
-      isGitRepo: true,
-      gitAvailable: true,
-    },
+    status: governanceStatus,
     refetch: mockGovRefetch,
   }),
 }));
@@ -281,7 +294,10 @@ vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
-vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
+vi.mock('@/components/ProjectSetupCard', () => ({
+  ProjectSetupCard: ({ onComplete }: { onComplete: () => void }) =>
+    React.createElement('button', { type: 'button', onClick: onComplete }, 'complete project setup'),
+}));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
@@ -306,7 +322,19 @@ describe('ChatContainer governance refetch', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     storeState = makeStoreState();
+    governanceStatus = {
+      ready: true,
+      needsBootstrap: false,
+      needsConfirmation: false,
+      isEmptyDir: false,
+      isGitRepo: true,
+      gitAvailable: true,
+    };
     mockGovRefetch.mockReset();
+    mockAgentHookRefresh.mockReset();
+    vi.mocked(apiFetch)
+      .mockReset()
+      .mockImplementation(async () => ({ ok: true, json: async () => ({ threads: [] }) }) as Response);
     mockUseAgentHookHealth.mockReset();
     mockUseAgentHookHealth.mockReturnValue({
       health: null,
@@ -314,6 +342,7 @@ describe('ChatContainer governance refetch', () => {
       syncing: false,
       synced: false,
       sync: vi.fn(),
+      refresh: mockAgentHookRefresh,
     });
   });
 
@@ -354,5 +383,48 @@ describe('ChatContainer governance refetch', () => {
 
     expect(mockUseAgentHookHealth).toHaveBeenCalledWith({ enabled: false, projectPath: 'default' });
     expect(container.textContent).not.toContain('Agent 运行 Hook 需要同步');
+  });
+
+  it('refreshes governance and agent hook health after project setup completes', async () => {
+    governanceStatus = {
+      ...governanceStatus,
+      ready: false,
+      needsBootstrap: true,
+    };
+
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+
+    const completeButton = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('complete project setup'),
+    );
+    if (!completeButton) throw new Error('Missing mocked project setup button');
+
+    await act(async () => {
+      completeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mockGovRefetch).toHaveBeenCalledTimes(1);
+    expect(mockAgentHookRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('rebinds the active project when thread detail has a newer projectPath than the cached thread list', async () => {
+    const reboundProjectPath = '/tmp/rebound-project';
+    vi.mocked(apiFetch).mockImplementation(
+      async (path) =>
+        ({
+          ok: true,
+          json: async () =>
+            path === '/api/threads/thread-a' ? { id: 'thread-a', projectPath: reboundProjectPath } : { threads: [] },
+        }) as Response,
+    );
+
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+
+    expect(storeState.setCurrentProject).toHaveBeenCalledWith(reboundProjectPath);
+    expect(storeState.threads.find((thread) => thread.id === 'thread-a')?.projectPath).toBe(reboundProjectPath);
   });
 });

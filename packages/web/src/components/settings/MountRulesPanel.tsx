@@ -32,6 +32,8 @@ interface MountRulesPanelProps {
   projectPath?: string;
   /** 'project' = per-project rules (default), 'default' = global defaultMountRules */
   scope?: 'project' | 'default';
+  /** Remote Hub sessions may inspect rules but cannot mutate them. */
+  readOnly?: boolean;
   onSaved?: () => void | Promise<void>;
 }
 
@@ -40,7 +42,7 @@ interface MountRulesError {
   details?: string;
 }
 
-export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: MountRulesPanelProps) {
+export function MountRulesPanel({ projectPath, scope = 'project', readOnly = false, onSaved }: MountRulesPanelProps) {
   const [open, setOpen] = useState(false);
   const [rules, setRules] = useState<MountRules | null>(null);
   const [loading, setLoading] = useState(false);
@@ -195,7 +197,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
                     <input
                       type="checkbox"
                       checked={rules.mountPoints[id].enabled}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       onChange={() => toggleStandard(id)}
                       className="h-4 w-4"
                     />
@@ -214,41 +216,45 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
                   <div key={cp.alias} className="flex items-center gap-3 text-sm">
                     <span className="font-medium text-cafe">{cp.alias}</span>
                     <code className="flex-1 text-xs text-cafe-muted">{cp.path}</code>
-                    <button
-                      type="button"
-                      onClick={() => removeCustom(cp.alias)}
-                      disabled={saving}
-                      className="text-xs text-conn-red-text hover:underline"
-                    >
-                      移除
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => removeCustom(cp.alias)}
+                        disabled={saving}
+                        className="text-xs text-conn-red-text hover:underline"
+                      >
+                        移除
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newAlias}
-                  onChange={(e) => setNewAlias(e.target.value)}
-                  placeholder="alias (e.g. opencode)"
-                  className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
-                />
-                <input
-                  type="text"
-                  value={newPath}
-                  onChange={(e) => setNewPath(e.target.value)}
-                  placeholder=".opencode/skills"
-                  className="flex-1 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={addCustom}
-                  disabled={saving || !newAlias.trim() || !newPath.trim()}
-                  className="rounded-xl bg-[var(--console-active-bg)] px-3 py-1 text-xs font-semibold text-cafe-interactive disabled:opacity-40"
-                >
-                  添加
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newAlias}
+                    onChange={(e) => setNewAlias(e.target.value)}
+                    placeholder="alias (e.g. opencode)"
+                    className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={newPath}
+                    onChange={(e) => setNewPath(e.target.value)}
+                    placeholder=".opencode/skills"
+                    className="flex-1 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustom}
+                    disabled={saving || !newAlias.trim() || !newPath.trim()}
+                    className="rounded-xl bg-[var(--console-active-bg)] px-3 py-1 text-xs font-semibold text-cafe-interactive disabled:opacity-40"
+                  >
+                    添加
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

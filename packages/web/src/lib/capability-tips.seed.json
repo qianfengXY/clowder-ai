@@ -1098,6 +1098,27 @@
     "owner": "opus"
   },
   {
+    "id": "capability-drift-remote-readonly",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "packages/web/src/components/settings/AllProjectsSyncBanner.tsx",
+      "anchor": "远程访问仅支持查看"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/AllProjectsSyncBanner.tsx",
+      "anchor": "AllProjectsSyncBanner"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/settings/AllProjectsSyncBanner.tsx",
+      "anchor": "localhost Hub"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "通过 cpolar 远程打开 Skill / MCP 管理时，可以查看各项目的同步差异；涉及本机配置写入的同步操作，请回到 Mac Mini 的 localhost Hub 执行。",
+    "action": { "type": "open_concierge_draft", "label": "了解远程同步边界" },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f273-desktop-in-app-update",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" },
