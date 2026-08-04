@@ -176,9 +176,7 @@ function canSyncAgentHooks(
   syncing: boolean,
   currentStatus: AgentHookNoticeStatus,
 ): boolean {
-  return (
-    health?.syncAllowed !== false && !syncing && currentStatus !== 'synced' && currentStatus !== 'uninitialised'
-  );
+  return health?.syncAllowed !== false && !syncing && currentStatus !== 'synced' && currentStatus !== 'uninitialised';
 }
 
 function shouldShowTargetStatus(health: AgentHookStatusResponse | null): boolean {

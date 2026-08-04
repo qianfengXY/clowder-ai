@@ -110,11 +110,14 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
     regex: /Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i,
   },
   { code: 'missing_rollout', regex: /no rollout found/i },
-  // clowder-ai#1038: opencode resumed a stale --session after its session DB was
-  // recreated/cleared (Redis still holds the old cliSessionId). stderr is the literal
-  // `Error: Session not found`. Distinct from missing_rollout (Codex "no rollout found")
-  // — routes to the session self-heal retry path (Path A) in invoke-single-cat.
-  { code: 'session_not_found', regex: /Session not found/i },
+  // An external CLI can reject a stored session because it no longer exists or because
+  // the invocation moved to another working directory. Both make the resume id unusable
+  // for this invocation and must route to session self-heal (drop the id, retry fresh).
+  // Distinct from missing_rollout (Codex "no rollout found").
+  {
+    code: 'session_not_found',
+    regex: /Session(?:\s+"[^"\r\n]+")?\s+(?:not found|was created under a different directory)/i,
+  },
   // F212 Phase H (AC-H3, Sol runtime forensics 2026-07-09): upstream provider (Codex 0.98+)
   // policy engine rejects prompt as "cyber-safety risk". Emit `{type:"error",message:"This
   // content was flagged for possible cybersecurity risk..."}` then `turn.failed` + exit 1.
