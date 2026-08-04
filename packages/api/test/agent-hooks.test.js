@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -14,7 +14,6 @@ import {
   syncAgentHooks,
 } from '../dist/agent-hooks/index.js';
 import { agentHooksRoutes } from '../dist/routes/agent-hooks.js';
-import { resolveStartupProjectRoot } from '../dist/utils/startup-root.js';
 
 const HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const SESSION_HEADERS = { 'x-test-session-user': 'test-user' };
@@ -39,20 +38,24 @@ async function createProjectRoot() {
 describe('agent hook sync targets', () => {
   let projectRoot;
   let targetRoot;
+  let capabilityProjectRoot;
 
   beforeEach(async () => {
     projectRoot = await createProjectRoot();
     targetRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-home-'));
+    capabilityProjectRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-capability-project-'));
   });
 
   afterEach(async () => {
     await rm(projectRoot, { recursive: true, force: true });
     await rm(targetRoot, { recursive: true, force: true });
+    await rm(capabilityProjectRoot, { recursive: true, force: true });
   });
 
-  it('maps the runtime MCP baseline to the persistent workspace root', async () => {
-    const runtimeRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-runtime-'));
+  it('uses the persistent workspace for implicit capabilities and preserves explicit project scope', async () => {
+    const runtimeRoot = await createProjectRoot();
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-workspace-'));
+    const externalRoot = await mkdtemp(join(tmpdir(), 'agent-hooks-external-'));
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
 
@@ -60,7 +63,48 @@ describe('agent hook sync targets', () => {
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
 
     try {
-      assert.equal(await resolveAgentHookGlobalRoot(runtimeRoot), await realpath(workspaceRoot));
+      const persistentRoot = await realpath(workspaceRoot);
+      assert.equal(await resolveAgentHookGlobalRoot(runtimeRoot), persistentRoot);
+
+      const runtimeCapabilitiesPath = join(runtimeRoot, '.cat-cafe', 'capabilities.json');
+      const workspaceCapabilitiesPath = join(workspaceRoot, '.cat-cafe', 'capabilities.json');
+      const externalCapabilitiesPath = join(externalRoot, '.cat-cafe', 'capabilities.json');
+      const emptyCapabilities = { version: 2, capabilities: [] };
+      const globalCapabilities = {
+        version: 2,
+        capabilities: [
+          {
+            type: 'mcp',
+            id: 'persistent-baseline',
+            source: 'cat-cafe',
+            enabled: true,
+            mcpServer: { command: 'echo', args: ['persistent'] },
+          },
+        ],
+      };
+      await mkdir(join(runtimeRoot, '.cat-cafe'), { recursive: true });
+      await mkdir(join(workspaceRoot, '.cat-cafe'), { recursive: true });
+      await mkdir(join(externalRoot, '.cat-cafe'), { recursive: true });
+      await writeFile(runtimeCapabilitiesPath, JSON.stringify(emptyCapabilities), 'utf-8');
+      await writeFile(workspaceCapabilitiesPath, JSON.stringify(globalCapabilities), 'utf-8');
+      await writeFile(externalCapabilitiesPath, JSON.stringify(emptyCapabilities), 'utf-8');
+
+      const implicitStatus = await getAgentHookStatus({ projectRoot: runtimeRoot, targetRoot });
+      const implicitMcp = implicitStatus.targets.find((target) => target.name === 'mcp');
+      assert.equal(implicitMcp?.status, 'configured');
+      assert.equal(implicitMcp?.drifted, false);
+
+      await syncAgentHooks({ projectRoot: runtimeRoot, targetRoot, ownerAuthorized: true });
+      assert.deepEqual(JSON.parse(await readFile(runtimeCapabilitiesPath, 'utf-8')), emptyCapabilities);
+
+      const explicitStatus = await getAgentHookStatus({
+        projectRoot: runtimeRoot,
+        targetRoot,
+        capabilityProjectRoot: externalRoot,
+      });
+      const explicitMcp = explicitStatus.targets.find((target) => target.name === 'mcp');
+      assert.equal(explicitMcp?.status, 'stale');
+      assert.equal(explicitMcp?.drifted, true);
     } finally {
       if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
       else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
@@ -68,6 +112,7 @@ describe('agent hook sync targets', () => {
       else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
       await rm(runtimeRoot, { recursive: true, force: true });
       await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
     }
   });
 
@@ -362,8 +407,15 @@ describe('agent hook sync targets', () => {
     // project-local MCP entries that are absent from the global config.
     // The keep-project policy only protects config-mismatch; project-orphan
     // issues must be filtered out of the health sync path entirely.
-    const catCafeDir = join(projectRoot, '.cat-cafe');
-    await mkdir(catCafeDir, { recursive: true });
+    const globalCatCafeDir = join(projectRoot, '.cat-cafe');
+    const projectCatCafeDir = join(capabilityProjectRoot, '.cat-cafe');
+    await mkdir(globalCatCafeDir, { recursive: true });
+    await mkdir(projectCatCafeDir, { recursive: true });
+    await writeFile(
+      join(globalCatCafeDir, 'capabilities.json'),
+      JSON.stringify({ version: 2, capabilities: [] }),
+      'utf-8',
+    );
 
     const pluginMcpId = `probe-plugin-${randomUUID().slice(0, 8)}`;
     const capabilities = {
@@ -379,11 +431,12 @@ describe('agent hook sync targets', () => {
         },
       ],
     };
-    await writeFile(join(catCafeDir, 'capabilities.json'), JSON.stringify(capabilities, null, 2), 'utf-8');
+    const projectCapabilitiesPath = join(projectCatCafeDir, 'capabilities.json');
+    await writeFile(projectCapabilitiesPath, JSON.stringify(capabilities, null, 2), 'utf-8');
 
-    await syncAgentHooks({ projectRoot, targetRoot, ownerAuthorized: true });
+    await syncAgentHooks({ projectRoot, targetRoot, capabilityProjectRoot, ownerAuthorized: true });
 
-    const afterSync = JSON.parse(await readFile(join(catCafeDir, 'capabilities.json'), 'utf-8'));
+    const afterSync = JSON.parse(await readFile(projectCapabilitiesPath, 'utf-8'));
     const pluginEntry = afterSync.capabilities.find((c) => c.id === pluginMcpId);
     assert.ok(pluginEntry, `Plugin MCP "${pluginMcpId}" must survive health sync (not removed as orphan)`);
     assert.equal(pluginEntry.pluginId, 'test-plugin');
@@ -394,28 +447,43 @@ describe('agent hook sync targets', () => {
     // syncAgentHooks does. Otherwise the UI shows an un-clearable stale badge
     // for projects with plugin MCPs not in global config.
     //
-    // Strategy: seed an empty capabilities.json so syncAgentHooks populates
-    // all global MCPs, then inject a plugin-owned orphan entry that has no
-    // global counterpart. After sync, global-new drift = 0; only orphan remains.
-    const catCafeDir = join(projectRoot, '.cat-cafe');
-    const capPath = join(catCafeDir, 'capabilities.json');
-    await mkdir(catCafeDir, { recursive: true });
-    await writeFile(capPath, JSON.stringify({ version: 2, capabilities: [] }), 'utf-8');
-    await syncAgentHooks({ projectRoot, targetRoot, ownerAuthorized: true });
-    const synced = JSON.parse(await readFile(capPath, 'utf-8'));
+    // Model host global and external project scopes independently. The global
+    // config is empty, so the project plugin entry is the only MCP difference.
+    const globalCatCafeDir = join(projectRoot, '.cat-cafe');
+    const projectCatCafeDir = join(capabilityProjectRoot, '.cat-cafe');
+    const projectCapabilitiesPath = join(projectCatCafeDir, 'capabilities.json');
+    await mkdir(globalCatCafeDir, { recursive: true });
+    await mkdir(projectCatCafeDir, { recursive: true });
+    await writeFile(
+      join(globalCatCafeDir, 'capabilities.json'),
+      JSON.stringify({ version: 2, capabilities: [] }),
+      'utf-8',
+    );
 
     const pluginMcpId = `orphan-only-${randomUUID().slice(0, 8)}`;
-    synced.capabilities.push({
-      type: 'mcp',
-      id: pluginMcpId,
-      source: 'cat-cafe',
-      pluginId: 'test-plugin',
-      enabled: true,
-      mcpServer: { command: 'echo', args: ['test'] },
-    });
-    await writeFile(capPath, JSON.stringify(synced, null, 2), 'utf-8');
+    await writeFile(
+      projectCapabilitiesPath,
+      JSON.stringify(
+        {
+          version: 2,
+          capabilities: [
+            {
+              type: 'mcp',
+              id: pluginMcpId,
+              source: 'cat-cafe',
+              pluginId: 'test-plugin',
+              enabled: true,
+              mcpServer: { command: 'echo', args: ['test'] },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
 
-    const status = await getAgentHookStatus({ projectRoot, targetRoot, ownerAuthorized: true });
+    const status = await getAgentHookStatus({ projectRoot, targetRoot, capabilityProjectRoot, ownerAuthorized: true });
     const mcpResult = status.targets.find((t) => t.name === 'mcp');
     assert.ok(mcpResult, 'health status must include mcp target');
     assert.equal(mcpResult.status, 'configured', 'orphan-only MCP drift must not report stale');
@@ -425,49 +493,45 @@ describe('agent hook sync targets', () => {
   it('health status reports stale for non-plugin managed MCP orphans', async () => {
     // Non-plugin orphans (managed MCPs removed from global config) should
     // surface as stale — they represent real drift, unlike plugin orphans.
-    //
-    // The orphan filter requires a valid global config at the startup root
-    // (filterOrphanIssues falls back to filtering ALL orphans when global
-    // is unreadable). Ensure a minimal global config exists for CI envs
-    // where .cat-cafe/ is not checked in.
-    const startupRoot = resolveStartupProjectRoot();
-    const globalCapsPath = join(startupRoot, '.cat-cafe', 'capabilities.json');
-    const globalCapsExisted = existsSync(globalCapsPath);
-    if (!globalCapsExisted) {
-      await mkdir(join(startupRoot, '.cat-cafe'), { recursive: true });
-      await writeFile(globalCapsPath, JSON.stringify({ version: 2, capabilities: [] }), 'utf-8');
-    }
-
-    const catCafeDir = join(projectRoot, '.cat-cafe');
-    const capPath = join(catCafeDir, 'capabilities.json');
-    await mkdir(catCafeDir, { recursive: true });
-    await writeFile(capPath, JSON.stringify({ version: 2, capabilities: [] }), 'utf-8');
-    await syncAgentHooks({ projectRoot, targetRoot, ownerAuthorized: true });
-    const synced = JSON.parse(await readFile(capPath, 'utf-8'));
+    const globalCatCafeDir = join(projectRoot, '.cat-cafe');
+    const projectCatCafeDir = join(capabilityProjectRoot, '.cat-cafe');
+    const projectCapabilitiesPath = join(projectCatCafeDir, 'capabilities.json');
+    await mkdir(globalCatCafeDir, { recursive: true });
+    await mkdir(projectCatCafeDir, { recursive: true });
+    await writeFile(
+      join(globalCatCafeDir, 'capabilities.json'),
+      JSON.stringify({ version: 2, capabilities: [] }),
+      'utf-8',
+    );
 
     // Inject a managed (non-plugin) orphan — source 'cat-cafe' but NO pluginId
     const managedOrphanId = `managed-orphan-${randomUUID().slice(0, 8)}`;
-    synced.capabilities.push({
-      type: 'mcp',
-      id: managedOrphanId,
-      source: 'cat-cafe',
-      enabled: true,
-      mcpServer: { command: 'echo', args: ['test'] },
-    });
-    await writeFile(capPath, JSON.stringify(synced, null, 2), 'utf-8');
+    await writeFile(
+      projectCapabilitiesPath,
+      JSON.stringify(
+        {
+          version: 2,
+          capabilities: [
+            {
+              type: 'mcp',
+              id: managedOrphanId,
+              source: 'cat-cafe',
+              enabled: true,
+              mcpServer: { command: 'echo', args: ['test'] },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
 
-    try {
-      const status = await getAgentHookStatus({ projectRoot, targetRoot, ownerAuthorized: true });
-      const mcpResult = status.targets.find((t) => t.name === 'mcp');
-      assert.ok(mcpResult, 'health status must include mcp target');
-      assert.equal(mcpResult.status, 'stale', 'non-plugin managed orphan must report stale');
-      assert.equal(mcpResult.drifted, true, 'non-plugin managed orphan must report drifted');
-    } finally {
-      // Clean up global config if we created it (don't leave artifacts in repo root)
-      if (!globalCapsExisted) {
-        await rm(globalCapsPath, { force: true });
-      }
-    }
+    const status = await getAgentHookStatus({ projectRoot, targetRoot, capabilityProjectRoot, ownerAuthorized: true });
+    const mcpResult = status.targets.find((t) => t.name === 'mcp');
+    assert.ok(mcpResult, 'health status must include mcp target');
+    assert.equal(mcpResult.status, 'stale', 'non-plugin managed orphan must report stale');
+    assert.equal(mcpResult.drifted, true, 'non-plugin managed orphan must report drifted');
   });
 
   it('ownerAuthorized omitted defaults to fail-closed (no capability sync)', async () => {
@@ -482,6 +546,67 @@ describe('agent hook sync targets', () => {
     const capExists = (await readFile(capPath, 'utf8').catch(() => null)) !== null;
     assert.equal(capExists, false, 'capabilities.json should not be created when ownerAuthorized is omitted');
     assert.ok(result.targets.length > 0);
+  });
+
+  it('uses an explicit Clowder AI project as the skill and MCP truth root', async () => {
+    const catCafeRoot = await createProjectRoot();
+    const catCafeHome = await mkdtemp(join(tmpdir(), 'agent-hooks-cat-cafe-home-'));
+    const skillName = 'debugging';
+    const skillSource = join(catCafeRoot, 'cat-cafe-skills', skillName);
+    const skillLink = join(catCafeRoot, '.claude', 'skills', skillName);
+    const capDir = join(catCafeRoot, '.cat-cafe');
+
+    try {
+      await mkdir(skillSource, { recursive: true });
+      await writeFile(join(catCafeRoot, 'cat-cafe-skills', 'manifest.yaml'), 'version: 1\n', 'utf-8');
+      await writeFile(join(skillSource, 'SKILL.md'), '# debugging\n', 'utf-8');
+      await mkdir(join(catCafeRoot, '.claude', 'skills'), { recursive: true });
+      await symlink(skillSource, skillLink);
+      await mkdir(capDir, { recursive: true });
+      await writeFile(
+        join(capDir, 'capabilities.json'),
+        JSON.stringify(
+          {
+            version: 2,
+            capabilities: [
+              {
+                id: skillName,
+                type: 'skill',
+                enabled: true,
+                source: 'cat-cafe',
+                mountPaths: ['claude'],
+                globalEnabled: true,
+              },
+              {
+                id: 'local-cat-cafe-mcp',
+                type: 'mcp',
+                enabled: true,
+                source: 'cat-cafe',
+                mcpServer: { command: 'node', args: [join(catCafeRoot, 'packages/mcp-server/dist/local.js')] },
+                globalEnabled: true,
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+
+      const status = await getAgentHookStatus({
+        projectRoot,
+        targetRoot: catCafeHome,
+        capabilityProjectRoot: catCafeRoot,
+      });
+      const skills = status.targets.find((target) => target.name === 'skills');
+      const mcp = status.targets.find((target) => target.name === 'mcp');
+
+      assert.equal(skills?.status, 'configured');
+      assert.equal(mcp?.status, 'configured');
+    } finally {
+      await rm(catCafeRoot, { recursive: true, force: true });
+      await rm(catCafeHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -785,6 +910,7 @@ describe('agent hook routes', () => {
     assert.equal(res.statusCode, 400, 'invalid projectPath must fail loud with 400');
     const body = JSON.parse(res.payload);
     assert.ok(body.error, 'response must include error message');
+    assert.equal(body.code, 'INVALID_PROJECT_PATH', 'response must carry the machine-readable code');
     // Must NOT contain health targets (which would mean it read host state)
     assert.equal(body.targets, undefined, 'must not return host health targets');
   });
@@ -801,6 +927,7 @@ describe('agent hook routes', () => {
       assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
       const body = JSON.parse(res.payload);
       assert.ok(body.error, 'response must include error message');
+      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
       assert.equal(body.targets, undefined, 'must not return host health targets');
     } finally {
       await rm(uninitDir, { recursive: true, force: true });
@@ -817,6 +944,7 @@ describe('agent hook routes', () => {
     assert.equal(res.statusCode, 400, 'invalid projectPath must fail loud with 400');
     const body = JSON.parse(res.payload);
     assert.ok(body.error, 'response must include error message');
+    assert.equal(body.code, 'INVALID_PROJECT_PATH', 'response must carry the machine-readable code');
     assert.equal(body.targets, undefined, 'must not return sync results');
   });
 
@@ -832,6 +960,7 @@ describe('agent hook routes', () => {
       assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
       const body = JSON.parse(res.payload);
       assert.ok(body.error, 'response must include error message');
+      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
       assert.equal(body.targets, undefined, 'must not return sync results');
     } finally {
       await rm(uninitDir, { recursive: true, force: true });

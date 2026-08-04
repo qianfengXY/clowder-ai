@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { CriticalText } from '@/components/content-overflow';
 import { apiFetch } from '../../utils/api-client';
 
 const STANDARD_IDS = ['claude', 'codex', 'gemini', 'kimi'] as const;
@@ -31,15 +32,22 @@ interface MountRulesPanelProps {
   projectPath?: string;
   /** 'project' = per-project rules (default), 'default' = global defaultMountRules */
   scope?: 'project' | 'default';
+  /** Remote Hub sessions may inspect rules but cannot mutate them. */
+  readOnly?: boolean;
   onSaved?: () => void | Promise<void>;
 }
 
-export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: MountRulesPanelProps) {
+interface MountRulesError {
+  summary: string;
+  details?: string;
+}
+
+export function MountRulesPanel({ projectPath, scope = 'project', readOnly = false, onSaved }: MountRulesPanelProps) {
   const [open, setOpen] = useState(false);
   const [rules, setRules] = useState<MountRules | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<MountRulesError | null>(null);
   const [newAlias, setNewAlias] = useState('');
   const [newPath, setNewPath] = useState('');
 
@@ -60,7 +68,10 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
       const data = (await res.json()) as MountRulesResponse;
       setRules(data.rules);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'unknown error');
+      setError({
+        summary: '无法加载 Mount Rules',
+        details: err instanceof Error ? err.message : 'unknown error',
+      });
     } finally {
       setLoading(false);
     }
@@ -88,12 +99,19 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
         });
         if (!res.ok) {
           const txt = await res.text();
-          throw new Error(`PUT /api/mount-rules failed: ${res.status} ${txt.slice(0, 120)}`);
+          setError({
+            summary: `保存 Mount Rules 失败（HTTP ${res.status}）`,
+            details: txt || undefined,
+          });
+          return;
         }
         setRules(next);
         await onSaved?.();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'unknown error');
+        setError({
+          summary: '保存 Mount Rules 失败',
+          details: err instanceof Error ? err.message : 'unknown error',
+        });
       } finally {
         setSaving(false);
       }
@@ -119,7 +137,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
     if (!rules) return;
     if (!newAlias.trim() || !newPath.trim()) return;
     if (rules.customPaths.some((cp) => cp.alias === newAlias.trim())) {
-      setError(`Alias "${newAlias.trim()}" already exists`);
+      setError({ summary: `Alias "${newAlias.trim()}" already exists` });
       return;
     }
     void saveRules({
@@ -169,7 +187,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
       {open && (
         <div className="px-4 pb-3">
           {loading && <p className="text-xs text-cafe-muted">加载中…</p>}
-          {error && <p className="text-xs text-conn-red-text">⚠ {error}</p>}
+          {error && <CriticalText summary={error.summary} details={error.details} className="mb-3" />}
           {rules && !loading && (
             <>
               <p className="mb-2 text-xs font-semibold text-cafe-secondary">标准 Mount Point</p>
@@ -179,7 +197,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
                     <input
                       type="checkbox"
                       checked={rules.mountPoints[id].enabled}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       onChange={() => toggleStandard(id)}
                       className="h-4 w-4"
                     />
@@ -198,41 +216,45 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
                   <div key={cp.alias} className="flex items-center gap-3 text-sm">
                     <span className="font-medium text-cafe">{cp.alias}</span>
                     <code className="flex-1 text-xs text-cafe-muted">{cp.path}</code>
-                    <button
-                      type="button"
-                      onClick={() => removeCustom(cp.alias)}
-                      disabled={saving}
-                      className="text-xs text-conn-red-text hover:underline"
-                    >
-                      移除
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => removeCustom(cp.alias)}
+                        disabled={saving}
+                        className="text-xs text-conn-red-text hover:underline"
+                      >
+                        移除
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newAlias}
-                  onChange={(e) => setNewAlias(e.target.value)}
-                  placeholder="alias (e.g. opencode)"
-                  className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
-                />
-                <input
-                  type="text"
-                  value={newPath}
-                  onChange={(e) => setNewPath(e.target.value)}
-                  placeholder=".opencode/skills"
-                  className="flex-1 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={addCustom}
-                  disabled={saving || !newAlias.trim() || !newPath.trim()}
-                  className="rounded-xl bg-[var(--console-active-bg)] px-3 py-1 text-xs font-semibold text-cafe-interactive disabled:opacity-40"
-                >
-                  添加
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newAlias}
+                    onChange={(e) => setNewAlias(e.target.value)}
+                    placeholder="alias (e.g. opencode)"
+                    className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={newPath}
+                    onChange={(e) => setNewPath(e.target.value)}
+                    placeholder=".opencode/skills"
+                    className="flex-1 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustom}
+                    disabled={saving || !newAlias.trim() || !newPath.trim()}
+                    className="rounded-xl bg-[var(--console-active-bg)] px-3 py-1 text-xs font-semibold text-cafe-interactive disabled:opacity-40"
+                  >
+                    添加
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

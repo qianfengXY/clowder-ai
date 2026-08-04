@@ -126,4 +126,30 @@ describe('useAgentHookHealth project switch', () => {
     expect(lastResult?.health).toEqual(healthB);
     expect(lastResult?.loading).toBe(false);
   });
+
+  it('clears a successful sync confirmation when the project changes', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(healthA), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(healthA), { status: 200 }));
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { projectPath: PROJECT_A }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const sync = lastResult?.sync;
+    if (!sync) throw new Error('Missing hook sync action');
+    await act(async () => {
+      await sync();
+    });
+    expect(lastResult?.synced).toBe(true);
+
+    const pendingB = new Promise<Response>(() => {});
+    apiFetchMock.mockReturnValueOnce(pendingB);
+    await act(async () => {
+      root.render(React.createElement(HookHost, { projectPath: PROJECT_B }));
+    });
+
+    expect(lastResult?.synced).toBe(false);
+  });
 });

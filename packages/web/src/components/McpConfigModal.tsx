@@ -21,6 +21,9 @@ export interface McpConfigModalProps {
   editId?: string;
   editData?: McpEditData;
   readOnly?: boolean;
+  hasProjectOverride?: boolean;
+  /** Whether localhost-only probe and capability mutation actions are available. */
+  allowLocalActions?: boolean;
   tools?: McpTool[];
   onSaved: () => void;
   onClose: () => void;
@@ -84,10 +87,17 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
   return data.error ?? `${fallback} (${res.status})`;
 }
 
-function modalSubtitle(readOnly: boolean, isEdit: boolean): string {
+function modalSubtitle(readOnly: boolean, isEdit: boolean, allowLocalActions: boolean): string {
+  if (readOnly && !allowLocalActions) {
+    return '远程访问为只读预览；本机探测与配置修改需在 localhost Hub 执行。';
+  }
   if (readOnly) return '托管 MCP 为只读预览，敏感值仅显示键名。';
   if (isEdit) return '敏感值已掩码，未改动的字段保留原值。';
   return '先预览将改动的 CLI 配置，再确认安装。';
+}
+
+function whenAllowed<T>(allowed: boolean, action: T): T | undefined {
+  return allowed ? action : undefined;
 }
 
 type ProbeConnectionStatus = 'connected' | 'disconnected' | 'timeout' | 'error' | 'unknown';
@@ -126,6 +136,8 @@ export function McpConfigModal({
   editId,
   editData,
   readOnly = false,
+  hasProjectOverride = false,
+  allowLocalActions = true,
   tools: initialTools,
   onSaved,
   onClose,
@@ -207,8 +219,12 @@ export function McpConfigModal({
 
   // Probe tools using the current form values (ad-hoc, no save required).
   const handleProbeTools = useCallback(async () => {
+    if (readOnly) {
+      await doProbe(projectPath ? { projectPath } : {});
+      return;
+    }
     await doProbe(buildProbeBody(transport, command, args, url, headers, envPairs, projectPath));
-  }, [args, command, doProbe, envPairs, headers, projectPath, transport, url]);
+  }, [args, command, doProbe, envPairs, headers, projectPath, readOnly, transport, url]);
 
   // Auto-probe on mount: use persisted config (empty body) so the server reads
   // real env values from capabilities.json. Ad-hoc form values would strip
@@ -217,11 +233,11 @@ export function McpConfigModal({
   const mountProbed = useRef(false);
   useEffect(() => {
     if (mountProbed.current) return;
-    if (isEdit && editId && !initialTools) {
+    if (allowLocalActions && isEdit && editId && !initialTools) {
       mountProbed.current = true;
       void doProbe(projectPath ? { projectPath } : {});
     }
-  }, [doProbe, editId, initialTools, isEdit, projectPath]);
+  }, [allowLocalActions, doProbe, editId, initialTools, isEdit, projectPath]);
 
   // Sync externally provided tools (from parent's initial load).
   useEffect(() => {
@@ -288,7 +304,7 @@ export function McpConfigModal({
 
   // F249 §8.3: "恢复全局配置" — clear project override, restore to global config
   const [restoring, setRestoring] = useState(false);
-  const canRestoreGlobal = isEdit && !!projectPath;
+  const canRestoreGlobal = allowLocalActions && isEdit && !!projectPath && hasProjectOverride && !readOnly;
   const handleRestoreGlobal = useCallback(async () => {
     if (!editId || !projectPath) return;
     setError(null);
@@ -321,7 +337,7 @@ export function McpConfigModal({
       <div className="relative flex max-h-[85vh] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] px-6 py-4 shadow-[0_24px_56px_rgba(43,33,26,0.14)]">
         <McpModalHeader
           title={readOnly ? id : isEdit ? `编辑 ${id}` : '新增 MCP'}
-          subtitle={modalSubtitle(readOnly, isEdit)}
+          subtitle={modalSubtitle(readOnly, isEdit, allowLocalActions)}
           onClose={onClose}
         />
         <div className="mt-3 flex-1 space-y-2.5 overflow-y-auto">
@@ -381,7 +397,7 @@ export function McpConfigModal({
             loading={probeLoading}
             connectionStatus={probeStatus}
             error={probeError}
-            onProbe={handleProbeTools}
+            onProbe={whenAllowed(allowLocalActions, handleProbeTools)}
           />
           <McpPreviewSection preview={preview} />
         </div>

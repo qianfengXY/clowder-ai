@@ -35,6 +35,10 @@ export interface ScopeIssues {
 export interface DriftCheckResult {
   issues: DriftIssue[];
   driftHash: string;
+  /** False when a historical project path exists but has no .cat-cafe project state. */
+  initialized?: boolean;
+  /** Server-authoritative locality decision for capability write surfaces. */
+  syncAllowed?: boolean;
 }
 
 /** Issue-type label map (covers both Skill and MCP issue types). */

@@ -10,9 +10,14 @@
  * one component, and one endpoint for both capability types.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
-import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
+import {
+  isLocalCapabilityWriteRequest,
+  requireLocalCapabilityWriteRequest,
+} from '../config/capabilities/capability-write-guards.js';
 import { checkMcpProject } from '../mcp/mcp-drift-detector.js';
 import type { McpDriftResolution } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpDrift, VALID_MCP_DRIFT_DECISIONS } from '../mcp/mcp-drift-resolver.js';
@@ -66,6 +71,20 @@ function parseType(body: Record<string, unknown>): DriftType | null {
   return null;
 }
 
+function isInitializedProjectScope(projectPath: string | undefined, effectiveRoot: string): boolean {
+  return !projectPath || existsSync(join(effectiveRoot, '.cat-cafe'));
+}
+
+function rejectUninitializedProjectScope(
+  projectPath: string | undefined,
+  effectiveRoot: string,
+  reply: FastifyReply,
+): boolean {
+  if (isInitializedProjectScope(projectPath, effectiveRoot)) return false;
+  reply.status(400);
+  return true;
+}
+
 export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /api/drift/check ──
   app.post('/api/drift/check', async (request, reply) => {
@@ -83,6 +102,7 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : undefined;
+    const syncAllowed = isLocalCapabilityWriteRequest(request);
 
     if (type === 'skill') {
       const ctx = await computeSkillDrift(projectPath);
@@ -97,7 +117,12 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
         mountPoint: i.mountPointId,
       }));
       return {
-        result: { issues, driftHash: ctx.drift.driftHash },
+        result: {
+          issues,
+          driftHash: ctx.drift.driftHash,
+          initialized: isInitializedProjectScope(projectPath, ctx.effectiveRoot),
+          syncAllowed,
+        },
         projectRoot: ctx.effectiveRoot,
       };
     }
@@ -118,7 +143,12 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
       hasOverride: i.hasOverride,
     }));
     return {
-      result: { issues, driftHash: drift.driftHash },
+      result: {
+        issues,
+        driftHash: drift.driftHash,
+        initialized: isInitializedProjectScope(projectPath, effectiveRoot),
+        syncAllowed,
+      },
       projectRoot: effectiveRoot,
     };
   });
@@ -165,6 +195,9 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
       if (!targetRoot) {
         reply.status(400);
         return { error: 'Invalid project path' };
+      }
+      if (rejectUninitializedProjectScope(projectPath, targetRoot, reply)) {
+        return { error: 'Project not initialized (missing .cat-cafe)' };
       }
       return withCapabilityLock(targetRoot, async () => {
         const ctx = await computeSkillDrift(projectPath);
@@ -223,6 +256,9 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
     const globalRoot = await resolveGlobalProjectRoot();
     const effectiveRoot = projectRoot ?? globalRoot;
+    if (rejectUninitializedProjectScope(projectPath, effectiveRoot, reply)) {
+      return { error: 'Project not initialized (missing .cat-cafe)' };
+    }
     const drift = await checkMcpProject(effectiveRoot, globalRoot);
     if (drift.issues.length === 0) {
       return {

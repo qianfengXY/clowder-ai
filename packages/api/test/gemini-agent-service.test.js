@@ -462,7 +462,126 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
 // ===== antigravity-cli adapter tests =====
 
 describe('GeminiAgentService (antigravity-cli adapter)', () => {
-  test('spawns agy print mode with repo access and maps plain stdout to text', async () => {
+  test('fails before spawn when AGY global permissions contain an empty file path grant', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Claude Opus 4.6 (Thinking)',
+    });
+    const home = mkdtempSync(join(tmpdir(), 'agy-invalid-permissions-home-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-invalid-permissions-workdir-'));
+    const configDir = join(home, '.gemini', 'config');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.json'),
+      JSON.stringify({
+        userSettings: { globalPermissionGrants: { allow: ['command(*)', 'read_file()'] } },
+      }),
+    );
+
+    try {
+      const invocation = collect(
+        service.invoke('Review the diff', { workingDirectory: workDir, accountEnv: { HOME: home } }),
+      );
+      emitPlainText(proc, 'AGY_SHOULD_NOT_HAVE_SPAWNED\n');
+      const msgs = await invocation;
+
+      assert.equal(spawnFn.mock.callCount(), 0, 'invalid sandbox permission config must fail before spawning AGY');
+      const err = msgs.find((message) => message.type === 'error');
+      assert.ok(err);
+      assert.match(err.error, /read_file\(\)/);
+      assert.equal(err.metadata?.diagnostics?.antigravityCli?.preflight?.reason, 'empty_file_permission_path');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails before spawn when an AGY MCP permission uses the wrong server namespace', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Claude Opus 4.6 (Thinking)',
+    });
+    const home = mkdtempSync(join(tmpdir(), 'agy-invalid-mcp-namespace-home-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-invalid-mcp-namespace-workdir-'));
+    const configDir = join(home, '.gemini', 'config');
+    const settingsDir = join(home, '.gemini', 'antigravity-cli');
+    const schemaDir = join(settingsDir, 'mcp', 'cat-cafe-collab');
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(schemaDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ userSettings: {} }));
+    writeFileSync(
+      join(configDir, 'mcp_config.json'),
+      JSON.stringify({
+        mcpServers: {
+          'cat-cafe-memory': { command: 'memory-server' },
+          'cat-cafe-collab': { command: 'collab-server' },
+        },
+      }),
+    );
+    writeFileSync(
+      join(settingsDir, 'settings.json'),
+      JSON.stringify({
+        permissions: { allow: ['mcp(cat-cafe-memory/cat_cafe_get_thread_context)'] },
+      }),
+    );
+    writeFileSync(join(schemaDir, 'cat_cafe_get_thread_context.json'), JSON.stringify({ name: 'get_thread_context' }));
+
+    try {
+      const invocation = collect(
+        service.invoke('Load the thread', { workingDirectory: workDir, accountEnv: { HOME: home } }),
+      );
+      emitPlainText(proc, 'AGY_SHOULD_NOT_HAVE_SPAWNED\n');
+      const msgs = await invocation;
+
+      assert.equal(spawnFn.mock.callCount(), 0, 'misnamespaced MCP permission must fail before spawning AGY');
+      const err = msgs.find((message) => message.type === 'error');
+      assert.ok(err);
+      assert.match(err.error, /cat-cafe-collab/);
+      assert.equal(err.metadata?.diagnostics?.antigravityCli?.preflight?.reason, 'mcp_permission_server_mismatch');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('injects the runtime cat identity contract for callback-backed MCP tools', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      catId: 'agy-opus',
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Claude Opus 4.6 (Thinking)',
+    });
+
+    const promise = collect(
+      service.invoke('Load the thread', {
+        callbackEnv: { CAT_CAFE_API_URL: 'http://localhost:3004' },
+      }),
+    );
+    emitPlainText(proc, 'AGY_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const printPrompt = args[args.indexOf('--print') + 1];
+    assert.match(printPrompt, /agentKeyCatId="agy-opus"/);
+    assert.match(printPrompt, /schema includes `agentKeyCatId`/);
+  });
+
+  test('spawns agy print mode with repo access and maps plain stdout to text', async (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    delete process.env.CLI_TIMEOUT_MS;
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
+
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new GeminiAgentService({
@@ -491,7 +610,7 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.ok(call.arguments[0] === 'agy' || call.arguments[0].endsWith('/agy'));
     const args = call.arguments[1];
     assert.ok(args.includes('--print'));
-    assert.ok(args.includes('--print-timeout'));
+    assert.equal(args.includes('--print-timeout'), false, 'manual-cancel-only default must not arm AGY print timeout');
     assert.equal(
       args.includes('--dangerously-skip-permissions'),
       false,
@@ -503,6 +622,33 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     const modelIdx = args.indexOf('--model');
     assert.ok(modelIdx >= 0, 'agy now supports per-session --model and runtime should pass the cat model');
     assert.equal(args[modelIdx + 1], 'Gemini 3.5 Flash (High)');
+  });
+
+  test('passes an explicitly configured positive CLI timeout to agy print mode', async (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '1500';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
+
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'gemini-3.5-flash',
+    });
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-timeout-workdir-'));
+
+    const promise = collect(service.invoke('Say hi', { workingDirectory: workDir }));
+    emitPlainText(proc, 'AGY_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const timeoutIdx = args.indexOf('--print-timeout');
+    assert.ok(timeoutIdx >= 0, 'positive CLI_TIMEOUT_MS must preserve the opt-in AGY timeout');
+    assert.equal(args[timeoutIdx + 1], '2s');
   });
 
   test('normalizes legacy Gemini model ids before agy --model spawn', async () => {
@@ -905,6 +1051,46 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.ok(progress.length >= 1, 'should yield trajectory progress side-channel events');
     const text = msgs.find((m) => m.type === 'text');
     assert.equal(text?.content, 'AGY_FINAL_REPLY', 'final text must equal agy stdout — semantics unchanged');
+
+    rmSync(appDataDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210: surfaces AGY trajectory permission failures as invocation errors', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Claude Opus 4.6 (Thinking)',
+    });
+    const appDataDir = mkdtempSync(join(tmpdir(), 'agy-traj-error-int-'));
+    const uuid = 'bbcdef12-3456-7890-abcd-ef1234567890';
+    mkdirSync(join(appDataDir, 'conversations'));
+    const tdb = new Database(join(appDataDir, 'conversations', `${uuid}.db`));
+    tdb.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const errorText = 'User denied permission for mcp(cat-cafe-collab/cat_cafe_get_thread_context).';
+    const errorBytes = Buffer.from(errorText, 'utf8');
+    tdb
+      .prepare('INSERT INTO steps (idx, step_type, status, error_details) VALUES (?, ?, ?, ?)')
+      .run(6, 38, 7, Buffer.concat([Buffer.from([0x0a, errorBytes.length]), errorBytes]));
+    tdb.close();
+    const logPath = join(appDataDir, 'agy.log');
+    writeFileSync(logPath, `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+
+    const promise = collect(
+      service.invoke('Load the thread', { workingDirectory: workDir, agyLogPathOverride: logPath }),
+    );
+    emitPlainText(proc, 'I will load the context first.\n');
+    const msgs = await promise;
+
+    const error = msgs.find((message) => message.type === 'error');
+    assert.ok(error, 'trajectory error_details must make the invocation visibly fail');
+    assert.match(error.error, /User denied permission/);
+    assert.doesNotMatch(error.error, /stack trace/i);
 
     rmSync(appDataDir, { recursive: true, force: true });
     rmSync(workDir, { recursive: true, force: true });

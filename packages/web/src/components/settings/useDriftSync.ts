@@ -15,7 +15,7 @@ interface UseDriftSyncOptions {
   resolvedProjectPath?: string;
   /** Increment to force re-fetch of scope reports. */
   refreshToken?: number;
-  /** Whether to fetch (only when scope = all-projects). */
+  /** Whether to fetch full cross-project reports (the global write gate is always resolved once). */
   enabled?: boolean;
 }
 
@@ -47,7 +47,7 @@ export function useDriftSync({
   // driftFor(undefined) → checkGlobal. Including it again would duplicate global
   // issues (mount-missing, unregistered) as project-level sync issues, making
   // every skill badge show "待同步" even when projects are correctly synced.
-  const projectPaths = useMemo(() => {
+  const candidateProjectPaths = useMemo(() => {
     const normalize = (p: string) => p.replace(/\/+$/, '');
     const resolvedNorm = resolvedProjectPath ? normalize(resolvedProjectPath) : null;
     const paths = new Set<string>();
@@ -58,7 +58,9 @@ export function useDriftSync({
     }
     return Array.from(paths);
   }, [rawProjectPaths, resolvedProjectPath]);
-  const projectPathsKey = projectPaths.join('\0');
+  const projectPathsKey = candidateProjectPaths.join('\0');
+  const hasResolvedWriteEligibility = scopeDrift[GLOBAL_SCOPE_KEY] !== undefined;
+  const canSync = scopeDrift[GLOBAL_SCOPE_KEY]?.syncAllowed === true;
 
   /** Call /api/drift/check for one scope. */
   const driftFor = useCallback(
@@ -80,30 +82,34 @@ export function useDriftSync({
     async (paths: string[]) => {
       const generation = ++reportsFetchGen.current;
       const isCurrent = () => reportsFetchGen.current === generation;
-      const [globalDrift, projectDrifts] = await Promise.all([
-        driftFor(undefined),
-        // Per-project: catch individually so one invalid/stale project doesn't
-        // kill the entire batch. A failed project shows as a synthetic issue
-        // instead of silently hiding all drift results.
-        Promise.all(
-          paths.map(async (path) => {
-            try {
-              return [path, await driftFor(path)] as const;
-            } catch (err) {
-              const label = path.split('/').pop() ?? path;
-              const msg = err instanceof Error ? err.message : '检测失败';
-              const failIssue: DriftIssue = {
-                id: '__check-failed',
-                issueType: 'check-failed',
-                message: `项目 ${label} 异常检测失败: ${msg}`,
-              };
-              return [path, { issues: [failIssue], driftHash: '' } as DriftCheckResult] as const;
-            }
-          }),
-        ),
-      ]);
-      if (!isCurrent()) return;
-      setScopeDrift({ [GLOBAL_SCOPE_KEY]: globalDrift, ...Object.fromEntries(projectDrifts) });
+      try {
+        const [globalDrift, projectDrifts] = await Promise.all([
+          driftFor(undefined),
+          // Per-project: catch individually so one invalid/stale project doesn't
+          // kill the entire batch. A failed project shows as a synthetic issue
+          // instead of silently hiding all drift results.
+          Promise.all(
+            paths.map(async (path) => {
+              try {
+                return [path, await driftFor(path)] as const;
+              } catch (err) {
+                const label = path.split('/').pop() ?? path;
+                const msg = err instanceof Error ? err.message : '检测失败';
+                const failIssue: DriftIssue = {
+                  id: '__check-failed',
+                  issueType: 'check-failed',
+                  message: `项目 ${label} 异常检测失败: ${msg}`,
+                };
+                return [path, { issues: [failIssue], driftHash: '' } as DriftCheckResult] as const;
+              }
+            }),
+          ),
+        ]);
+        if (!isCurrent()) return;
+        setScopeDrift({ [GLOBAL_SCOPE_KEY]: globalDrift, ...Object.fromEntries(projectDrifts) });
+      } catch (err) {
+        if (isCurrent()) throw err;
+      }
     },
     [driftFor],
   );
@@ -117,6 +123,22 @@ export function useDriftSync({
       setSyncAllError(err instanceof Error ? err.message : '跨项目状态加载失败');
     });
   }, [fetchScopeReports, projectPathsKey, enabled, refreshToken]);
+
+  // The active tab may disable full cross-project reports, but it must not
+  // disable the server-authoritative write gate. Fetch only the global scope
+  // until eligibility is known; project reports remain gated by `enabled`.
+  useEffect(() => {
+    if (enabled || hasResolvedWriteEligibility) return;
+    setSyncAllError(null);
+    void fetchScopeReports([]).catch((err) => {
+      setSyncAllError(err instanceof Error ? err.message : '写权限检测失败');
+    });
+  }, [enabled, fetchScopeReports, hasResolvedWriteEligibility]);
+
+  const projectPaths = useMemo(
+    () => candidateProjectPaths.filter((path) => scopeDrift[path]?.initialized !== false),
+    [candidateProjectPaths, scopeDrift],
+  );
 
   /** Scope tree: global first, then each project. */
   const scopeIssues: ScopeIssues[] = useMemo(() => {
@@ -164,14 +186,14 @@ export function useDriftSync({
       setSyncAllError(null);
       try {
         await resolveScope('sync', projectPath);
-        await fetchScopeReports(projectPaths);
+        await fetchScopeReports(candidateProjectPaths);
       } catch (err) {
         setSyncAllError(err instanceof Error ? err.message : '同步失败');
       } finally {
         setSyncing(false);
       }
     },
-    [fetchScopeReports, projectPaths, resolveScope],
+    [candidateProjectPaths, fetchScopeReports, resolveScope],
   );
 
   const handleSyncAllScopes = useCallback(async () => {
@@ -183,17 +205,18 @@ export function useDriftSync({
       for (const path of projectPaths) {
         await resolveScope('sync', path);
       }
-      await fetchScopeReports(projectPaths);
+      await fetchScopeReports(candidateProjectPaths);
     } catch (err) {
       setSyncAllError(err instanceof Error ? err.message : '全部同步失败');
     } finally {
       setSyncing(false);
     }
-  }, [fetchScopeReports, projectPaths, resolveScope, type]);
+  }, [candidateProjectPaths, fetchScopeReports, projectPaths, resolveScope, type]);
 
   return {
     syncing,
     syncAllError,
+    canSync,
     projectPaths,
     projectConsistency,
     scopeIssues,

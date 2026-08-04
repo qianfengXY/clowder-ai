@@ -254,7 +254,7 @@ vi.mock('@/hooks/useGovernanceStatus', () => ({
   }),
 }));
 vi.mock('@/hooks/useAgentHookHealth', () => ({
-  useAgentHookHealth: (options: { enabled?: boolean } = {}) => mockUseAgentHookHealth(options),
+  useAgentHookHealth: (options: { enabled?: boolean; projectPath?: string } = {}) => mockUseAgentHookHealth(options),
 }));
 vi.mock('@/hooks/useIndexState', () => ({
   useIndexState: () => ({

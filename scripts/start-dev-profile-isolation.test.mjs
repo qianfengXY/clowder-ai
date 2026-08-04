@@ -357,6 +357,80 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-dev wires F247 cloud supporting services through optional helper stage', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-dev.sh'), 'utf8');
+
+    assert.match(source, /f247-cloud-services\.mjs/);
+    assert.match(source, /start --optional/);
+    assert.match(source, /CAT_CAFE_F247_CLOUD_AUTOSTART/);
+    assert.match(source, /start --optional --owner-file=/);
+    assert.match(source, /stop-owned --owner-file=/);
+  });
+
+  it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {
+    const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const unixOptIns = runtimeScript.match(
+      /export CONNECTOR_GATEWAY_AUTOSTART="\$\{CONNECTOR_GATEWAY_AUTOSTART:-1\}"/g,
+    );
+
+    assert.equal(unixOptIns?.length, 2, 'both Unix runtime paths must explicitly opt in');
+    assert.match(windowsScript, /CONNECTOR_GATEWAY_AUTOSTART\s*=\s*\$connectorGatewayAutostart/);
+    assert.match(
+      windowsScript,
+      /\$connectorGatewayAutostart\s*=\s*if\s*\(\$env:CONNECTOR_GATEWAY_AUTOSTART\)[\s\S]*?elseif\s*\(-not \$Dev\)/,
+      'Windows production runtime must compute an explicit connector opt-in',
+    );
+  });
+
+  it('Windows launcher snapshots connector authority before dotenv and restores only that wrapper decision', () => {
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const snapshot =
+      '$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")';
+    const dotenvLoad = '# -- Load .env';
+    const restore = '# -- Restore connector launcher authority after dotenv';
+    const runtimeProjection = '$connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART)';
+
+    assert.ok(windowsScript.indexOf(snapshot) >= 0, 'Windows launcher must snapshot wrapper authority');
+    assert.ok(
+      windowsScript.indexOf(snapshot) < windowsScript.indexOf(dotenvLoad),
+      'wrapper authority must be captured before dotenv mutates the process environment',
+    );
+    assert.ok(
+      windowsScript.indexOf(restore) > windowsScript.indexOf(dotenvLoad) &&
+        windowsScript.indexOf(restore) < windowsScript.indexOf(runtimeProjection),
+      'dotenv-only grants must be removed before runtimeEnvOverrides are computed',
+    );
+    assert.match(
+      windowsScript,
+      /SetEnvironmentVariable\("CONNECTOR_GATEWAY_AUTOSTART", \$null, "Process"\)/,
+      'an absent wrapper decision must remain absent after dotenv loading',
+    );
+  });
+
+  it('does not advertise connector lifecycle authority through the .env template', () => {
+    const envExample = readFileSync(resolve(ROOT, '.env.example'), 'utf8');
+
+    assert.doesNotMatch(envExample, /^\s*#?\s*CONNECTOR_GATEWAY_AUTOSTART=/m);
+  });
+
+  it('runtime-only lifecycle capabilities are stripped from agent and terminal shells', () => {
+    const acpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts'),
+      'utf8',
+    );
+    const acpHttpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts'),
+      'utf8',
+    );
+    const tmuxGateway = readFileSync(resolve(ROOT, 'packages/api/src/domains/terminal/tmux-gateway.ts'), 'utf8');
+
+    assert.match(acpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(tmuxGateway, /'CONNECTOR_GATEWAY_AUTOSTART'/);
+    assert.match(tmuxGateway, /'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/);
+  });
+
   it('Windows status succeeds only when required API and web PID files are running', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {
@@ -536,6 +610,73 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     assert.ok(
       ps1.includes('CAT_CAFE_SERVICE_ASR_ENABLED') && ps1.includes('CAT_CAFE_SERVICE_TTS_ENABLED'),
       'start-windows.ps1 must preserve explicit .env sidecar flags for API startup lifecycle',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when an external Redis URL is unreachable', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /function Stop-RedisStartup\s*\{[\s\S]*?Get-Job -Name "redis-bootstrap"[\s\S]*?Stop-Job[\s\S]*?Remove-Job[\s\S]*?install\.ps1[\s\S]*?REDIS_URL[\s\S]*?-Memory[\s\S]*?exit 1[\s\S]*?\}/,
+      'the shared failure path must clean the bootstrap job, explain both persistent-storage repairs, and exit non-zero',
+    );
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not reachable at \$safeConfiguredRedisUrl\."/,
+      'an unreachable external REDIS_URL must stop startup instead of selecting memory storage',
+    );
+    assert.ok(
+      ps1.lastIndexOf('Stop-RedisStartup -Reason') < ps1.indexOf('Start-Job -Name "api"'),
+      'every Redis failure path must run before API startup',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when managed Redis does not start', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Managed Redis failed to start on port \$RedisPort\. Check \$redisLogFile for details\."/,
+      'a failed managed Redis start must stop startup before the API and web jobs are created',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when no Redis binary is installed', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not installed\."/,
+      'a missing Redis binary must stop startup instead of silently choosing volatile storage',
+    );
+  });
+
+  it('start-windows.ps1 fails closed on an unexpected Redis bootstrap exception', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /catch\s*\{[\s\S]*?Write-InstallerExceptionDetails\s+-Context\s+"Redis start"[\s\S]*?Stop-RedisStartup\s+-Reason\s+"Redis bootstrap failed\."/,
+      'an unexpected Redis bootstrap exception must stop startup after printing its diagnostic details',
+    );
+  });
+
+  it('start-windows.ps1 enables volatile storage only for explicit -Memory mode', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const assignments = ps1.match(/\$env:MEMORY_STORE\s*=\s*["']1["']/g) ?? [];
+
+    assert.equal(assignments.length, 1, 'the launcher must have exactly one MEMORY_STORE opt-in');
+    assert.match(
+      ps1,
+      /if\s*\(\$Memory\)\s*\{[\s\S]*?Remove-Item Env:REDIS_URL[\s\S]*?\$env:MEMORY_STORE\s*=\s*["']1["'][\s\S]*?\}/,
+      'MEMORY_STORE=1 must be scoped to the explicit -Memory switch',
+    );
+    assert.doesNotMatch(
+      ps1,
+      /\$useRedis\s*=\s*\$false/,
+      'Redis failure branches must not converge on an implicit memory fallback',
     );
   });
 

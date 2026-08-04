@@ -11,7 +11,7 @@ vi.mock('../../../utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
 }));
 
-function driftResponse(projectPath: string) {
+function driftResponse(projectPath: string, initialized = true) {
   return {
     result: {
       issues: [
@@ -23,6 +23,7 @@ function driftResponse(projectPath: string) {
         },
       ],
       driftHash: `hash-${projectPath}`,
+      initialized,
     },
   };
 }
@@ -98,6 +99,9 @@ describe('DriftBanner (skill)', () => {
     expect(dialog?.textContent).toContain('tdd');
     expect(dialog?.textContent).toContain('存在同名目录占用');
     expect(dialog?.textContent).toContain('立即同步会覆盖和清理已有内容，请先确认是否需要进行备份');
+    expect(
+      Array.from(dialog?.querySelectorAll('button') ?? []).some((button) => button.textContent === '立即同步'),
+    ).toBe(true);
   });
 
   it('closes the detail dialog when the backdrop is clicked', async () => {
@@ -117,5 +121,77 @@ describe('DriftBanner (skill)', () => {
     });
     await flush();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('keeps the complete sync error recoverable behind a technical-details control', async () => {
+    const tail = 'DRIFT_ERROR_TAIL_SENTINEL';
+    const responseBody = `${'sync diagnostic '.repeat(20)}${tail}`;
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/drift/check') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+        return { ok: true, json: async () => driftResponse(body.projectPath ?? '') };
+      }
+      if (url === '/api/drift/resolve') {
+        return { ok: false, status: 409, text: async () => responseBody };
+      }
+      throw new Error(`Unexpected apiFetch path: ${url}`);
+    });
+
+    act(() => {
+      root.render(<DriftBanner type="skill" projectPath="/tmp/project-a" />);
+    });
+    await flush();
+    const issueDetails = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看详情'),
+    );
+    await act(async () => issueDetails?.click());
+    const syncButton = Array.from(document.body.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('立即同步'),
+    );
+    await act(async () => syncButton?.click());
+    await flush();
+
+    expect(container.textContent).toContain('同步 Skill 失败');
+    expect(container.textContent).not.toContain(tail);
+    const technicalDetails = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看技术详情'),
+    );
+    expect(technicalDetails).toBeTruthy();
+    await act(async () => technicalDetails?.click());
+    expect(container.textContent).toContain(tail);
+  });
+
+  it('keeps an explicit uninitialized project read-only even on localhost', async () => {
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/drift/check') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+        return {
+          ok: true,
+          json: async () => driftResponse(body.projectPath ?? '', false),
+        };
+      }
+      throw new Error(`Unexpected apiFetch path: ${url}`);
+    });
+
+    act(() => {
+      root.render(<DriftBanner type="skill" projectPath="/tmp/uninitialized-project" />);
+    });
+    await flush();
+
+    expect(container.textContent).toContain('尚未初始化');
+    const detail = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看详情'),
+    );
+    act(() => {
+      detail?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    const dialog = document.querySelector('[role="dialog"]');
+    const syncButton = Array.from(dialog?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === '立即同步',
+    );
+    expect(syncButton).toBeUndefined();
+    expect(apiFetch).not.toHaveBeenCalledWith('/api/drift/resolve', expect.objectContaining({ method: 'POST' }));
   });
 });

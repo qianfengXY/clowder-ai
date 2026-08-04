@@ -211,6 +211,38 @@ test('all known reasonCodes produce non-empty publicSummary + publicHint', () =>
   }
 });
 
+test('Kimi session from another working directory is classified as an unresumable session', () => {
+  const rawText = [
+    'Session "session_9c3b6b0f-2206-478e-834b-191bb33bf8d8" was created under a different directory.',
+    '  cd "/Volumes/WorkSSD/clowder-ai/packages/api" && kimi -r session_9c3b6b0f-2206-478e-834b-191bb33bf8d8',
+    '',
+    'error: failed to run prompt: Session "session_9c3b6b0f-2206-478e-834b-191bb33bf8d8" was created under a different directory.',
+  ].join('\n');
+
+  const diagnostic = buildCliDiagnostics({
+    rawText,
+    debugRef: { ...baseRef, command: 'kimi' },
+  });
+
+  assert.strictEqual(diagnostic.reasonCode, 'session_not_found');
+});
+
+test('Kimi cross-directory diagnostic redacts non-HOME workspace paths from the public excerpt', () => {
+  const workspacePath = '/srv/app/project/packages/api';
+  const diagnostic = buildCliDiagnostics({
+    rawText: [
+      'Session "session-1" was created under a different directory.',
+      `  cd "${workspacePath}" && kimi -r session-1`,
+    ].join('\n'),
+    debugRef: { ...baseRef, command: 'kimi' },
+  });
+
+  assert.strictEqual(diagnostic.reasonCode, 'session_not_found');
+  assert.ok(diagnostic.safeExcerpt);
+  assert.ok(!diagnostic.safeExcerpt.includes(workspacePath), 'public excerpt must not expose the workspace path');
+  assert.match(diagnostic.safeExcerpt, /\[PATH_REDACTED\]/);
+});
+
 // ── F212 Phase D: result-error diagnostic completeness ──
 
 test('AC-D1: collects the REAL opus-4.8 tool-call-parse result event (subtype:success + is_error:true)', () => {
