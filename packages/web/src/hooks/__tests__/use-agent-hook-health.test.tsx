@@ -144,10 +144,16 @@ describe('useAgentHookHealth', () => {
 
   it('surfaces an uninitialized project as a non-syncable health result', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: 'Project not initialized (missing .cat-cafe/): /workspace/project' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          code: 'PROJECT_NOT_INITIALIZED',
+          error: 'Project not initialized (missing .cat-cafe/): /workspace/project',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
 
     await act(async () => {
@@ -157,10 +163,10 @@ describe('useAgentHookHealth', () => {
 
     expect(latestResult?.error).toBeNull();
     expect(latestResult?.health).toMatchObject({
-      status: 'error',
+      status: 'unsupported',
       targets: [],
       syncAllowed: false,
-      message: 'Project not initialized (missing .cat-cafe/): /workspace/project',
+      uninitialised: true,
     });
   });
 
@@ -350,5 +356,28 @@ describe('useAgentHookHealth', () => {
 
     expect(latestResult?.health).toBeNull();
     expect(latestResult?.error).toBe('agent hook status response is invalid');
+  });
+
+  it('still reports other 400 responses as errors', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: 'INVALID_PROJECT_PATH',
+          error: 'Invalid project path: not found, denied, or not a directory: /nope',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    await act(async () => {
+      root.render(<ResultProbe />);
+      await flushPromises();
+    });
+
+    expect(latestResult?.health).toBeNull();
+    expect(latestResult?.error).toBe('Invalid project path: not found, denied, or not a directory: /nope');
   });
 });

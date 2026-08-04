@@ -68,6 +68,12 @@ const remoteBlockedHealth: AgentHookStatusResponse = {
   message: '为保护本机配置，一键同步仅支持 localhost Hub。',
 };
 
+const uninitialisedHealth: AgentHookStatusResponse = {
+  status: 'unsupported',
+  targets: [],
+  uninitialised: true,
+};
+
 describe('AgentHookHealthNotice', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -135,6 +141,16 @@ describe('AgentHookHealthNotice', () => {
     expect(html).toContain('MCP：未知');
     expect(html).not.toContain('Claude：正常');
     expect(html).not.toContain('Codex：正常');
+    expect(html).toContain('border-conn-red-ring');
+    expect(html).toContain('一键同步');
+  });
+
+  it('renders uninitialised projects as neutral guidance without a sync action', () => {
+    const html = renderToStaticMarkup(<AgentHookHealthNotice health={uninitialisedHealth} onSync={() => {}} />);
+
+    expect(html).toContain('该项目尚未初始化');
+    expect(html).not.toContain('Agent 运行环境检测失败');
+    expect(html).not.toContain('一键同步');
   });
 
   it('shows visible feedback when sync ran but capability drift remains', () => {

@@ -910,6 +910,7 @@ describe('agent hook routes', () => {
     assert.equal(res.statusCode, 400, 'invalid projectPath must fail loud with 400');
     const body = JSON.parse(res.payload);
     assert.ok(body.error, 'response must include error message');
+    assert.equal(body.code, 'INVALID_PROJECT_PATH', 'response must carry the machine-readable code');
     // Must NOT contain health targets (which would mean it read host state)
     assert.equal(body.targets, undefined, 'must not return host health targets');
   });
@@ -926,6 +927,7 @@ describe('agent hook routes', () => {
       assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
       const body = JSON.parse(res.payload);
       assert.ok(body.error, 'response must include error message');
+      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
       assert.equal(body.targets, undefined, 'must not return host health targets');
     } finally {
       await rm(uninitDir, { recursive: true, force: true });
@@ -942,6 +944,7 @@ describe('agent hook routes', () => {
     assert.equal(res.statusCode, 400, 'invalid projectPath must fail loud with 400');
     const body = JSON.parse(res.payload);
     assert.ok(body.error, 'response must include error message');
+    assert.equal(body.code, 'INVALID_PROJECT_PATH', 'response must carry the machine-readable code');
     assert.equal(body.targets, undefined, 'must not return sync results');
   });
 
@@ -957,6 +960,7 @@ describe('agent hook routes', () => {
       assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
       const body = JSON.parse(res.payload);
       assert.ok(body.error, 'response must include error message');
+      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
       assert.equal(body.targets, undefined, 'must not return sync results');
     } finally {
       await rm(uninitDir, { recursive: true, force: true });
