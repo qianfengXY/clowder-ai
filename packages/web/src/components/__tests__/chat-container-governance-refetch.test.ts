@@ -59,7 +59,6 @@ type StoreState = {
 const mockGovRefetch = vi.fn();
 const mockUseAgentHookHealth = vi.fn();
 const mockAgentHookRefresh = vi.fn();
-
 let governanceStatus = {
   ready: true,
   needsBootstrap: false,
@@ -296,7 +295,11 @@ vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({
   ProjectSetupCard: ({ onComplete }: { onComplete: () => void }) =>
-    React.createElement('button', { type: 'button', onClick: onComplete }, 'complete project setup'),
+    React.createElement(
+      'button',
+      { type: 'button', 'data-testid': 'project-setup-complete', onClick: onComplete },
+      'complete project setup',
+    ),
 }));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
@@ -341,6 +344,7 @@ describe('ChatContainer governance refetch', () => {
       error: null,
       syncing: false,
       synced: false,
+      syncAttempted: false,
       sync: vi.fn(),
       refresh: mockAgentHookRefresh,
     });
@@ -374,7 +378,9 @@ describe('ChatContainer governance refetch', () => {
       error: null,
       syncing: false,
       synced: false,
+      syncAttempted: false,
       sync: vi.fn(),
+      refresh: mockAgentHookRefresh,
     });
 
     await act(async () => {
@@ -390,25 +396,24 @@ describe('ChatContainer governance refetch', () => {
       ...governanceStatus,
       ready: false,
       needsBootstrap: true,
+      isEmptyDir: true,
+      isGitRepo: false,
     };
 
     await act(async () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
     });
 
-    const completeButton = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('complete project setup'),
-    );
-    if (!completeButton) throw new Error('Missing mocked project setup button');
+    const complete = container.querySelector<HTMLButtonElement>('[data-testid="project-setup-complete"]');
+    expect(complete).not.toBeNull();
 
     await act(async () => {
-      completeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      complete?.click();
     });
 
     expect(mockGovRefetch).toHaveBeenCalledTimes(1);
     expect(mockAgentHookRefresh).toHaveBeenCalledTimes(1);
   });
-
   it('rebinds the active project when thread detail has a newer projectPath than the cached thread list', async () => {
     const reboundProjectPath = '/tmp/rebound-project';
     vi.mocked(apiFetch).mockImplementation(

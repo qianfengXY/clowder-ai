@@ -67,7 +67,7 @@ import { MobileStatusSheet } from './MobileStatusSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
 import { PendingMemberBubble } from './PendingMemberBubble';
 import { ProjectSetupCard } from './ProjectSetupCard';
-import { derivePendingMemberInvocations, hasInvocationStartedExecuting } from './pending-member-projection';
+import { derivePendingMemberInvocations } from './pending-member-projection';
 import { QueuePanel } from './QueuePanel';
 import { collectExactLiveInvocationIds } from './queue-receipt-projection';
 import { RightStatusPanel } from './RightStatusPanel';
@@ -715,13 +715,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     (intentMode == null && hasActiveInvocation && (activeInvocationCount === 1 || singleSpawningTarget));
 
   const pendingInvocations = useMemo(
-    () =>
-      hasActiveInvocation
-        ? derivePendingMemberInvocations(activeInvocations, messages).filter(
-            (invocation) => !hasInvocationStartedExecuting(invocation, catInvocations[invocation.catId]),
-          )
-        : [],
-    [hasActiveInvocation, activeInvocations, messages, catInvocations],
+    () => (hasActiveInvocation ? derivePendingMemberInvocations(activeInvocations, messages, threadId) : []),
+    [hasActiveInvocation, activeInvocations, messages, threadId],
   );
   const pendingTipContexts = useMemo<readonly CapabilityTipContext[]>(
     () => getStreamingTipContexts(intentMode),
@@ -1156,8 +1151,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             <ChatInput
               key={threadId}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId) =>
-                handleSend(content, images, undefined, whisper, deliveryMode, replyToId)
+              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition) =>
+                handleSend(content, images, undefined, whisper, deliveryMode, replyToId, messageDisposition)
               }
               onStop={handleStop}
               disabled={connectionStatus.isReadonly}
