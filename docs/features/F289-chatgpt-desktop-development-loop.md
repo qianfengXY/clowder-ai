@@ -2,6 +2,7 @@
 description: "Cat Café 负责需求、方案与多猫 Review，ChatGPT Desktop 负责实现、测试、修复与合入；以 durable managed work 串起两边会话与 Traqen 试点。"
 related_features: [F065, F211, F247, F253, F261, F275, F286]
 topics: [chatgpt-desktop, managed-work, mcp, multi-agent-review, traqen]
+tips_exempt: spec-only architecture behind the F275 named-consumer gate; no runtime or user-visible capability surface exists yet
 ---
 
 # F289: ChatGPT Desktop Development Loop

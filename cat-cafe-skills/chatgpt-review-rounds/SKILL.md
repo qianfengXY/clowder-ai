@@ -1,5 +1,6 @@
 ---
 name: chatgpt-review-rounds
+tips_exempt: harness-internal operator-approved review protocol; no standalone end-user capability surface
 description: >
   Operator-approved multi-cat review rounds for code authored by ChatGPT desktop Codex.
   Use when: ChatGPT has pushed a code HEAD and co-creator requires independent cat reviews,
