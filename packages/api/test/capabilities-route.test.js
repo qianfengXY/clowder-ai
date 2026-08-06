@@ -1619,6 +1619,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     const runtimeRoot = findRepoRoot();
     const workspaceRoot = await makeTmpDir('persistent-global-root');
     const internalPackage = join(workspaceRoot, 'packages', 'api');
+    await mkdir(join(workspaceRoot, 'cat-cafe-skills'), { recursive: true });
     await mkdir(internalPackage, { recursive: true });
     process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
