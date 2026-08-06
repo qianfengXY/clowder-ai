@@ -44,9 +44,13 @@ function createTempProject(name) {
       mode: 0o644,
     },
   );
-  writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "STARTED:%s\\n" "$PWD"\n', {
-    mode: 0o755,
-  });
+  writeFileSync(
+    join(projectDir, 'scripts', 'start-dev.sh'),
+    '#!/bin/sh\nprintf "STARTED:%s ARGS:%s\\n" "$PWD" "$*"\n',
+    {
+      mode: 0o755,
+    },
+  );
   return projectDir;
 }
 
@@ -121,6 +125,9 @@ if [ "\${1:-}" = "install" ] && [ "\${2:-}" = "--no-frozen-lockfile" ]; then
   exit 0
 fi
 if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "build" ]; then
+  if [ -n "\${RUNTIME_TEST_BUILD_ENV_LOG:-}" ]; then
+    printf '%s=%s\\n' "NEXT_PUBLIC_API_URL" "\${NEXT_PUBLIC_API_URL:-}" >> "\${RUNTIME_TEST_BUILD_ENV_LOG}"
+  fi
   case "$target_dir" in
     */packages/shared)
       mkdir -p "$target_dir/dist"
@@ -327,6 +334,27 @@ printf 'ok'`,
     assert.equal(result.status, 0);
     assert.match(result.stdout, /running in-place \(deployment mode\)/);
     assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(result.stdout, /ARGS:--prod-web --profile=opensource --quick --daemon/);
+  });
+
+  it('supports an explicit foreground start while keeping quick mode', () => {
+    const projectDir = createTempProject('runtime-non-git-foreground');
+    seedRuntimeDependencyMarkers(projectDir);
+    seedRuntimeBuildArtifacts(projectDir);
+
+    const result = spawnSync(
+      'bash',
+      [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync', '--foreground'],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+        env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
+      },
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /ARGS:--prod-web --profile=opensource --quick/);
+    assert.doesNotMatch(result.stdout, /--daemon/);
   });
 
   it('ignores sibling runtime .env when starting in-place outside git', async () => {
@@ -586,20 +614,19 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stdout, /STARTED:/);
   });
 
-  it('rebuilds missing quick-start artifacts before start', () => {
+  it('rebuilds missing artifacts once before the default quick daemon start', () => {
     const projectDir = createTempProject('runtime-self-heal-quick-build');
     const env = withStubbedPnpmEnv(projectDir);
+    const buildEnvLog = join(projectDir, 'build-env.log');
+    env.RUNTIME_TEST_BUILD_ENV_LOG = buildEnvLog;
+    writeFileSync(join(projectDir, '.env.local'), 'NEXT_PUBLIC_API_URL=https://skycat-api.nas.cpolar.cn\n', 'utf8');
     seedRuntimeDependencyMarkers(projectDir);
 
-    const result = spawnSync(
-      'bash',
-      [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync', '--', '--quick'],
-      {
-        cwd: projectDir,
-        encoding: 'utf8',
-        env,
-      },
-    );
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env,
+    });
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /runtime dist: shared stale\/missing/);
@@ -607,12 +634,22 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.match(result.stdout, /runtime dist: MCP server stale\/missing/);
     assert.match(result.stdout, /runtime dist: web production build stale\/missing/);
     assert.match(result.stdout, /STARTED:/);
+    assert.match(result.stdout, /ARGS:--prod-web --profile=opensource --quick --daemon/);
 
     const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8');
     assert.match(pnpmLog, /-C .*packages\/shared run build/);
     assert.match(pnpmLog, /-C .*packages\/api run build/);
     assert.match(pnpmLog, /-C .*packages\/mcp-server run build/);
     assert.match(pnpmLog, /-C .*packages\/web run build/);
+    assert.equal(
+      pnpmLog
+        .trim()
+        .split('\n')
+        .filter((line) => line.endsWith('run build')).length,
+      4,
+      'each runtime package should build exactly once',
+    );
+    assert.match(readFileSync(buildEnvLog, 'utf8'), /NEXT_PUBLIC_API_URL=https:\/\/skycat-api\.nas\.cpolar\.cn/);
   });
 
   it('starts in-place when .git is a dangling pointer file', () => {

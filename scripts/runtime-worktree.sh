@@ -23,6 +23,7 @@ FORCE=false
 RUN_INSTALL=true
 SYNC_BEFORE_START=true
 START_ARGS=()
+START_IN_FOREGROUND=false
 
 usage() {
   cat <<'EOF'
@@ -30,7 +31,7 @@ Clowder AI Runtime Worktree Manager
 
 Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
-  ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
+  ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--foreground] [--] [start-dev args...]
   ./scripts/runtime-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
 
 Defaults:
@@ -40,7 +41,9 @@ Defaults:
 
 Runtime Contract (passive frozen):
   Runtime restarts ONLY on explicit `pnpm start` invocation.
-  start runs sync (git pull) + build invariant (rebuild stale dist) internally.
+  start runs sync (git pull) + build invariant (rebuild stale dist) internally,
+  then launches the verified artifacts in quick daemon mode.
+  Use --foreground for an attached process during debugging.
   No standalone `sync` subcommand — fold into `pnpm start` as a single entry.
   No tsx watch auto-restart — runtime doesn't track main src changes.
   See docs/decisions/039-runtime-passive-freeze.md for design rationale.
@@ -213,6 +216,52 @@ runtime_quick_mode() {
   start_arg_present "--quick" || start_arg_present "-q"
 }
 
+runtime_daemon_mode() {
+  start_arg_present "--daemon" || start_arg_present "-d"
+}
+
+apply_runtime_start_defaults() {
+  # This outer manager owns sync + build freshness. The inner service launcher
+  # must reuse those verified artifacts; normal mode deletes .next and would
+  # rebuild the frontend a second time.
+  if ! runtime_quick_mode; then
+    START_ARGS+=("--quick")
+  fi
+
+  if [ "$START_IN_FOREGROUND" = "true" ]; then
+    if runtime_daemon_mode; then
+      die "--foreground conflicts with --daemon/-d"
+    fi
+    return 0
+  fi
+
+  if ! runtime_daemon_mode; then
+    START_ARGS+=("--daemon")
+  fi
+}
+
+runtime_install_stamp_file() {
+  printf '%s\n' "$RUNTIME_DIR/node_modules/.cat-cafe-install-commit"
+}
+
+runtime_dependencies_match_commit() {
+  local head_commit="$1"
+  local stamp
+  [ -n "$head_commit" ] || return 1
+  stamp="$(runtime_install_stamp_file)"
+  [ -f "$stamp" ] || return 1
+  [ "$(cat "$stamp" 2>/dev/null)" = "$head_commit" ]
+}
+
+record_runtime_install_commit() {
+  local head_commit="$1"
+  local stamp
+  [ -n "$head_commit" ] || return 0
+  stamp="$(runtime_install_stamp_file)"
+  mkdir -p "$(dirname "$stamp")"
+  printf '%s\n' "$head_commit" > "$stamp"
+}
+
 runtime_install_can_retry_without_frozen_lockfile() {
   local log_file="$1"
   # Kept in sync with scripts/install.ps1::Test-LockfileMismatchFailure — the
@@ -231,6 +280,7 @@ runtime_install_can_retry_without_frozen_lockfile() {
 install_runtime_dependencies() {
   local install_log
   local install_status
+  local head_commit
 
   info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
   # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
@@ -250,6 +300,8 @@ install_runtime_dependencies() {
 
   if [ "$install_status" -eq 0 ]; then
     rm -f "$install_log"
+    head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+    record_runtime_install_commit "$head_commit"
     return 0
   fi
 
@@ -262,6 +314,8 @@ install_runtime_dependencies() {
   info "runtime frozen lockfile install failed; retrying pnpm install --no-frozen-lockfile"
   env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
     pnpm -C "$RUNTIME_DIR" install --no-frozen-lockfile
+  head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+  record_runtime_install_commit "$head_commit"
 }
 
 seed_runtime_config_from_project() {
@@ -307,7 +361,20 @@ ensure_runtime_dependencies() {
   install_runtime_dependencies
 }
 
-ensure_runtime_dist_freshness() {
+load_runtime_build_env() {
+  local env_file
+  for env_file in "$RUNTIME_DIR/.env" "$RUNTIME_DIR/.env.local"; do
+    [ -f "$env_file" ] || continue
+    set -a
+    # Runtime env files are already sourced by start-dev.sh. Load the same
+    # values here so NEXT_PUBLIC_* variables are present during the outer
+    # freshness build instead of only when the service launcher starts.
+    source "$env_file"
+    set +a
+  done
+}
+
+ensure_runtime_dist_freshness() (
   # ADR-039 Invariant 3: build invariant — rebuild stale dist before runtime
   # spawns API/Web processes.
   #
@@ -317,6 +384,7 @@ ensure_runtime_dist_freshness() {
   # Freshness gate (git HEAD) means steady-state cost is ~0.1s; only when
   # main source moved do we actually rebuild.
   local head_commit
+  load_runtime_build_env
   head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
 
   # Order matters: shared first (api/mcp depend on it), then api, then mcp, then web.
@@ -347,7 +415,7 @@ ensure_runtime_dist_freshness() {
     pnpm -C "$RUNTIME_DIR/packages/web" run build
     record_build_stamp "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"
   fi
-}
+)
 
 ensure_runtime_start_prereqs() {
   ensure_runtime_dependencies
@@ -554,6 +622,7 @@ init_runtime_worktree() {
     info "installing dependencies in runtime worktree"
     env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
       pnpm -C "$RUNTIME_DIR" install
+    record_runtime_install_commit "$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
   fi
 
   seed_runtime_config_from_project
@@ -596,19 +665,26 @@ sync_runtime_worktree() {
   fi
 
   if [ "$RUN_INSTALL" = "true" ]; then
-    info "refreshing dependencies in runtime worktree"
-    env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
-      pnpm -C "$RUNTIME_DIR" install
+    local synced_head
+    synced_head="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+    if runtime_dependencies_match_commit "$synced_head"; then
+      info "runtime dependencies already installed for ${synced_head:0:12}; skipping pnpm install"
+    else
+      info "runtime commit changed or install stamp missing; refreshing dependencies"
+      env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+        pnpm -C "$RUNTIME_DIR" install
 
-    # pnpm install can legitimately fix an incomplete lock file (e.g. a PR
-    # added a dep to package.json but forgot to commit the lock update).
-    # If pnpm-lock.yaml is the ONLY dirty file, auto-commit the drift fix
-    # so the next `start` won't be blocked by ensure_runtime_clean.
-    local lock_drift
-    lock_drift=$(git -C "$RUNTIME_DIR" diff --name-only 2>/dev/null || true)
-    if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
-      info "lock drift detected — stashing instead of committing (avoids branch divergence)"
-      git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml
+      # pnpm install can legitimately fix an incomplete lock file (e.g. a PR
+      # added a dep to package.json but forgot to commit the lock update).
+      # If pnpm-lock.yaml is the ONLY dirty file, stash the drift so the
+      # runtime branch remains fast-forwardable.
+      local lock_drift
+      lock_drift=$(git -C "$RUNTIME_DIR" diff --name-only 2>/dev/null || true)
+      if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
+        info "lock drift detected — stashing instead of committing (avoids branch divergence)"
+        git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml
+      fi
+      record_runtime_install_commit "$synced_head"
     fi
   fi
 
@@ -747,6 +823,10 @@ while [ $# -gt 0 ]; do
       SYNC_BEFORE_START=false
       shift
       ;;
+    --foreground)
+      START_IN_FOREGROUND=true
+      shift
+      ;;
     --sync)
       SYNC_BEFORE_START=true
       shift
@@ -770,6 +850,10 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$COMMAND" = "start" ]; then
+  apply_runtime_start_defaults
+fi
 
 case "$COMMAND" in
   init)

@@ -95,14 +95,15 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
 
-# 5. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
+# 5. 启动（仅在运行时 commit 变化时同步/构建，随后后台常驻）
 pnpm start
 
+# 需要前台附着进程进行调试？
+#   pnpm start --foreground
+#
 # 想固定在某个版本？用 start:direct（不会自动更新）：
 #   git checkout <tag> && pnpm start:direct   # 如 v0.4.2
 
-# 6. 可选：后台启动（daemon 模式）
-pnpm start --daemon
 # 查看状态 / 停止
 pnpm start:status
 pnpm stop

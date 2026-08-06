@@ -101,14 +101,15 @@ pnpm build
 # 4. Configure infrastructure (API keys are added in the UI after launch)
 cp .env.example .env
 
-# 5. Start (auto-creates runtime worktree, starts Redis + API + Frontend)
+# 5. Start (syncs/builds only when the runtime commit changed, then stays in the background)
 pnpm start
 
+# Need an attached process for debugging?
+#   pnpm start --foreground
+#
 # Pin to a specific release? Use start:direct instead (won't auto-update):
 #   git checkout <tag> && pnpm start:direct   # e.g. v0.4.2
 
-# 6. Optional: run in background (daemon mode)
-pnpm start --daemon
 # Check status / stop
 pnpm start:status
 pnpm stop
