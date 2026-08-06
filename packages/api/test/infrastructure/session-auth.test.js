@@ -265,4 +265,24 @@ describe('F156 D-1: GET /api/session — session establishment', () => {
     assert.equal(res.json().userId, 'unpaired-user');
     assert.notEqual(res.json().userId, 'default-user');
   });
+
+  it('mints the owner identity remotely only with explicit single-user trust opt-in', async () => {
+    const previous = process.env.CAT_CAFE_TRUST_REMOTE_SINGLE_USER;
+    process.env.CAT_CAFE_TRUST_REMOTE_SINGLE_USER = '1';
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/session',
+        remoteAddress: '192.168.1.50',
+        headers: { 'x-forwarded-for': '203.0.113.50' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json().userId, 'default-user');
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_TRUST_REMOTE_SINGLE_USER;
+      else process.env.CAT_CAFE_TRUST_REMOTE_SINGLE_USER = previous;
+    }
+  });
 });

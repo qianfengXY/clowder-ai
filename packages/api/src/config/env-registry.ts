@@ -183,6 +183,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_TRUST_REMOTE_SINGLE_USER',
+    defaultValue: '0',
+    description: '将反向代理/隧道请求视为本机单用户 owner（高风险，仅用于访问入口已受保护的个人部署）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    allowedValues: ['0', '1'],
+  },
+  {
     name: 'CAT_CAFE_USER_ID',
     defaultValue: 'default-user',
     description: '当前用户 ID',

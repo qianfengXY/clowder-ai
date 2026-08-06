@@ -1,6 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 
 const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const TRUST_REMOTE_SINGLE_USER_ENV = 'CAT_CAFE_TRUST_REMOTE_SINGLE_USER';
 
 export function isLoopbackAddress(address: string): boolean {
   return LOOPBACK_ADDRS.has(address);
@@ -66,8 +67,14 @@ function hasNonEmptyHeader(value: string | string[] | undefined): boolean {
  * Returns true when the request originates from a direct loopback peer
  * (not proxied). Use this for owner-gate loopback guards so that reverse-
  * proxy / Tailscale sidecar deployments don't bypass the guard.
+ *
+ * Single-user operators may explicitly opt a trusted reverse proxy/tunnel
+ * into the local trust boundary. This deliberately grants every caller that
+ * can reach the deployment the same owner authority as localhost, so it is
+ * disabled by default and must never be enabled on a shared/public service.
  */
 export function isDirectLoopbackRequest(request: FastifyRequest): boolean {
+  if (process.env[TRUST_REMOTE_SINGLE_USER_ENV] === '1') return true;
   if (!isLoopbackAddress(request.ip)) return false;
   return !PROXY_FORWARDING_HEADERS.some((h) => hasNonEmptyHeader(request.headers[h]));
 }
