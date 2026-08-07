@@ -4,7 +4,11 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ExternalProject } from '@cat-cafe/shared';
+import type {
+  CreateDesktopDevelopmentProjectBindingInput,
+  DesktopDevelopmentPolicyUpdate,
+  ExternalProject,
+} from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
@@ -51,6 +55,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       description?: string;
       sourcePath?: string;
       backlogPath?: string;
+      desktopDevelopment?: CreateDesktopDevelopmentProjectBindingInput;
     };
     if (!body.name || !body.sourcePath) {
       return reply.status(400).send({ error: 'name and sourcePath are required' });
@@ -61,6 +66,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
         description: body.description ?? '',
         sourcePath: body.sourcePath,
         ...(body.backlogPath ? { backlogPath: body.backlogPath } : {}),
+        ...(body.desktopDevelopment ? { desktopDevelopment: body.desktopDevelopment } : {}),
       });
       return reply.status(201).send({ project });
     } catch (err: unknown) {
@@ -83,6 +89,26 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const project = await requireOwnedProject(id, userId, reply);
     if (!project) return;
     return reply.send({ project });
+  });
+
+  app.patch('/api/external-projects/:id/development-loop', async (request, reply) => {
+    const userId = requireUserId(request, reply);
+    if (!userId) return;
+    const { id } = request.params as { id: string };
+    if (!(await requireOwnedProject(id, userId, reply))) return;
+    const body = request.body as Partial<DesktopDevelopmentPolicyUpdate>;
+    if (!Number.isInteger(body.expectedVersion) || Number(body.expectedVersion) < 1) {
+      return reply.status(400).send({ error: 'expectedVersion is required' });
+    }
+    try {
+      const project = await externalProjectStore.updateDesktopDevelopment(id, body as DesktopDevelopmentPolicyUpdate);
+      if (!project) return reply.status(404).send({ error: 'Project not found' });
+      return reply.send({ project });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const status = /version conflict/i.test(message) ? 409 : 400;
+      return reply.status(status).send({ error: message });
+    }
   });
 
   app.delete('/api/external-projects/:id', async (request, reply) => {

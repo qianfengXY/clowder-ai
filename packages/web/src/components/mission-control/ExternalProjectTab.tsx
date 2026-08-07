@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { CreateIntentCardForm } from './CreateIntentCardForm';
+import { DesktopDevelopmentPanel } from './DesktopDevelopmentPanel';
 import { DispatchProgress } from './DispatchProgress';
 import { GovernanceHealth } from './GovernanceHealth';
 import { IntentCardDetail } from './IntentCardDetail';
@@ -24,7 +25,7 @@ import { RiskPanel } from './RiskPanel';
 import { SliceLadder } from './SliceLadder';
 import { TranslationMatrix } from './TranslationMatrix';
 
-type SubTab = 'features' | 'audit' | 'health' | 'progress' | 'risk' | 'resolutions' | 'slices' | 'reflux';
+type SubTab = 'development' | 'features' | 'audit' | 'health' | 'progress' | 'risk' | 'resolutions' | 'slices' | 'reflux';
 
 interface ExternalProjectTabProps {
   project: ExternalProject;
@@ -221,6 +222,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   }, [project.id, setResolutions, setSlices, setRefluxPatterns]);
 
   const SUB_TABS: { id: SubTab; label: string }[] = [
+    { id: 'development', label: '开发闭环' },
     { id: 'audit', label: '需求追踪' },
     { id: 'health', label: '治理健康度' },
     { id: 'features', label: '功能列表' },
@@ -276,6 +278,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
         <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           {/* Left column */}
           <div className="space-y-4">
+            {subTab === 'development' && <DesktopDevelopmentPanel project={project} />}
             {/* Stage 0 Frame prompt */}
             {!auditFrame && subTab === 'audit' && (
               <div className="rounded-lg bg-[var(--console-shell-bg)] p-4 text-center">

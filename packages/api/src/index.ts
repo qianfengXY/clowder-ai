@@ -272,6 +272,7 @@ import {
   connectorMediaRoutes,
   connectorPluginRoutes,
   debugInvocationExportRoutes,
+  desktopDevelopmentLoopRoutes,
   distillationOpportunityRoutes,
   distillationRoutes,
   dossierDistillationRoutes,
@@ -4297,6 +4298,8 @@ async function main(): Promise<void> {
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
+  const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
+  const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore);
   const intentCardStore = new IntentCardStore();
   const needAuditFrameStore = new NeedAuditFrameStore();
   const { ResolutionStore } = await import('./domains/projects/resolution-store.js');
@@ -4306,6 +4309,7 @@ async function main(): Promise<void> {
   const sliceStore = new SliceStore();
   const refluxPatternStore = new RefluxPatternStore();
   await app.register(externalProjectRoutes, { externalProjectStore, needAuditFrameStore, backlogStore });
+  await app.register(desktopDevelopmentLoopRoutes, { projectReviewHubService });
   await app.register(intentCardRoutes, { externalProjectStore, intentCardStore });
   await app.register(resolutionRoutes, { externalProjectStore, resolutionStore });
   await app.register(sliceRoutes, { externalProjectStore, sliceStore });

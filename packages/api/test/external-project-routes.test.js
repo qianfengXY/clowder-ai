@@ -54,6 +54,70 @@ describe('External Project Routes', () => {
     assert.equal(body.project.backlogPath, 'docs/ROADMAP.md');
   });
 
+  test('POST /api/external-projects can bind the GitHub repository in the same project action', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: {
+        name: 'desktop-loop',
+        sourcePath: '/tmp/desktop-loop',
+        desktopDevelopment: {
+          repository: 'https://github.com/qianfengXY/clowder-ai.git',
+          defaultBranch: 'main',
+          defaultReviewers: ['cat-idwxwjba', 'cat-kimi'],
+        },
+      },
+    });
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.json().project.desktopDevelopment.repository.fullName, 'qianfengXY/clowder-ai');
+    assert.equal(res.json().project.desktopDevelopment.mergeMode, 'manual_confirm_in_chatgpt');
+  });
+
+  test('PATCH development-loop enforces ownership and optimistic policy version', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: {
+        name: 'desktop-loop',
+        sourcePath: '/tmp/desktop-loop',
+        desktopDevelopment: {
+          repository: 'owner/repo',
+          defaultBranch: 'main',
+          defaultReviewers: ['cat-a', 'cat-b'],
+        },
+      },
+    });
+    const projectId = createRes.json().project.id;
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/api/external-projects/${projectId}/development-loop`,
+      headers: H,
+      payload: { expectedVersion: 1, allowPush: true },
+    });
+    assert.equal(updated.statusCode, 200);
+    assert.equal(updated.json().project.desktopDevelopment.allowPush, true);
+    assert.equal(updated.json().project.desktopDevelopment.version, 2);
+
+    const stale = await app.inject({
+      method: 'PATCH',
+      url: `/api/external-projects/${projectId}/development-loop`,
+      headers: H,
+      payload: { expectedVersion: 1, allowPush: false },
+    });
+    assert.equal(stale.statusCode, 409);
+
+    const otherUser = await app.inject({
+      method: 'PATCH',
+      url: `/api/external-projects/${projectId}/development-loop`,
+      headers: { 'x-cat-cafe-user': 'user2' },
+      payload: { expectedVersion: 2, allowPush: false },
+    });
+    assert.equal(otherUser.statusCode, 404);
+  });
+
   test('POST /api/external-projects rejects missing sourcePath', async () => {
     const res = await app.inject({
       method: 'POST',

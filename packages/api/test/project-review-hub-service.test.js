@@ -1,0 +1,70 @@
+// @ts-check
+
+import assert from 'node:assert/strict';
+import { beforeEach, describe, test } from 'node:test';
+
+describe('F289 ProjectReviewHubService', () => {
+  let projectStore;
+  let threadStore;
+  let service;
+  let project;
+
+  beforeEach(async () => {
+    const { ExternalProjectStore } = await import('../dist/domains/projects/external-project-store.js');
+    const { ProjectReviewHubService } = await import('../dist/domains/projects/project-review-hub-service.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    projectStore = new ExternalProjectStore();
+    threadStore = new ThreadStore({ maxThreads: 100 });
+    service = new ProjectReviewHubService(projectStore, threadStore);
+    project = await projectStore.create('user1', {
+      name: 'Loop Project',
+      description: '',
+      sourcePath: '/tmp/loop-project',
+      desktopDevelopment: {
+        repository: 'owner/repo',
+        defaultBranch: 'main',
+        defaultReviewers: ['cat-a', 'cat-b'],
+      },
+    });
+  });
+
+  test('concurrent ensure calls resolve one deterministic Review Hub', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => service.ensureForProject(project.id, 'user1')),
+    );
+    const ids = new Set(results.map((item) => item.threadId));
+    assert.deepEqual([...ids], [`project-review-hub:${project.id}`]);
+
+    const thread = await threadStore.get(results[0].threadId);
+    assert.equal(thread.projectPath, project.sourcePath);
+    assert.equal(thread.title, 'Review Hub · Loop Project');
+    assert.equal((await threadStore.list('user1')).filter((item) => item.id === results[0].threadId).length, 1);
+  });
+
+  test('soft deletion restores the same visible Hub and preserves thread identity', async () => {
+    const first = await service.ensureForProject(project.id, 'user1');
+    assert.equal(await threadStore.softDelete(first.threadId), true);
+    assert.ok((await threadStore.get(first.threadId)).deletedAt);
+
+    const restored = await service.ensureForProject(project.id, 'user1');
+    assert.equal(restored.threadId, first.threadId);
+    assert.equal(restored.status, 'restored');
+    assert.equal((await threadStore.get(first.threadId)).deletedAt, null);
+  });
+
+  test('reuses one Hub across delivery cycles and rejects cross-user access', async () => {
+    const first = await service.ensureForProject(project.id, 'user1');
+    const nextCycle = await service.ensureForProject(project.id, 'user1');
+    assert.equal(nextCycle.threadId, first.threadId);
+    await assert.rejects(() => service.ensureForProject(project.id, 'user2'), /Project not found/i);
+  });
+
+  test('fails closed for projects without a Desktop development binding', async () => {
+    const unbound = await projectStore.create('user1', {
+      name: 'Unbound',
+      description: '',
+      sourcePath: '/tmp/unbound',
+    });
+    await assert.rejects(() => service.ensureForProject(unbound.id, 'user1'), /not configured/i);
+  });
+});

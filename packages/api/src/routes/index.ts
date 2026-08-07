@@ -30,6 +30,7 @@ export { distillationRoutes } from './distillation-routes.js';
 export { dossierRoutes } from './dossier.js';
 export { distillationRoutes as dossierDistillationRoutes } from './dossier-distillations.js';
 export { dossierObservationRoutes } from './dossier-observations.js';
+export { desktopDevelopmentLoopRoutes } from './desktop-development-loop.js';
 export { evalHubRoutes } from './eval-hub.js';
 export { eventsRoutes } from './events.js';
 export { evidenceRoutes } from './evidence.js';

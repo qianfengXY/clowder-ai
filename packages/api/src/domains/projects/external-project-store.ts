@@ -4,7 +4,15 @@
  */
 
 import { resolve } from 'node:path';
-import type { CreateExternalProjectInput, ExternalProject } from '@cat-cafe/shared';
+import {
+  applyDesktopDevelopmentPolicyUpdate,
+  createDesktopDevelopmentProjectBinding,
+  recordAcceptedManualPilot,
+  type CreateExternalProjectInput,
+  type DesktopDevelopmentPolicyUpdate,
+  type DesktopDevelopmentProjectBinding,
+  type ExternalProject,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../cats/services/stores/ports/MessageStore.js';
 import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/community/external-project-keys.js';
@@ -36,6 +44,9 @@ export class ExternalProjectStore {
       description: input.description,
       sourcePath: input.sourcePath,
       backlogPath,
+      ...(input.desktopDevelopment
+        ? { desktopDevelopment: createDesktopDevelopmentProjectBinding(input.desktopDevelopment) }
+        : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -104,6 +115,37 @@ export class ExternalProjectStore {
     return updated;
   }
 
+  async updateDesktopDevelopment(
+    id: string,
+    patch: DesktopDevelopmentPolicyUpdate,
+  ): Promise<ExternalProject | null> {
+    const existing = await this.getById(id);
+    if (!existing) return null;
+    if (!existing.desktopDevelopment) {
+      throw new Error('Desktop development loop is not configured for this project');
+    }
+    const binding = applyDesktopDevelopmentPolicyUpdate(existing.desktopDevelopment, patch);
+    return this.persistDesktopDevelopment(existing, binding, patch.expectedVersion);
+  }
+
+  async recordAcceptedManualPilot(id: string, workId: string): Promise<ExternalProject | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const existing = await this.getById(id);
+      if (!existing) return null;
+      if (!existing.desktopDevelopment) {
+        throw new Error('Desktop development loop is not configured for this project');
+      }
+      const binding = recordAcceptedManualPilot(existing.desktopDevelopment, workId);
+      if (binding === existing.desktopDevelopment) return existing;
+      try {
+        return await this.persistDesktopDevelopment(existing, binding, existing.desktopDevelopment.version);
+      } catch (error) {
+        if (!(error instanceof Error) || !/version conflict/i.test(error.message) || attempt === 2) throw error;
+      }
+    }
+    throw new Error('Desktop development binding version conflict');
+  }
+
   async delete(id: string): Promise<boolean> {
     const project = await this.getById(id);
     if (!project) return false;
@@ -126,12 +168,19 @@ export class ExternalProjectStore {
       description: project.description,
       sourcePath: project.sourcePath,
       backlogPath: project.backlogPath,
+      ...(project.desktopDevelopment
+        ? {
+            desktopDevelopment: JSON.stringify(project.desktopDevelopment),
+            desktopDevelopmentVersion: String(project.desktopDevelopment.version),
+          }
+        : {}),
       createdAt: String(project.createdAt),
       updatedAt: String(project.updatedAt),
     };
   }
 
   private hydrateProject(data: Record<string, string>): ExternalProject {
+    const desktopDevelopment = this.hydrateDesktopDevelopment(data.desktopDevelopment);
     return {
       id: data.id ?? '',
       userId: data.userId ?? '',
@@ -139,8 +188,65 @@ export class ExternalProjectStore {
       description: data.description ?? '',
       sourcePath: data.sourcePath ?? '',
       backlogPath: data.backlogPath ?? 'docs/ROADMAP.md',
+      ...(desktopDevelopment ? { desktopDevelopment } : {}),
       createdAt: Number.parseInt(data.createdAt ?? '0', 10),
       updatedAt: Number.parseInt(data.updatedAt ?? '0', 10),
     };
+  }
+
+  private hydrateDesktopDevelopment(value: string | undefined): DesktopDevelopmentProjectBinding | undefined {
+    if (!value) return undefined;
+    try {
+      const parsed = JSON.parse(value) as DesktopDevelopmentProjectBinding;
+      if (parsed.protocolVersion !== 1 || !parsed.repository?.fullName || !Number.isInteger(parsed.version)) {
+        return undefined;
+      }
+      return parsed;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async persistDesktopDevelopment(
+    existing: ExternalProject,
+    binding: DesktopDevelopmentProjectBinding,
+    expectedVersion: number,
+  ): Promise<ExternalProject> {
+    const updated: ExternalProject = {
+      ...existing,
+      desktopDevelopment: binding,
+      updatedAt: Date.now(),
+    };
+    if (!this.redis) {
+      const current = this.fallbackProjects.get(existing.id);
+      if (current?.desktopDevelopment?.version !== expectedVersion) {
+        throw new Error(`Desktop development binding version conflict: expected ${expectedVersion}`);
+      }
+      this.fallbackProjects.set(existing.id, updated);
+      return updated;
+    }
+
+    const result = await this.redis.eval(
+      `
+        local current = redis.call('HGET', KEYS[1], 'desktopDevelopmentVersion')
+        if not current then return -1 end
+        if tonumber(current) ~= tonumber(ARGV[1]) then return 0 end
+        redis.call('HSET', KEYS[1],
+          'desktopDevelopment', ARGV[2],
+          'desktopDevelopmentVersion', ARGV[3],
+          'updatedAt', ARGV[4])
+        return 1
+      `,
+      1,
+      ExternalProjectKeys.detail(existing.id),
+      String(expectedVersion),
+      JSON.stringify(binding),
+      String(binding.version),
+      String(updated.updatedAt),
+    );
+    if (Number(result) !== 1) {
+      throw new Error(`Desktop development binding version conflict: expected ${expectedVersion}`);
+    }
+    return updated;
   }
 }

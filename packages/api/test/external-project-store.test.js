@@ -37,6 +37,24 @@ describe('ExternalProjectStore', () => {
     assert.equal(project.backlogPath, 'BACKLOG.md');
   });
 
+  test('create() persists an optional F289 Desktop development binding', async () => {
+    const project = await store.create('user1', {
+      name: 'bound',
+      description: '',
+      sourcePath: '/tmp/bound',
+      desktopDevelopment: {
+        repository: 'qianfengXY/clowder-ai',
+        defaultBranch: 'main',
+        defaultReviewers: ['cat-idwxwjba', 'cat-kimi'],
+      },
+    });
+
+    assert.equal(project.desktopDevelopment.repository.fullName, 'qianfengXY/clowder-ai');
+    assert.equal(project.desktopDevelopment.mergeMode, 'manual_confirm_in_chatgpt');
+    assert.equal(project.desktopDevelopment.successfulManualPilotCount, 0);
+    assert.deepEqual((await store.getById(project.id)).desktopDevelopment, project.desktopDevelopment);
+  });
+
   test('create() writes Redis detail and user index through one transaction', async () => {
     const mod = await import('../dist/domains/projects/external-project-store.js');
     const calls = [];
@@ -100,6 +118,48 @@ describe('ExternalProjectStore', () => {
     assert.equal(updated.sourcePath, '/new');
     assert.ok(updated.updatedAt >= created.updatedAt);
     assert.equal(updated.description, '');
+  });
+
+  test('updateDesktopDevelopment() uses optimistic versioning and persists policy', async () => {
+    const created = await store.create('user1', {
+      name: 'bound',
+      description: '',
+      sourcePath: '/bound',
+      desktopDevelopment: {
+        repository: 'owner/repo',
+        defaultBranch: 'main',
+        defaultReviewers: ['cat-a', 'cat-b'],
+      },
+    });
+
+    const updated = await store.updateDesktopDevelopment(created.id, {
+      expectedVersion: 1,
+      allowPush: true,
+    });
+    assert.equal(updated.desktopDevelopment.allowPush, true);
+    assert.equal(updated.desktopDevelopment.version, 2);
+    await assert.rejects(
+      () => store.updateDesktopDevelopment(created.id, { expectedVersion: 1, allowPush: false }),
+      /version conflict/i,
+    );
+  });
+
+  test('recordAcceptedManualPilot() is idempotent across reloads', async () => {
+    const created = await store.create('user1', {
+      name: 'bound',
+      description: '',
+      sourcePath: '/bound',
+      desktopDevelopment: {
+        repository: 'owner/repo',
+        defaultBranch: 'main',
+        defaultReviewers: ['cat-a', 'cat-b'],
+      },
+    });
+    const first = await store.recordAcceptedManualPilot(created.id, 'work-1');
+    const duplicate = await store.recordAcceptedManualPilot(created.id, 'work-1');
+    assert.equal(first.desktopDevelopment.successfulManualPilotCount, 1);
+    assert.equal(duplicate.desktopDevelopment.successfulManualPilotCount, 1);
+    assert.deepEqual((await store.getById(created.id)).desktopDevelopment.successfulManualPilotWorkIds, ['work-1']);
   });
 
   test('update() returns null for nonexistent id', async () => {

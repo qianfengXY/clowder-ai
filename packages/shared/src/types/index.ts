@@ -476,6 +476,8 @@ export type {
   CreateExternalProjectInput,
   ExternalProject,
 } from './external-project.js';
+// F289: project-scoped ChatGPT Desktop development loop contracts.
+export * from './desktop-development-loop.js';
 // F233 Phase C C2a: Feat Trajectory types (OQ-8 三源 source-contract: event-stream / historical-stitched / git-ref-snapshot)
 export type {
   BallShapedTrajectoryKind,

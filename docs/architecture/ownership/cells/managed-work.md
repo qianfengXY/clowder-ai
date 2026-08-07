@@ -33,6 +33,7 @@ doc_anchors:
 static_scan_hints: [WorkAdmission, WorkAttempt, workId, attemptId, managed_attributed, managed_unattributed, unmanaged_not_applicable, workflow_sop_v1]
 cited_by:
   - {feature: F275, date: 2026-08-01, delta: "new thin identity cell for SOP admission, attempt 1, and explicit invocation/PR/Episode attribution"}
+  - {feature: F289, date: 2026-08-07, delta: "named Desktop development consumer requires ordered attempts, typed evidence, and terminal transitions; claims stay fail-closed until that F275 port exists"}
 ---
 
 # Managed Work Identity
@@ -66,6 +67,7 @@ The cell does not create a new user or cat workflow. Admission is a server-side 
 
 - Add a producer only through a new Design Gate backed by a stable typed business commit and its own idempotent admission anchor.
 - Add Phase C attempt or terminal behavior only for a named consumer, with an explicit owner, transition contract, evidence requirements, and deterministic tests.
+- F289 is the first named Phase C consumer. Its required port is read/validate work+attempt, idempotent next-attempt creation, typed evidence append, and F275-owned accepted/rejected transitions. F289 may not implement a local fallback while this port is absent.
 - Preserve the current zero-ceremony boundary: propagation is internal plumbing, not a form, card, approval, or extra cat step.
 
 ## Do NOT Unify With
