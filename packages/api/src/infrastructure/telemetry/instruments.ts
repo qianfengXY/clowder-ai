@@ -851,6 +851,13 @@ export const holdBallPendingInputReject = lazy(() =>
 
 // --- F254 AC-B5: Freshness gate + notice + re-invoke telemetry ---
 
+export const codexFirstVisibleTextDuration = lazy(() =>
+  meter().createHistogram('cat_cafe.codex.first_visible_text.duration', {
+    description: 'Time from Codex invocation start until the first user-visible text fragment',
+    unit: 's',
+  }),
+);
+
 export const codexAppServerLifecycleTransition = lazy(() =>
   meter().createCounter('cat_cafe.codex_app_server.lifecycle_transition', {
     description: 'Codex app-server lifecycle stage transitions',

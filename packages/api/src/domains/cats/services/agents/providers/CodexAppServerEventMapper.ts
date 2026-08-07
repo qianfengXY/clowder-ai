@@ -43,6 +43,28 @@ export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppS
   const params = asCodexAppServerRecord(envelope?.params);
   if (!envelope || typeof envelope.method !== 'string') return null;
   switch (envelope.method) {
+    case 'item/agentMessage/delta': {
+      const threadId = params?.threadId;
+      const turnId = params?.turnId;
+      const itemId = params?.itemId;
+      const delta = params?.delta;
+      if (
+        typeof threadId !== 'string' ||
+        typeof turnId !== 'string' ||
+        typeof itemId !== 'string' ||
+        typeof delta !== 'string' ||
+        delta.length === 0
+      ) {
+        return null;
+      }
+      return {
+        type: 'item.agent_message.delta',
+        thread_id: threadId,
+        turn_id: turnId,
+        item_id: itemId,
+        delta,
+      };
+    }
     case 'item/started':
     case 'item/completed': {
       const item = mapItem(params?.item);

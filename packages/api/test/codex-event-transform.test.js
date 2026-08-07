@@ -34,6 +34,153 @@ test('item.completed agent_message → text', () => {
   assert.equal(msg?.content, 'Hello');
 });
 
+test('app-server agentMessage delta maps the exact installed schema', () => {
+  const mapped = mapCodexAppServerNotification({
+    method: 'item/agentMessage/delta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'message-1',
+      delta: 'Hel',
+    },
+  });
+
+  assert.deepEqual(mapped, {
+    type: 'item.agent_message.delta',
+    thread_id: 'thread-1',
+    turn_id: 'turn-1',
+    item_id: 'message-1',
+    delta: 'Hel',
+  });
+});
+
+test('app-server agentMessage delta rejects malformed or empty payloads', () => {
+  const validBase = {
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'x' },
+  };
+
+  for (const envelope of [
+    { ...validBase, params: { ...validBase.params, threadId: undefined } },
+    { ...validBase, params: { ...validBase.params, turnId: undefined } },
+    { ...validBase, params: { ...validBase.params, itemId: undefined } },
+    { ...validBase, params: { ...validBase.params, delta: undefined } },
+    { ...validBase, params: { ...validBase.params, delta: '' } },
+  ]) {
+    assert.equal(mapCodexAppServerNotification(envelope), null);
+  }
+});
+
+test('app-server fragmented agentMessage deltas append, then completion replaces with one canonical snapshot', () => {
+  const state = { hadPriorTextTurn: false };
+  const events = [
+    { type: 'item.agent_message.delta', item_id: 'message-1', delta: 'Hel' },
+    { type: 'item.agent_message.delta', item_id: 'message-1', delta: 'lo' },
+    { type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'Hello' } },
+  ];
+  let visible = '';
+  const messages = events.map((event) => transformCodexEvent(event, CAT, state));
+  for (const message of messages) {
+    assert.equal(Array.isArray(message), false);
+    if (!message || Array.isArray(message) || message.type !== 'text') continue;
+    visible = message.textMode === 'replace' ? message.content : visible + message.content;
+  }
+
+  assert.deepEqual(
+    messages.map((message) =>
+      message && !Array.isArray(message) ? { content: message.content, textMode: message.textMode } : message,
+    ),
+    [
+      { content: 'Hel', textMode: 'append' },
+      { content: 'lo', textMode: 'append' },
+      { content: 'Hello', textMode: 'replace' },
+    ],
+  );
+  assert.equal(visible, 'Hello', 'the completion snapshot must not duplicate already streamed prose');
+  assert.equal(
+    transformCodexEvent(
+      { type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'Hello' } },
+      CAT,
+      state,
+    ),
+    null,
+    'a duplicate streamed completion must be idempotent',
+  );
+});
+
+test('completion-only exec_json messages remain append-mode and byte-stable', () => {
+  const state = { hadPriorTextTurn: false };
+  const first = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'One' } },
+    CAT,
+    state,
+  );
+  const second = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'message-2', type: 'agent_message', text: 'Two' } },
+    CAT,
+    state,
+  );
+
+  assert.equal(Array.isArray(first), false);
+  assert.equal(Array.isArray(second), false);
+  assert.deepEqual(
+    [first, second].map((message) =>
+      message && !Array.isArray(message) ? { content: message.content, textMode: message.textMode } : message,
+    ),
+    [
+      { content: 'One', textMode: undefined },
+      { content: '\n\nTwo', textMode: undefined },
+    ],
+  );
+});
+
+test('app-server multiple streamed agentMessage items preserve earlier canonical text', () => {
+  const state = { hadPriorTextTurn: false };
+  const events = [
+    { type: 'item.agent_message.delta', item_id: 'message-1', delta: 'One' },
+    { type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'One' } },
+    { type: 'item.agent_message.delta', item_id: 'message-2', delta: 'Two' },
+    { type: 'item.completed', item: { id: 'message-2', type: 'agent_message', text: 'Two done' } },
+  ];
+  let visible = '';
+  for (const event of events) {
+    const message = transformCodexEvent(event, CAT, state);
+    assert.equal(Array.isArray(message), false);
+    if (!message || Array.isArray(message) || message.type !== 'text') continue;
+    visible = message.textMode === 'replace' ? message.content : visible + message.content;
+  }
+
+  assert.equal(visible, 'One\n\nTwo done');
+});
+
+test('app-server streamed signature is reconciled before one canonical final signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const events = [
+    { type: 'item.agent_message.delta', item_id: 'message-1', delta: '答案。\n\n[砚砚/gpt-' },
+    { type: 'item.agent_message.delta', item_id: 'message-1', delta: '5.6-sol🐾]' },
+    {
+      type: 'item.completed',
+      item: { id: 'message-1', type: 'agent_message', text: '答案。\n\n[砚砚/gpt-5.6-sol🐾]' },
+    },
+    { type: 'turn.completed', status: 'completed' },
+  ];
+  let visible = '';
+  for (const event of events) {
+    const message = transformCodexEvent(event, CAT, state);
+    assert.equal(Array.isArray(message), false);
+    if (!message || Array.isArray(message) || message.type !== 'text') continue;
+    visible = message.textMode === 'replace' ? message.content : visible + message.content;
+  }
+  const final = finalizeCodexStream(state, CAT);
+  if (final?.type === 'text') visible += final.content;
+
+  assert.equal(visible, '答案。\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
 test('item.started command_execution → tool_use', () => {
   const msg = transformCodexEvent(
     { type: 'item.started', item: { type: 'command_execution', command: 'ls -la' } },
