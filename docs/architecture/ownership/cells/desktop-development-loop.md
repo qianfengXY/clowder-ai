@@ -15,6 +15,7 @@ code_anchors:
   - packages/shared/src/types/external-project.ts
   - packages/api/src/domains/projects/external-project-store.ts
   - packages/api/src/domains/projects/project-review-hub-service.ts
+  - packages/api/src/domains/desktop-development-loop/desktop-session-store.ts
   - packages/api/src/routes/desktop-development-loop.ts
   - packages/web/src/components/mission-control/DesktopDevelopmentPanel.tsx
   - packages/web/src/components/mission-control/ImportProjectModal.tsx
