@@ -37,7 +37,8 @@ type CodexMappedDeltaEvent = {
 interface CodexStreamState {
   hadPriorTextTurn: boolean;
   canonicalText?: string;
-  streamedAgentMessageIds?: Set<string>;
+  streamedAgentMessageBases?: Map<string, string>;
+  completedStreamedAgentMessageIds?: Set<string>;
   // existing signature/final-terminal fields remain unchanged
 }
 ```
@@ -54,7 +55,7 @@ Lifecycle owner: one `CodexStreamState` instance owned by one `CodexAgentService
 | completion-only | first non-empty delta for item `I` | mark `I` streamed; append delta immediately |
 | streaming `I` | later delta for `I` | append suffix only |
 | streaming `I` | completed snapshot for `I` | strip provider signature; replace with cumulative canonical aggregate |
-| any | duplicate completed snapshot for streamed `I` | deterministic same replacement; never append duplicate prose |
+| any | duplicate completed snapshot for streamed `I` | ignore idempotently; never append duplicate prose |
 | any | unknown/malformed/empty delta | ignore; no first-visible sample |
 
 Invariants:
@@ -85,7 +86,7 @@ Run:
 
 ```bash
 pnpm --filter @cat-cafe/api run build
-node --import packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-event-transform.test.js
+node --import ./packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-event-transform.test.js
 ```
 
 Expected: new delta mapping/reconciliation assertions fail because the mapper returns `null` and the transformer has no delta branch.
@@ -114,7 +115,7 @@ Run:
 
 ```bash
 pnpm --filter @cat-cafe/api run build
-node --import packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-app-server-transport.test.js
+node --import ./packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-app-server-transport.test.js
 ```
 
 Expected: delta is absent and/or foreign delta is not fenced.
@@ -130,10 +131,10 @@ Repeat the Task 2 command; expect all tests to pass.
 ### Task 3: First-visible latency metric
 
 **Files:**
+- Add: `packages/api/src/domains/cats/services/agents/providers/codex-first-visible-telemetry.ts`
 - Modify: `packages/api/src/infrastructure/telemetry/instruments.ts`
 - Modify: `packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts`
 - Modify: `packages/api/test/codex-agent-service.test.js`
-- Modify: `packages/api/test/telemetry/cli-spawn-redaction.test.js`
 
 **Step 1: Write failing tests**
 
@@ -145,7 +146,7 @@ Run:
 
 ```bash
 pnpm --filter @cat-cafe/api run build
-node --import packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-agent-service.test.js packages/api/test/telemetry/cli-spawn-redaction.test.js
+TELEMETRY_HMAC_SALT=codex-first-visible-test-only node --import ./packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-agent-service.test.js packages/api/test/telemetry/cli-spawn-redaction.test.js
 ```
 
 Expected: metric/instrument and first-text observation assertions fail.
@@ -168,7 +169,7 @@ Repeat the Task 3 command; expect all tests to pass.
 Run:
 
 ```bash
-pnpm biome format --write packages/api/src/domains/cats/services/agents/providers/CodexAppServerEventMapper.ts packages/api/src/domains/cats/services/agents/providers/codex-event-transform.ts packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts packages/api/src/infrastructure/telemetry/instruments.ts packages/api/test/codex-event-transform.test.js packages/api/test/codex-app-server-transport.test.js packages/api/test/codex-agent-service.test.js packages/api/test/telemetry/cli-spawn-redaction.test.js
+pnpm biome format --write packages/api/src/domains/cats/services/agents/providers/CodexAppServerEventMapper.ts packages/api/src/domains/cats/services/agents/providers/codex-event-transform.ts packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts packages/api/src/domains/cats/services/agents/providers/codex-first-visible-telemetry.ts packages/api/src/infrastructure/telemetry/instruments.ts packages/api/test/codex-event-transform.test.js packages/api/test/codex-app-server-transport.test.js packages/api/test/codex-agent-service.test.js
 ```
 
 Expected: formatter exits 0.
@@ -177,7 +178,7 @@ Expected: formatter exits 0.
 
 ```bash
 pnpm --filter @cat-cafe/api run build
-node --import packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-event-transform.test.js packages/api/test/codex-app-server-transport.test.js packages/api/test/codex-agent-service.test.js packages/api/test/codex-app-server-host-pool.test.js packages/api/test/telemetry/cli-spawn-redaction.test.js
+TELEMETRY_HMAC_SALT=codex-first-visible-test-only node --import ./packages/api/test/helpers/setup-cat-registry.js --test packages/api/test/codex-event-transform.test.js packages/api/test/codex-app-server-transport.test.js packages/api/test/codex-agent-service.test.js packages/api/test/codex-app-server-host-pool.test.js packages/api/test/telemetry/cli-spawn-redaction.test.js
 ```
 
 Expected: all focused tests pass.

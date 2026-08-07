@@ -116,6 +116,39 @@ class ProtocolWire {
   }
 }
 
+test('app-server emits agentMessage deltas only for the active thread and turn', async () => {
+  const wire = new ProtocolWire();
+  const client = new CodexAppServerClient({ wire });
+  const outputPromise = collect(client.run({ prompt: 'work', thread: { kind: 'start' } }));
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  for (const params of [
+    { threadId: 'foreign-thread', turnId: 'turn-1', itemId: 'foreign-thread-message', delta: 'wrong thread' },
+    { threadId: 'thread-1', turnId: 'foreign-turn', itemId: 'foreign-turn-message', delta: 'wrong turn' },
+    { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'visible now' },
+  ]) {
+    wire.inbox.push({ method: 'item/agentMessage/delta', params });
+  }
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+
+  const output = await outputPromise;
+  assert.deepEqual(
+    output.filter((event) => event.type === 'item.agent_message.delta'),
+    [
+      {
+        type: 'item.agent_message.delta',
+        thread_id: 'thread-1',
+        turn_id: 'turn-1',
+        item_id: 'message-1',
+        delta: 'visible now',
+      },
+    ],
+  );
+});
+
 test('direct app-server carrier frames JSONL on LF only', async () => {
   const childScript = `
     const records = [
