@@ -16,6 +16,12 @@ const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
  */
 export interface CodexStreamState {
   hadPriorTextTurn: boolean;
+  /** Completed canonical aggregate used to reconcile app-server deltas with their final snapshots. */
+  canonicalText?: string;
+  /** Canonical aggregate captured before each currently streaming app-server agent message. */
+  streamedAgentMessageBases?: Map<string, string>;
+  /** Suppresses duplicate completion snapshots for messages already reconciled from deltas. */
+  completedStreamedAgentMessageIds?: Set<string>;
   /** Cat nickname/display name used to distinguish this cat's signature from quoted teammate signatures. */
   signatureIdentity?: string;
   /** Runtime-derived signature appended once after the provider stream ends normally. */
@@ -227,6 +233,7 @@ export function transformCodexEvent(
       state.lastTurnTerminal = 'non_success';
     } else if (
       e.type === 'turn.started' ||
+      e.type === 'item.agent_message.delta' ||
       e.type === 'item.started' ||
       e.type === 'item.updated' ||
       e.type === 'item.completed'
@@ -332,16 +339,63 @@ export function transformCodexEvent(
     return null;
   }
 
+  if (e.type === 'item.agent_message.delta') {
+    const itemId = e.item_id;
+    const delta = e.delta;
+    if (typeof itemId !== 'string' || typeof delta !== 'string' || delta.length === 0) return null;
+
+    let prefix = '';
+    if (state) {
+      state.streamedAgentMessageBases ??= new Map<string, string>();
+      if (!state.streamedAgentMessageBases.has(itemId)) {
+        const base = state.canonicalText ?? '';
+        state.streamedAgentMessageBases.set(itemId, base);
+        prefix = base.length > 0 ? '\n\n' : '';
+      }
+      state.hadPriorTextTurn = true;
+    }
+    return {
+      type: 'text',
+      catId,
+      content: prefix + delta,
+      textMode: 'append',
+      timestamp: Date.now(),
+    };
+  }
+
   if (e.type !== 'item.completed') return null;
 
   const item = e.item as Record<string, unknown> | undefined;
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
+    const itemId = typeof item.id === 'string' ? item.id : undefined;
+    if (itemId && state?.completedStreamedAgentMessageIds?.has(itemId)) return null;
     const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity, state?.canonicalSignature);
     if (state && stripped.signature) state.observedSignature = stripped.signature;
+
+    const streamedBase = itemId ? state?.streamedAgentMessageBases?.get(itemId) : undefined;
+    if (state && itemId && streamedBase !== undefined) {
+      const content = stripped.content.trim().length > 0 ? stripped.content : '';
+      const aggregate = streamedBase + (streamedBase.length > 0 && content.length > 0 ? '\n\n' : '') + content;
+      state.canonicalText = aggregate;
+      state.streamedAgentMessageBases?.delete(itemId);
+      state.completedStreamedAgentMessageIds ??= new Set<string>();
+      state.completedStreamedAgentMessageIds.add(itemId);
+      return {
+        type: 'text',
+        catId,
+        content: aggregate,
+        textMode: 'replace',
+        timestamp: Date.now(),
+      };
+    }
+
     if (stripped.content.trim().length === 0) return null;
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';
-    if (state) state.hadPriorTextTurn = true;
+    if (state) {
+      state.hadPriorTextTurn = true;
+      state.canonicalText = (state.canonicalText ?? '') + (state.canonicalText ? '\n\n' : '') + stripped.content;
+    }
     return {
       type: 'text',
       catId,

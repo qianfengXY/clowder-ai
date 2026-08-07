@@ -233,7 +233,10 @@ export class CodexAppServerClient {
 
         const mapped = mapCodexAppServerNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
-        if (mapped) yield mapped;
+        const isForeignAgentMessageDelta =
+          mapped?.type === 'item.agent_message.delta' &&
+          (mapped.thread_id !== threadId || mapped.turn_id !== activeTurnId);
+        if (mapped && !isForeignAgentMessageDelta) yield mapped;
         if (record?.method === 'turn/completed') {
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);

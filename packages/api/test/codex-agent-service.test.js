@@ -15,6 +15,9 @@ import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
   '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
 );
+const { classifyCodexFirstVisibleTextStatus, createCodexFirstVisibleTextRecorder } = await import(
+  '../dist/domains/cats/services/agents/providers/codex-first-visible-telemetry.js'
+);
 const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
 
 /** Helper: collect all items from async iterable */
@@ -25,6 +28,58 @@ async function collect(iterable) {
   }
   return items;
 }
+
+test('records the first visible Codex text once with a bounded carrier status', () => {
+  const records = [];
+  const histogram = { record: (value, attributes) => records.push({ value, attributes }) };
+  let nowMs = 2_500;
+  const recorder = createCodexFirstVisibleTextRecorder(1_000, histogram, () => nowMs);
+
+  assert.equal(
+    classifyCodexFirstVisibleTextStatus(
+      { type: 'item.agent_message.delta', item_id: 'message-1', delta: 'hello' },
+      true,
+    ),
+    'app_server_delta',
+  );
+  assert.equal(
+    classifyCodexFirstVisibleTextStatus(
+      { type: 'item.completed', item: { type: 'agent_message', text: 'hello' } },
+      true,
+    ),
+    'app_server_completed',
+  );
+  assert.equal(
+    classifyCodexFirstVisibleTextStatus(
+      { type: 'item.completed', item: { type: 'agent_message', text: 'hello' } },
+      false,
+    ),
+    'exec_json_completed',
+  );
+  assert.equal(
+    classifyCodexFirstVisibleTextStatus({ type: 'item.completed', item: { type: 'reasoning' } }, false),
+    null,
+  );
+
+  assert.equal(
+    recorder.observe({ type: 'status', catId: 'codex', content: 'streaming', timestamp: 0 }, 'app_server_delta'),
+    false,
+  );
+  assert.equal(
+    recorder.observe({ type: 'text', catId: 'codex', content: '   ', timestamp: 0 }, 'app_server_delta'),
+    false,
+  );
+  assert.equal(
+    recorder.observe({ type: 'text', catId: 'codex', content: 'hello', timestamp: 0 }, 'app_server_delta'),
+    true,
+  );
+  nowMs = 9_000;
+  assert.equal(
+    recorder.observe({ type: 'text', catId: 'codex', content: 'later', timestamp: 0 }, 'app_server_completed'),
+    false,
+  );
+  assert.deepEqual(records, [{ value: 1.5, attributes: { status: 'app_server_delta' } }]);
+});
 
 /**
  * Create a mock child process for testing.

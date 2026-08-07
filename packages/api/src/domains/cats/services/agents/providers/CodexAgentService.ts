@@ -96,6 +96,11 @@ import {
 } from './codex-app-approval-routing.js';
 import { classifyCodexExecToolSurface } from './codex-app-server-boundary.js';
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
+import {
+  type CodexFirstVisibleTextStatus,
+  classifyCodexFirstVisibleTextStatus,
+  createCodexFirstVisibleTextRecorder,
+} from './codex-first-visible-telemetry.js';
 import { createDirectAgentCarrierSession } from './DirectAgentCarrierSession.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
@@ -948,6 +953,8 @@ export class CodexAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const firstVisibleTextRecorder = createCodexFirstVisibleTextRecorder();
+    let latestFirstVisibleTextStatus: CodexFirstVisibleTextStatus | null = null;
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     // Codex CLI has no system prompt flag; prepend identity to prompt text
     const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
@@ -1458,6 +1465,8 @@ export class CodexAgentService implements AgentService {
       };
 
       for await (const event of events) {
+        const firstVisibleTextStatus = classifyCodexFirstVisibleTextStatus(event, useAppServer);
+        if (firstVisibleTextStatus) latestFirstVisibleTextStatus = firstVisibleTextStatus;
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
           bindSessionCredentialFile(credentialNamespace, event.thread_id, pooledCredentialEnv.path);
         }
@@ -1698,12 +1707,14 @@ export class CodexAgentService implements AgentService {
               if (msg.type === 'session_init' && msg.sessionId) {
                 metadata.sessionId = msg.sessionId;
               }
+              if (firstVisibleTextStatus) firstVisibleTextRecorder.observe(msg, firstVisibleTextStatus);
               yield { ...msg, metadata };
             }
           } else {
             if (result.type === 'session_init' && result.sessionId) {
               metadata.sessionId = result.sessionId;
             }
+            if (firstVisibleTextStatus) firstVisibleTextRecorder.observe(result, firstVisibleTextStatus);
             yield { ...result, metadata };
           }
         }
@@ -1711,6 +1722,9 @@ export class CodexAgentService implements AgentService {
 
       const finalSignature = finalizeCodexStream(codexStreamState, this.catId);
       if (finalSignature) {
+        if (latestFirstVisibleTextStatus) {
+          firstVisibleTextRecorder.observe(finalSignature, latestFirstVisibleTextStatus);
+        }
         yield { ...finalSignature, metadata };
       }
 
