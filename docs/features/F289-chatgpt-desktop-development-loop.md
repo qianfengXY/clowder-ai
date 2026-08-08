@@ -150,9 +150,9 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 
 ### Review / feedback loop
 
-- [ ] AC-R1: 至少两名非作者在同一 full SHA 上独立完成后 barrier 才打开，并发 finish 不会提前泄露草稿。
-- [ ] AC-R2: 共识 finding 有稳定 finding ID/evidence/status；Desktop 只能读取 barrier-safe projection。
-- [ ] AC-R3: 新 SHA 使旧 round stale；有 open finding 时不能 merge；零 finding 只批准最新 SHA。
+- [x] AC-R1: 至少两名非作者在同一 full SHA 上独立完成后 barrier 才打开，并发 finish 不会提前泄露草稿。（`review-round-store.test.js`）
+- [x] AC-R2: 共识 finding 有稳定 finding ID/evidence/status；Desktop 只能读取 barrier-safe projection。（`review-round-store.test.js`）
+- [x] AC-R3: 新 SHA 使旧 round stale；有 open finding 时不能 merge；零 finding 只批准最新 SHA。（work-current + atomic consensus regression）
 - [ ] AC-R4: 同一 Review Hub 可连续承载多个 feature、delivery cycle、attempt 与 round，不产生窗口爆炸。
 
 ### Merge / acceptance

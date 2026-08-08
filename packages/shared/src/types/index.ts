@@ -416,6 +416,8 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+// F289: project-scoped ChatGPT Desktop development loop contracts.
+export * from './desktop-development-loop.js';
 // Dispatch proposal types (F246 Phase B: F193 E3 cross-thread dispatch)
 export {
   type DispatchProposal,
@@ -476,8 +478,6 @@ export type {
   CreateExternalProjectInput,
   ExternalProject,
 } from './external-project.js';
-// F289: project-scoped ChatGPT Desktop development loop contracts.
-export * from './desktop-development-loop.js';
 // F233 Phase C C2a: Feat Trajectory types (OQ-8 三源 source-contract: event-stream / historical-stitched / git-ref-snapshot)
 export type {
   BallShapedTrajectoryKind,
@@ -706,13 +706,11 @@ export type {
   LimbNodeRecord,
   LimbNodeStatus,
 } from './limb.js';
-// F275: internal managed-work identity and named-consumer kernel
-export { MANAGED_WORK_CONSUMER_IDS } from './managed-work.js';
 export type {
+  ManagedWorkBinding,
   ManagedWorkConsumerId,
   ManagedWorkConsumerSnapshot,
   ManagedWorkConsumerState,
-  ManagedWorkBinding,
   ManagedWorkEvidence,
   ManagedWorkEvidenceInput,
   ManagedWorkExecutorActor,
@@ -722,6 +720,8 @@ export type {
   WorkAttempt,
   WorkflowSopAdmissionBundle,
 } from './managed-work.js';
+// F275: internal managed-work identity and named-consumer kernel
+export { MANAGED_WORK_CONSUMER_IDS } from './managed-work.js';
 // Marketplace types (F146 MCP Marketplace Control Plane)
 export type {
   InstallMode,
@@ -1082,6 +1082,20 @@ export type {
   ResolutionItem,
   ResolutionStatus,
 } from './resolution.js';
+// F253/F289: durable exact-SHA independent review rounds
+export type {
+  ReviewConsensus,
+  ReviewConsensusFinding,
+  ReviewConsensusVerdict,
+  ReviewDraftFinding,
+  ReviewDraftVerdict,
+  ReviewFindingStatus,
+  ReviewPrivateDraft,
+  ReviewRound,
+  ReviewRoundPhase,
+  ReviewRoundSafeView,
+  ReviewSeverity,
+} from './review-round.js';
 // Rich block types (F22 Rich Blocks 富消息系统)
 export type {
   InteractiveOption,
