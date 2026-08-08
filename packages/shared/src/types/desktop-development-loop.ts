@@ -97,12 +97,19 @@ export interface DesktopDevelopmentResumePacket {
   readonly defaultBranch: string;
   readonly workId: string;
   readonly attemptId: string;
+  readonly workLifecycle: 'active' | 'accepted' | 'rejected';
+  readonly managedWorkVersion: number;
   readonly bindingEpoch: number;
+  readonly sessionStatus: DesktopSessionBindingStatus;
+  readonly sessionVersion: number;
   readonly branch: string;
   readonly currentSha: string;
   readonly lastCommittedSha: string;
   readonly worktreePresent: boolean;
   readonly reviewRoundId: string | null;
+  readonly reviewPhase: 'independent' | 'cross_review' | 'consensus_ready' | 'complete' | null;
+  readonly reviewRoundVersion: number | null;
+  readonly reviewCurrentForWork: boolean;
   readonly openFindings: readonly BarrierSafeReviewFinding[];
   readonly nextLegalActions: readonly string[];
 }
