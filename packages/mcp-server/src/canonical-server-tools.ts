@@ -25,6 +25,7 @@ import {
   perspectiveTools,
   publishVerdictTools,
   recentTools,
+  reviewRoundTools,
   richBlockRulesTools,
   scheduleTools,
   sessionChainTools,
@@ -36,6 +37,7 @@ import {
 export const CANONICAL_TOOL_SOURCES = {
   collab: [
     ...desktopDevelopmentLoopTools,
+    ...reviewRoundTools,
     ...callbackTools,
     ...autoDreamTools,
     ...communityRouteAcceptanceTools,

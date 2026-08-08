@@ -215,6 +215,20 @@ export {
   listRecentInputSchema,
   recentTools,
 } from './recent-tools.js';
+export {
+  handleReviewBarrierDraftsRead,
+  handleReviewConsensusPublish,
+  handleReviewCrossFinish,
+  handleReviewDraftSubmit,
+  handleReviewIndependentFinish,
+  handleReviewPrivateDraftRead,
+  handleReviewRoundRead,
+  reviewConsensusPublishInputSchema,
+  reviewDraftSubmitInputSchema,
+  reviewRoundReadInputSchema,
+  reviewRoundTools,
+  reviewStageFinishInputSchema,
+} from './review-round-tools.js';
 // F193 Phase D AC-D1: reflect-tools removed (deprecated)
 export {
   handleGetRichBlockRules,
