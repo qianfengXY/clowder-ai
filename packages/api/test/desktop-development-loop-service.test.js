@@ -391,6 +391,47 @@ describe(
       assert.deepEqual(packet.nextLegalActions, ['fix_open_findings']);
     });
 
+    test('returns an explicit committed-SHA recovery action when the permanent worktree is missing', async () => {
+      const { project, bundle } = await arrange();
+      const missingWorktree = workspace();
+      missingWorktree.worktreePresent = false;
+      const packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-missing-worktree',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-missing-worktree',
+        leaseDurationMs: 60_000,
+        workspace: missingWorktree,
+        now: 2_000,
+      });
+
+      assert.equal(packet.worktreePresent, false);
+      assert.equal(packet.lastCommittedSha, SHA_A);
+      assert.deepEqual(packet.nextLegalActions, ['rebuild_worktree_from_last_committed_sha']);
+      await assert.rejects(
+        () =>
+          service.reportImplementation({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            runtimeSessionId: 'runtime-missing-worktree',
+            bindingEpoch: packet.bindingEpoch,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            exactSha: SHA_A,
+            idempotencyKey: 'report-missing-worktree',
+            now: 3_000,
+          }),
+        /worktree is missing/i,
+      );
+    });
+
     test('derives reviewer identity from the Review Hub and writes one canonical review-completed evidence row', async () => {
       const { project, bundle } = await arrange();
       let packet = await service.connect({

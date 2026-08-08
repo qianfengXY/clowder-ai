@@ -209,6 +209,9 @@ export class DesktopDevelopmentLoopService {
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const session = await this.assertCurrentSession(input, now, true);
+    if (!session.workspace.worktreePresent) {
+      throw new Error('Permanent worktree is missing; rebuild it from the last committed SHA before reporting');
+    }
     const exactSha = input.exactSha.toLowerCase();
     if (session.workspace.currentSha !== exactSha || session.workspace.lastCommittedSha !== exactSha) {
       throw new Error('Implementation SHA must equal the current committed workspace SHA');
@@ -570,6 +573,7 @@ interface NextLegalActionsInput {
 function deriveNextLegalActions(input: NextLegalActionsInput): readonly string[] {
   if (input.managedLifecycle !== 'active') return [];
   if (input.session.status !== 'active') return ['rebind_session'];
+  if (!input.session.workspace.worktreePresent) return ['rebuild_worktree_from_last_committed_sha'];
   if (!input.review) return ['implement_and_report_committed_sha'];
   if (input.review.round.exactSha !== input.session.workspace.currentSha) return ['report_new_committed_sha'];
   if (input.review.round.phase === 'complete') return deriveCompletedReviewActions(input);
