@@ -16,8 +16,10 @@ export interface WorkAdmission {
 export interface WorkAttempt {
   readonly attemptId: string;
   readonly workId: string;
-  readonly attemptNumber: 1;
+  readonly attemptNumber: number;
   readonly executorCatId: CatId | null;
+  /** Phase-C executor identity. Legacy Phase-B records hydrate from executorCatId. */
+  readonly executorActor?: ManagedWorkExecutorActor;
   readonly createdAt: number;
   readonly executorBoundAt: number | null;
 }
@@ -31,4 +33,58 @@ export interface WorkflowSopAdmissionBundle {
 export interface ManagedWorkBinding {
   readonly workId: string;
   readonly attemptId: string;
+}
+
+export const MANAGED_WORK_CONSUMER_IDS = ['f289_desktop_development_loop'] as const;
+export type ManagedWorkConsumerId = (typeof MANAGED_WORK_CONSUMER_IDS)[number];
+
+export type ManagedWorkExecutorActor =
+  | { readonly kind: 'cat'; readonly catId: CatId }
+  | { readonly kind: 'external_actor'; readonly actorId: 'chatgpt-desktop-dev' };
+
+export type ManagedWorkLifecycle = 'active' | 'accepted' | 'rejected';
+
+export interface ManagedWorkConsumerState {
+  readonly consumerId: ManagedWorkConsumerId;
+  readonly workId: string;
+  readonly currentAttemptId: string;
+  readonly currentAttemptNumber: number;
+  readonly lifecycle: ManagedWorkLifecycle;
+  readonly terminalExactSha?: string;
+  readonly terminalAt?: number;
+  readonly version: number;
+}
+
+export type ManagedWorkEvidenceInput =
+  | { readonly kind: 'implementation_committed'; readonly exactSha: string }
+  | {
+      readonly kind: 'review_completed';
+      readonly exactSha: string;
+      readonly reviewRoundId: string;
+      readonly openFindingCount: number;
+      readonly checksPassed: boolean;
+    }
+  | {
+      readonly kind: 'merge_confirmed';
+      readonly exactSha: string;
+      readonly bindingEpoch: number;
+      readonly confirmedByUserId: string;
+    }
+  | { readonly kind: 'merged'; readonly exactSha: string; readonly mergeCommitSha: string }
+  | { readonly kind: 'acceptance_recorded'; readonly exactSha: string; readonly accepted: boolean }
+  | { readonly kind: 'work_rejected'; readonly exactSha: string; readonly reason: string };
+
+export type ManagedWorkEvidence = ManagedWorkEvidenceInput & {
+  readonly evidenceId: string;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly consumerId: ManagedWorkConsumerId;
+  readonly recordedAt: number;
+};
+
+export interface ManagedWorkConsumerSnapshot {
+  readonly admission: WorkAdmission;
+  readonly attempt: WorkAttempt;
+  readonly state: ManagedWorkConsumerState;
+  readonly evidence: readonly ManagedWorkEvidence[];
 }

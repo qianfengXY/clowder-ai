@@ -15,8 +15,10 @@ canonical_features: [F275]
 code_anchors:
   - packages/shared/src/types/managed-work.ts
   - packages/api/src/domains/cats/services/stores/ports/WorkflowSopStore.ts
+  - packages/api/src/domains/cats/services/stores/ports/ManagedWorkConsumerPort.ts
   - packages/api/src/domains/cats/services/stores/redis-keys/managed-work-keys.ts
   - packages/api/src/domains/cats/services/stores/redis/RedisWorkflowSopStore.ts
+  - packages/api/src/domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.ts
   - packages/api/src/domains/cats/services/stores/redis/managed-work-attempt-binding.ts
   - packages/api/src/domains/cats/services/agents/invocation/managed-work-invocation-binding.ts
   - packages/api/src/domains/cats/services/agents/invocation/InvocationRegistry.ts
@@ -44,7 +46,7 @@ Architecture cell: managed-work
 
 F275 owns the canonical fact that a delivery work was admitted and the opaque identities that connect its work root and execution attempts. In v1 this is limited to TTL-0 `WorkAdmission`, an unbound attempt 1, authenticated bind-once executor attribution, and explicit propagation to internal invocation, PR, and TaskOutcome evidence.
 
-The cell does not create a new user or cat workflow. Admission is a server-side side effect of the existing eligible development WorkflowSop first-persist path. Ordinary chat, questions, and open exploration remain `unmanaged_not_applicable` and acquire no identity.
+The cell does not create a new user or cat workflow. Admission is a server-side side effect of the existing eligible development WorkflowSop first-persist path. Ordinary chat, questions, and open exploration remain `unmanaged_not_applicable` and acquire no identity. Phase C currently exposes one closed named-consumer port for F289; it does not turn managed-work into a generic workflow engine.
 
 ## Adjacent Ownership Boundaries
 
@@ -61,7 +63,8 @@ The cell does not create a new user or cat workflow. Admission is a server-side 
 3. Authenticated admitted invocation identity binds attempt 1 exactly once. Caller-supplied IDs, `batonHolder`, and persistence actor fields are not executor proof.
 4. Missing identity never blocks the delivery workflow. It fails closed only for attribution as `managed_unattributed`; no latest-by-thread fallback is permitted.
 5. Raw `workId/attemptId` remain server-private and never enter REST, socket, callback, web-store, community-board, or other user-facing task projections.
-6. Phase B records no whole-work terminal state, terminal policy, reopen command, generic event ledger, repair subsystem, second producer, or multi-attempt mutation.
+6. Phase B records no whole-work terminal state. The F289-named Phase C extension owns only ordered attempt CAS, typed evidence, and accepted/rejected terminal state for that consumer; it adds no second producer, reopen command, generic event ledger, or repair subsystem.
+7. ChatGPT Desktop is an external executor actor, never a CatId. Existing cat attempt binding and the named-consumer claim share one conflict boundary so neither can overwrite the other.
 
 ## Extend By
 

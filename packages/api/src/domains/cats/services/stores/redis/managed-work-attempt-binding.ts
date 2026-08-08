@@ -31,8 +31,17 @@ if admission.workId ~= ARGV[2]
   return {'identity_conflict', 'identity_mismatch'}
 end
 
+if attempt.executorActor and attempt.executorActor ~= cjson.null then
+  if attempt.executorActor.kind == 'cat' and attempt.executorActor.catId == ARGV[5] then
+    return {'same', admissionRaw, attemptRaw}
+  end
+  local actorId = attempt.executorActor.catId or attempt.executorActor.actorId or 'unknown'
+  return {'executor_conflict', actorId}
+end
+
 if attempt.executorCatId == nil or attempt.executorCatId == cjson.null then
   attempt.executorCatId = ARGV[5]
+  attempt.executorActor = {kind = 'cat', catId = ARGV[5]}
   attempt.executorBoundAt = tonumber(ARGV[6])
   attemptRaw = cjson.encode(attempt)
   redis.call('SET', KEYS[2], attemptRaw)
@@ -76,7 +85,7 @@ export async function bindManagedWorkAttemptInRedis(input: {
   }
   if (result[0] === 'not_admitted') return null;
   if (result[0] === 'executor_conflict' && typeof result[1] === 'string') {
-    throw new ManagedWorkExecutorConflictError(result[1] as CatId);
+    throw new ManagedWorkExecutorConflictError(result[1]);
   }
   if (result[0] === 'identity_conflict') {
     throw new Error(`Managed-work attempt bind failed closed: ${String(result[1] ?? 'unknown')}`);

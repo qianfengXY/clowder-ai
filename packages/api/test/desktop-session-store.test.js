@@ -2,6 +2,11 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { assertRedisIsolationOrThrow } from './helpers/redis-test-helpers.js';
+
+const DESKTOP_SESSION_REDIS_URL =
+  process.env.F289_TEST_REDIS_URL ??
+  (process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1' ? process.env.REDIS_URL : undefined);
 
 const workspace = {
   repository: { host: 'github.com', owner: 'owner', name: 'repo', fullName: 'owner/repo' },
@@ -153,7 +158,7 @@ describe('F289 DesktopSessionStore', () => {
 
   test(
     'Redis backend persists without TTL and atomically selects one rebind winner',
-    { skip: !process.env.F289_TEST_REDIS_URL },
+    { skip: !DESKTOP_SESSION_REDIS_URL },
     async () => {
       const { Redis } = await import('ioredis');
       const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
@@ -161,7 +166,10 @@ describe('F289 DesktopSessionStore', () => {
       const projectId = `ep-redis-${suffix}`;
       const workId = `work-redis-${suffix}`;
       const key = `desktop-development:session:${encodeURIComponent(projectId)}:${encodeURIComponent(workId)}`;
-      const redis = new Redis(process.env.F289_TEST_REDIS_URL, { maxRetriesPerRequest: 1 });
+      if (!process.env.F289_TEST_REDIS_URL) {
+        assertRedisIsolationOrThrow(DESKTOP_SESSION_REDIS_URL, 'desktop-session-store');
+      }
+      const redis = new Redis(DESKTOP_SESSION_REDIS_URL, { maxRetriesPerRequest: 1 });
 
       try {
         const firstStore = new DesktopSessionStore(redis);

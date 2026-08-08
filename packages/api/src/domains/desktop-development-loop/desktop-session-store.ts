@@ -134,7 +134,7 @@ export class DesktopSessionStore {
   async bind(input: BindDesktopSessionInput): Promise<DesktopSessionBinding> {
     const normalized = normalizeBindInput(input);
     const key = sessionKey(normalized.projectId, normalized.workId);
-    const fingerprint = JSON.stringify(normalized);
+    const fingerprint = operationFingerprint(normalized);
     const template: DesktopSessionBinding = {
       projectId: normalized.projectId,
       workId: normalized.workId,
@@ -187,7 +187,7 @@ export class DesktopSessionStore {
   async heartbeat(input: HeartbeatDesktopSessionInput): Promise<DesktopSessionBinding> {
     const normalized = normalizeHeartbeatInput(input);
     const key = sessionKey(normalized.projectId, normalized.workId);
-    const fingerprint = JSON.stringify(normalized);
+    const fingerprint = operationFingerprint(normalized);
 
     if (this.redis) {
       const raw = await this.redis.eval(
@@ -380,6 +380,11 @@ function cloneBinding(binding: DesktopSessionBinding): DesktopSessionBinding {
       repository: { ...binding.workspace.repository },
     },
   };
+}
+
+function operationFingerprint<T extends { readonly now: number }>(value: T): string {
+  const { now: _serverTime, ...stable } = value;
+  return JSON.stringify(stable);
 }
 
 function unwrapResult(result: StoreResult): DesktopSessionBinding {

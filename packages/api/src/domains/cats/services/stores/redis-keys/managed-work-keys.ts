@@ -19,7 +19,17 @@ export function deriveWorkflowSopAdmissionIds(
   return { workId, attemptId: `wat_${attemptDigest.slice(0, 32)}` };
 }
 
+export function deriveManagedWorkAttemptId(workId: string, attemptNumber: number): string {
+  const attemptDigest = digest([workId, 'attempt', String(attemptNumber)]);
+  return `wat_${attemptDigest.slice(0, 32)}`;
+}
+
 export const ManagedWorkKeys = {
   admission: (workId: string) => `managed-work:admission:${workId}`,
   attempt: (attemptId: string) => `managed-work:attempt:${attemptId}`,
+  consumerState: (consumerId: string, workId: string) => `managed-work:consumer:${consumerId}:state:${workId}`,
+  consumerEvidence: (consumerId: string, workId: string) =>
+    `managed-work:consumer:${consumerId}:evidence:${workId}`,
+  consumerReceipt: (consumerId: string, workId: string, operation: string, idempotencyKey: string) =>
+    `managed-work:consumer:${consumerId}:receipt:${workId}:${operation}:${idempotencyKey}`,
 } as const;

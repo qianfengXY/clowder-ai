@@ -706,9 +706,17 @@ export type {
   LimbNodeRecord,
   LimbNodeStatus,
 } from './limb.js';
-// F275 Phase B: internal managed-work identity kernel
+// F275: internal managed-work identity and named-consumer kernel
+export { MANAGED_WORK_CONSUMER_IDS } from './managed-work.js';
 export type {
+  ManagedWorkConsumerId,
+  ManagedWorkConsumerSnapshot,
+  ManagedWorkConsumerState,
   ManagedWorkBinding,
+  ManagedWorkEvidence,
+  ManagedWorkEvidenceInput,
+  ManagedWorkExecutorActor,
+  ManagedWorkLifecycle,
   WorkAdmission,
   WorkAdmissionProducerKind,
   WorkAttempt,
