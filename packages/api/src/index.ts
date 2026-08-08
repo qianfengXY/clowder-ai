@@ -365,6 +365,7 @@ import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
+import { primaryMentionHandleForCatId } from './utils/cat-mention-handle.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
@@ -4308,25 +4309,35 @@ async function main(): Promise<void> {
     | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
     | undefined;
   if (redis) {
-    const [serviceMod, coordinatorMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
+    const [serviceMod, coordinatorMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
       import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
       import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
+      import('./domains/desktop-development-loop/review-round-stage-dispatcher.js'),
       import('./domains/desktop-development-loop/desktop-session-store.js'),
       import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
       import('./domains/review-coordination/RedisReviewRoundStore.js'),
     ]);
     const managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
     const reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
+    const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher({
+      sendMessage: async ({ headers, payload }) => {
+        const response = await app.inject({ method: 'POST', url: '/api/messages', headers, payload });
+        return { statusCode: response.statusCode, body: response.body };
+      },
+      resolveMentionHandle: primaryMentionHandleForCatId,
+    });
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,
       projectReviewHubService,
       new sessionMod.DesktopSessionStore(redis),
       managedWorkConsumerPort,
       reviewRoundStore,
+      reviewRoundDispatcher,
     );
     reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
       reviewRoundStore,
       managedWorkConsumerPort,
+      reviewRoundDispatcher,
     );
   }
   const intentCardStore = new IntentCardStore();

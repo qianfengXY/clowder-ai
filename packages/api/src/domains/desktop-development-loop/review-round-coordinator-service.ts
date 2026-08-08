@@ -5,6 +5,7 @@ import type {
   IReviewRoundStore,
   ReviewDraftFindingInput,
 } from '../review-coordination/ReviewRoundStore.js';
+import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -41,6 +42,7 @@ export class ReviewRoundCoordinatorService {
   constructor(
     private readonly reviewRounds: IReviewRoundStore,
     private readonly managedWork: IManagedWorkConsumerPort,
+    private readonly reviewDispatcher: IReviewRoundStageDispatcher,
   ) {}
 
   async readSafe(input: ReviewPrincipalInput): Promise<ReviewRoundSafeView> {
@@ -83,7 +85,7 @@ export class ReviewRoundCoordinatorService {
 
   async finishIndependent(input: FinishCoordinatedReviewStageInput) {
     await this.requireReviewerInHub(input);
-    return this.reviewRounds.finishIndependent({
+    const round = await this.reviewRounds.finishIndependent({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
       reviewerCatId: input.reviewerCatId,
@@ -91,11 +93,24 @@ export class ReviewRoundCoordinatorService {
       idempotencyKey: input.idempotencyKey,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
+    if (round.phase === 'cross_review') {
+      await this.reviewDispatcher.dispatch({
+        stage: 'cross_review',
+        ownerUserId: round.ownerUserId,
+        projectId: round.projectId,
+        reviewHubThreadId: buildProjectReviewHubId(round.projectId),
+        roundId: round.roundId,
+        exactSha: round.exactSha,
+        reviewerCatIds: round.reviewerCatIds,
+        recorderCatId: round.recorderCatId,
+      });
+    }
+    return round;
   }
 
   async finishCrossReview(input: FinishCoordinatedReviewStageInput) {
     await this.requireReviewerInHub(input);
-    return this.reviewRounds.finishCrossReview({
+    const round = await this.reviewRounds.finishCrossReview({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
       reviewerCatId: input.reviewerCatId,
@@ -103,6 +118,19 @@ export class ReviewRoundCoordinatorService {
       idempotencyKey: input.idempotencyKey,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
+    if (round.phase === 'consensus_ready') {
+      await this.reviewDispatcher.dispatch({
+        stage: 'consensus',
+        ownerUserId: round.ownerUserId,
+        projectId: round.projectId,
+        reviewHubThreadId: buildProjectReviewHubId(round.projectId),
+        roundId: round.roundId,
+        exactSha: round.exactSha,
+        reviewerCatIds: round.reviewerCatIds,
+        recorderCatId: round.recorderCatId,
+      });
+    }
+    return round;
   }
 
   async publishConsensus(input: PublishCoordinatedReviewConsensusInput): Promise<ReviewRoundSafeView> {

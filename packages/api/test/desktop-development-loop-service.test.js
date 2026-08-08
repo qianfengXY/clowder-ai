@@ -19,6 +19,7 @@ describe(
     let service;
     let reviewCoordinator;
     let reviewHubEnsureCount;
+    let reviewDispatches;
     let connected = false;
 
     before(async () => {
@@ -64,8 +65,20 @@ describe(
           };
         },
       };
-      service = new DesktopDevelopmentLoopService(externalProjects, reviewHubs, sessions, managedWork, reviewRounds);
-      reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork);
+      const reviewDispatcher = {
+        dispatch: async (input) => {
+          reviewDispatches.push(input);
+        },
+      };
+      service = new DesktopDevelopmentLoopService(
+        externalProjects,
+        reviewHubs,
+        sessions,
+        managedWork,
+        reviewRounds,
+        reviewDispatcher,
+      );
+      reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork, reviewDispatcher);
     });
 
     after(async () => {
@@ -83,6 +96,7 @@ describe(
     beforeEach(async (t) => {
       if (!connected) return t.skip('Redis not connected');
       reviewHubEnsureCount = 0;
+      reviewDispatches = [];
       await cleanupPrefixedRedisKeys(redis, [
         'external-project:*',
         'workflow:sop:*',
@@ -215,6 +229,18 @@ describe(
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
       assert.equal(reviewHubEnsureCount, 1);
+      assert.deepEqual(reviewDispatches, [
+        {
+          stage: 'independent',
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          reviewHubThreadId: `project-review-hub:${project.id}`,
+          roundId: reported.reviewRoundId,
+          exactSha: SHA_A,
+          reviewerCatIds: ['cat-codex', 'cat-kimi'],
+          recorderCatId: 'cat-codex',
+        },
+      ]);
 
       const round = await reviewRounds.readCurrentSafe({
         ownerUserId: 'owner-1',
@@ -240,6 +266,7 @@ describe(
       });
       assert.equal(replayed.reviewRoundId, reported.reviewRoundId);
       assert.equal(replayed.managedWorkVersion, reported.managedWorkVersion);
+      assert.equal(reviewDispatches.length, 2, 'the dispatcher receives a retry and deduplicates at message ingress');
     });
 
     test('returns only barrier-safe consensus findings in the Resume Packet', async () => {
@@ -455,6 +482,8 @@ describe(
         idempotencyKey: 'finish-independent-kimi-flow',
         now: 5_000,
       });
+      assert.equal(reviewDispatches.at(-1).stage, 'cross_review');
+      assert.equal(reviewDispatches.at(-1).roundId, roundId);
       assert.equal(
         (
           await reviewCoordinator.readBarrierDrafts({
@@ -484,6 +513,9 @@ describe(
         idempotencyKey: 'finish-cross-kimi-flow',
         now: 6_000,
       });
+      assert.equal(reviewDispatches.at(-1).stage, 'consensus');
+      assert.deepEqual(reviewDispatches.at(-1).reviewerCatIds, ['cat-codex', 'cat-kimi']);
+      assert.equal(reviewDispatches.at(-1).recorderCatId, 'cat-codex');
       const completed = await reviewCoordinator.publishConsensus({
         ownerUserId: 'owner-1',
         threadId: hubThreadId,

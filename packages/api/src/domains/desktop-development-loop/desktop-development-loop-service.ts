@@ -17,6 +17,7 @@ import type { ExternalProjectStore } from '../projects/external-project-store.js
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -118,6 +119,7 @@ export class DesktopDevelopmentLoopService {
     private readonly sessions: DesktopSessionStore,
     private readonly managedWork: IManagedWorkConsumerPort,
     private readonly reviewRounds: IReviewRoundStore,
+    private readonly reviewDispatcher: IReviewRoundStageDispatcher,
   ) {}
 
   async readProject(input: {
@@ -221,7 +223,7 @@ export class DesktopDevelopmentLoopService {
     });
     const recorderCatId = input.recorderCatId ?? project.desktopDevelopment.defaultReviewers[0];
     if (!recorderCatId) throw new Error('Review recorder is unavailable');
-    await this.reviewRounds.createRound({
+    const round = await this.reviewRounds.createRound({
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
       workId: input.workId,
@@ -233,7 +235,17 @@ export class DesktopDevelopmentLoopService {
       idempotencyKey: `${input.idempotencyKey}:round`,
       now,
     });
-    await this.reviewHubs.ensureForProject(input.projectId, input.ownerUserId);
+    const reviewHub = await this.reviewHubs.ensureForProject(input.projectId, input.ownerUserId);
+    await this.reviewDispatcher.dispatch({
+      stage: 'independent',
+      ownerUserId: input.ownerUserId,
+      projectId: input.projectId,
+      reviewHubThreadId: reviewHub.threadId,
+      roundId: round.roundId,
+      exactSha: round.exactSha,
+      reviewerCatIds: round.reviewerCatIds,
+      recorderCatId: round.recorderCatId,
+    });
 
     return this.readWork(
       {
