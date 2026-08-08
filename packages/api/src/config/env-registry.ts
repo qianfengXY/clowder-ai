@@ -305,6 +305,14 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN',
+    defaultValue: '(空)',
+    description: 'F289 ChatGPT Desktop 开发闭环专用 bearer token；服务端绑定 owner，未配置时能力失败关闭',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_DESKTOP_MODE',
     defaultValue: 'fable-phase0',
     description:

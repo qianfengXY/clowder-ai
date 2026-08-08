@@ -4300,6 +4300,24 @@ async function main(): Promise<void> {
   const externalProjectStore = new ExternalProjectStore(redis);
   const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
   const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore);
+  let desktopDevelopmentLoopService:
+    | import('./domains/desktop-development-loop/desktop-development-loop-service.js').DesktopDevelopmentLoopService
+    | undefined;
+  if (redis) {
+    const [serviceMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
+      import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
+      import('./domains/desktop-development-loop/desktop-session-store.js'),
+      import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
+      import('./domains/review-coordination/RedisReviewRoundStore.js'),
+    ]);
+    desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
+      externalProjectStore,
+      projectReviewHubService,
+      new sessionMod.DesktopSessionStore(redis),
+      new managedWorkMod.RedisManagedWorkConsumerPort(redis),
+      new reviewRoundMod.RedisReviewRoundStore(redis),
+    );
+  }
   const intentCardStore = new IntentCardStore();
   const needAuditFrameStore = new NeedAuditFrameStore();
   const { ResolutionStore } = await import('./domains/projects/resolution-store.js');
@@ -4309,7 +4327,12 @@ async function main(): Promise<void> {
   const sliceStore = new SliceStore();
   const refluxPatternStore = new RefluxPatternStore();
   await app.register(externalProjectRoutes, { externalProjectStore, needAuditFrameStore, backlogStore });
-  await app.register(desktopDevelopmentLoopRoutes, { projectReviewHubService });
+  await app.register(desktopDevelopmentLoopRoutes, {
+    projectReviewHubService,
+    ...(desktopDevelopmentLoopService ? { desktopDevelopmentLoopService } : {}),
+    desktopDevelopmentToken: process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN,
+    desktopDevelopmentOwnerUserId: privateUserId,
+  });
   await app.register(intentCardRoutes, { externalProjectStore, intentCardStore });
   await app.register(resolutionRoutes, { externalProjectStore, resolutionStore });
   await app.register(sliceRoutes, { externalProjectStore, sliceStore });

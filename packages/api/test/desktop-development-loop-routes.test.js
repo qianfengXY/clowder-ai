@@ -68,3 +68,219 @@ describe('F289 desktop development loop routes', () => {
     assert.equal(otherUser.statusCode, 404);
   });
 });
+
+describe('F289 ChatGPT Desktop service-principal routes', () => {
+  const packet = {
+    protocolVersion: 1,
+    projectId: 'project-1',
+    repository: { host: 'github.com', owner: 'owner', name: 'repo', fullName: 'owner/repo' },
+    defaultBranch: 'main',
+    workId: 'work-1',
+    attemptId: 'attempt-1',
+    workLifecycle: 'active',
+    managedWorkVersion: 2,
+    bindingEpoch: 1,
+    sessionStatus: 'active',
+    sessionVersion: 1,
+    branch: 'feat/example',
+    currentSha: 'a'.repeat(40),
+    lastCommittedSha: 'a'.repeat(40),
+    worktreePresent: true,
+    reviewRoundId: null,
+    reviewPhase: null,
+    reviewRoundVersion: null,
+    reviewCurrentForWork: false,
+    openFindings: [],
+    nextLegalActions: ['implement_and_report_committed_sha'],
+  };
+
+  async function createApp(options = {}) {
+    const { desktopDevelopmentLoopRoutes } = await import('../dist/routes/desktop-development-loop.js');
+    const calls = [];
+    const service = {
+      readProject: async (input) => {
+        calls.push(['readProject', input]);
+        return { project: { projectId: input.projectId, localCheckoutBound: true, binding: null }, reviewHubId: 'hub' };
+      },
+      readWork: async (input) => {
+        calls.push(['readWork', input]);
+        return packet;
+      },
+      connect: async (input) => {
+        calls.push(['connect', input]);
+        return packet;
+      },
+      heartbeat: async (input) => {
+        calls.push(['heartbeat', input]);
+        return packet;
+      },
+      reportImplementation: async (input) => {
+        calls.push(['reportImplementation', input]);
+        return { ...packet, reviewRoundId: 'round-1', reviewPhase: 'independent' };
+      },
+    };
+    const app = Fastify();
+    await app.register(desktopDevelopmentLoopRoutes, {
+      projectReviewHubService: { ensureForProject: async () => ({}) },
+      desktopDevelopmentLoopService: service,
+      desktopDevelopmentToken: 'desktop-secret',
+      desktopDevelopmentOwnerUserId: 'server-owner',
+      ...options,
+    });
+    return { app, calls };
+  }
+
+  test('fails closed when provider authentication is unavailable or invalid', async () => {
+    const unavailable = await createApp({ desktopDevelopmentToken: '' });
+    let response = await unavailable.app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/project-1?protocolVersion=1',
+      headers: { authorization: 'Bearer desktop-secret' },
+    });
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(unavailable.calls, []);
+
+    const invalid = await createApp();
+    response = await invalid.app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/project-1?protocolVersion=1',
+      headers: { authorization: 'Bearer wrong' },
+    });
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(invalid.calls, []);
+  });
+
+  test('derives owner identity server-side and rejects caller-supplied identity fields', async () => {
+    const { app, calls } = await createApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/project-1?protocolVersion=1',
+      headers: {
+        authorization: 'Bearer desktop-secret',
+        'x-cat-cafe-user': 'spoofed-owner',
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(calls, [
+      ['readProject', { protocolVersion: 1, ownerUserId: 'server-owner', projectId: 'project-1' }],
+    ]);
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/connect',
+      headers: { authorization: 'Bearer desktop-secret' },
+      payload: {
+        protocolVersion: 1,
+        ownerUserId: 'spoofed-owner',
+        projectId: 'project-1',
+        workId: 'work-1',
+        attemptId: 'attempt-1',
+        runtimeSessionId: 'runtime-1',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-1',
+        leaseDurationMs: 60_000,
+        workspace: {
+          repository: { host: 'github.com', owner: 'owner', name: 'repo', fullName: 'owner/repo' },
+          branch: 'feat/example',
+          baseSha: '0'.repeat(40),
+          currentSha: 'a'.repeat(40),
+          lastCommittedSha: 'a'.repeat(40),
+          worktreePresent: true,
+          worktreePath: '/private/worktree',
+          validatedAt: 1_000,
+        },
+      },
+    });
+    assert.equal(rejected.statusCode, 400);
+    assert.equal(calls.length, 1);
+  });
+
+  test('exposes only the bounded project, work, connect, heartbeat, and implementation surface', async () => {
+    const { app, calls } = await createApp();
+    const headers = { authorization: 'Bearer desktop-secret' };
+    const common = {
+      protocolVersion: 1,
+      projectId: 'project-1',
+      workId: 'work-1',
+      attemptId: 'attempt-1',
+    };
+    const workspace = {
+      repository: { host: 'github.com', owner: 'owner', name: 'repo', fullName: 'owner/repo' },
+      branch: 'feat/example',
+      baseSha: '0'.repeat(40),
+      currentSha: 'a'.repeat(40),
+      lastCommittedSha: 'a'.repeat(40),
+      worktreePresent: true,
+      worktreePath: '/private/worktree',
+      validatedAt: 1_000,
+    };
+
+    let response = await app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/works/work-1?protocolVersion=1&projectId=project-1&attemptId=attempt-1',
+      headers,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.doesNotMatch(response.body, /private\/worktree/);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/connect',
+      headers,
+      payload: {
+        ...common,
+        runtimeSessionId: 'runtime-1',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-1',
+        leaseDurationMs: 60_000,
+        workspace,
+      },
+    });
+    assert.equal(response.statusCode, 200);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/heartbeat',
+      headers,
+      payload: {
+        ...common,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: 1,
+        expectedSessionVersion: 1,
+        idempotencyKey: 'heartbeat-1',
+        leaseDurationMs: 60_000,
+      },
+    });
+    assert.equal(response.statusCode, 200);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/implementation',
+      headers,
+      payload: {
+        ...common,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: 1,
+        expectedManagedWorkVersion: 2,
+        exactSha: 'a'.repeat(40),
+        idempotencyKey: 'implementation-1',
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().reviewRoundId, 'round-1');
+    assert.deepEqual(
+      calls.map(([name]) => name),
+      ['readWork', 'connect', 'heartbeat', 'reportImplementation'],
+    );
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/merge',
+      headers,
+      payload: common,
+    });
+    assert.equal(response.statusCode, 404);
+  });
+});
