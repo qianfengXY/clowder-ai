@@ -18,8 +18,12 @@ export const DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS = derivedProfileSet(
   CANONICAL_TOOL_REGISTRY,
   'desktop:cloud-pro-phase0',
 );
+export const DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS = derivedProfileSet(
+  CANONICAL_TOOL_REGISTRY,
+  'desktop:development-loop',
+);
 
-const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0']);
+const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0', 'development-loop']);
 
 export interface ToolsetEnv {
   readonly?: boolean;
@@ -65,6 +69,9 @@ export function applyReadonlyFilter<T extends { name: string }>(
     if (env.desktopMode === 'cloud-pro-phase0') {
       // F238 Phase B1a + F231: cloud-pro-phase0 复用 fable-phase0 同 11 工具白名单
       return tools.filter((t) => DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.has(t.name));
+    }
+    if (env.desktopMode === 'development-loop') {
+      return tools.filter((t) => DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS.has(t.name));
     }
   }
   if (!env.readonly) return tools;

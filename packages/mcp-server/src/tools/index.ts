@@ -71,6 +71,19 @@ export {
   handleCommunityRouteAcceptance,
 } from './community-route-acceptance-tool.js';
 export {
+  desktopDevelopmentLoopTools,
+  developmentImplementationReportInputSchema,
+  developmentProjectReadInputSchema,
+  developmentWorkConnectInputSchema,
+  developmentWorkHeartbeatInputSchema,
+  developmentWorkReadInputSchema,
+  handleDevelopmentImplementationReport,
+  handleDevelopmentProjectRead,
+  handleDevelopmentWorkConnect,
+  handleDevelopmentWorkHeartbeat,
+  handleDevelopmentWorkRead,
+} from './desktop-development-loop-tools.js';
+export {
   distillationTools,
   handleMarkGeneralizable,
   handleNominateForGlobal,

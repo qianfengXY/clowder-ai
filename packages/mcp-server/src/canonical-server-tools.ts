@@ -5,6 +5,7 @@ import {
   callbackMemoryTools,
   callbackTools,
   communityRouteAcceptanceTools,
+  desktopDevelopmentLoopTools,
   distillationTools,
   evalLifecycleTools,
   eventMemoryTools,
@@ -34,6 +35,7 @@ import {
 
 export const CANONICAL_TOOL_SOURCES = {
   collab: [
+    ...desktopDevelopmentLoopTools,
     ...callbackTools,
     ...autoDreamTools,
     ...communityRouteAcceptanceTools,

@@ -12,6 +12,7 @@ export type CanonicalToolsetEnv = {
 const DESKTOP_PROFILES = {
   'fable-phase0': 'desktop:fable-phase0',
   'cloud-pro-phase0': 'desktop:cloud-pro-phase0',
+  'development-loop': 'desktop:development-loop',
 } as const;
 
 function assertGovernedDefinition(definition: McpToolDefinition): void {

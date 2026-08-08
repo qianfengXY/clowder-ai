@@ -315,8 +315,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_DESKTOP_MODE',
     defaultValue: 'fable-phase0',
-    description:
-      'F247 B1a Cloud Cat — remote-spike.ts 工具白名单 mode 选择（fable-phase0 / cloud-pro-phase0；收窄到 10 项 collab+memory 工具）',
+    description: 'Desktop MCP 严格工具白名单 mode（fable-phase0 / cloud-pro-phase0 / development-loop）',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,

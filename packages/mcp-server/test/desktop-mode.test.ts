@@ -7,6 +7,7 @@ import {
   buildLimbTools,
   buildMemoryTools,
   DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS,
+  DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS,
   DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS,
   parseToolsetEnv,
   READONLY_ALLOWED_TOOLS,
@@ -49,6 +50,11 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_unregister_tracking',
   'cat_cafe_shell_exec',
+  'cat_cafe_development_project_read',
+  'cat_cafe_development_work_read',
+  'cat_cafe_development_work_connect',
+  'cat_cafe_development_work_heartbeat',
+  'cat_cafe_development_implementation_report',
   // memory
   'cat_cafe_search_evidence',
   'cat_cafe_graph_resolve',
@@ -174,6 +180,19 @@ describe('applyReadonlyFilter — env modes', () => {
   it('unknown desktopMode throws even with readonly/agent-key set', () => {
     const env: ToolsetEnv = { desktopMode: 'typo', readonly: true, hasAgentKey: true };
     assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
+  });
+
+  it('desktopMode=development-loop exposes only the five F289 lifecycle tools', () => {
+    const out = applyReadonlyFilter(ALL_FAKE_TOOLS, { desktopMode: 'development-loop' });
+    assert.deepEqual(out.map((tool) => tool.name).sort(), [...DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS].sort());
+    assert.equal(
+      out.some((tool) => tool.name === 'cat_cafe_shell_exec'),
+      false,
+    );
+    assert.equal(
+      out.some((tool) => tool.name === 'cat_cafe_read_file_slice'),
+      false,
+    );
   });
 });
 
