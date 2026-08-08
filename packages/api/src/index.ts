@@ -322,6 +322,7 @@ import {
   registerCallbackDocsRoutes,
   registerProfileUpdateDecisionRoutes,
   resolutionRoutes,
+  reviewRoundCallbackRoutes,
   rulesRoutes,
   servicesRoutes,
   sessionChainRoutes,
@@ -4303,19 +4304,29 @@ async function main(): Promise<void> {
   let desktopDevelopmentLoopService:
     | import('./domains/desktop-development-loop/desktop-development-loop-service.js').DesktopDevelopmentLoopService
     | undefined;
+  let reviewRoundCoordinatorService:
+    | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
+    | undefined;
   if (redis) {
-    const [serviceMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
+    const [serviceMod, coordinatorMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
       import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
+      import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
       import('./domains/desktop-development-loop/desktop-session-store.js'),
       import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
       import('./domains/review-coordination/RedisReviewRoundStore.js'),
     ]);
+    const managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
+    const reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,
       projectReviewHubService,
       new sessionMod.DesktopSessionStore(redis),
-      new managedWorkMod.RedisManagedWorkConsumerPort(redis),
-      new reviewRoundMod.RedisReviewRoundStore(redis),
+      managedWorkConsumerPort,
+      reviewRoundStore,
+    );
+    reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
+      reviewRoundStore,
+      managedWorkConsumerPort,
     );
   }
   const intentCardStore = new IntentCardStore();
@@ -4332,6 +4343,10 @@ async function main(): Promise<void> {
     ...(desktopDevelopmentLoopService ? { desktopDevelopmentLoopService } : {}),
     desktopDevelopmentToken: process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN,
     desktopDevelopmentOwnerUserId: privateUserId,
+  });
+  await app.register(reviewRoundCallbackRoutes, {
+    registry,
+    ...(reviewRoundCoordinatorService ? { coordinator: reviewRoundCoordinatorService } : {}),
   });
   await app.register(intentCardRoutes, { externalProjectStore, intentCardStore });
   await app.register(resolutionRoutes, { externalProjectStore, resolutionStore });

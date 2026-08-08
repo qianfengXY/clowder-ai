@@ -17,6 +17,7 @@ describe(
     let reviewRounds;
     let sessions;
     let service;
+    let reviewCoordinator;
     let reviewHubEnsureCount;
     let connected = false;
 
@@ -34,6 +35,9 @@ describe(
       const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
       const { DesktopDevelopmentLoopService } = await import(
         '../dist/domains/desktop-development-loop/desktop-development-loop-service.js'
+      );
+      const { ReviewRoundCoordinatorService } = await import(
+        '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
       );
 
       redis = createRedisClient({ url: REDIS_URL });
@@ -61,6 +65,7 @@ describe(
         },
       };
       service = new DesktopDevelopmentLoopService(externalProjects, reviewHubs, sessions, managedWork, reviewRounds);
+      reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork);
     });
 
     after(async () => {
@@ -357,6 +362,154 @@ describe(
       );
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
       assert.deepEqual(packet.nextLegalActions, ['fix_open_findings']);
+    });
+
+    test('derives reviewer identity from the Review Hub and writes one canonical review-completed evidence row', async () => {
+      const { project, bundle } = await arrange();
+      let packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-reviewer-flow',
+        leaseDurationMs: 60_000,
+        workspace: workspace(),
+        now: 2_000,
+      });
+      packet = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'report-reviewer-flow',
+        now: 3_000,
+      });
+      const roundId = packet.reviewRoundId;
+      const hubThreadId = `project-review-hub:${project.id}`;
+
+      await assert.rejects(
+        () =>
+          reviewCoordinator.readSafe({
+            ownerUserId: 'owner-1',
+            threadId: 'ordinary-thread',
+            reviewerCatId: 'cat-codex',
+            roundId,
+          }),
+        /project Review Hub/i,
+      );
+
+      await reviewCoordinator.submitDraft({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedDraftVersion: 0,
+        idempotencyKey: 'draft-codex-flow',
+        verdict: 'approve',
+        findings: [],
+        now: 4_000,
+      });
+      await reviewCoordinator.submitDraft({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-kimi',
+        roundId,
+        expectedDraftVersion: 0,
+        idempotencyKey: 'draft-kimi-flow',
+        verdict: 'approve',
+        findings: [],
+        now: 4_000,
+      });
+      let round = (
+        await reviewCoordinator.readSafe({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId: 'cat-codex',
+          roundId,
+        })
+      ).round;
+      round = await reviewCoordinator.finishIndependent({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        idempotencyKey: 'finish-independent-codex-flow',
+        now: 5_000,
+      });
+      round = await reviewCoordinator.finishIndependent({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-kimi',
+        roundId,
+        expectedRoundVersion: round.version,
+        idempotencyKey: 'finish-independent-kimi-flow',
+        now: 5_000,
+      });
+      assert.equal(
+        (
+          await reviewCoordinator.readBarrierDrafts({
+            ownerUserId: 'owner-1',
+            threadId: hubThreadId,
+            reviewerCatId: 'cat-codex',
+            roundId,
+          })
+        ).length,
+        2,
+      );
+      round = await reviewCoordinator.finishCrossReview({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        idempotencyKey: 'finish-cross-codex-flow',
+        now: 6_000,
+      });
+      round = await reviewCoordinator.finishCrossReview({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-kimi',
+        roundId,
+        expectedRoundVersion: round.version,
+        idempotencyKey: 'finish-cross-kimi-flow',
+        now: 6_000,
+      });
+      const completed = await reviewCoordinator.publishConsensus({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'publish-consensus-flow',
+        verdict: 'approved',
+        checksPassed: true,
+        findings: [],
+        resolvedFindingIds: [],
+        now: 7_000,
+      });
+      assert.equal(completed.consensus.openFindingCount, 0);
+
+      const managed = await managedWork.read({
+        consumerId: 'f289_desktop_development_loop',
+        ownerUserId: 'owner-1',
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+      });
+      const reviewEvidence = managed.evidence.filter((evidence) => evidence.kind === 'review_completed');
+      assert.equal(reviewEvidence.length, 1);
+      assert.equal(reviewEvidence[0].reviewRoundId, roundId);
+      assert.equal(reviewEvidence[0].checksPassed, true);
     });
   },
 );
