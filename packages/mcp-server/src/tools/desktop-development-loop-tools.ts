@@ -78,6 +78,20 @@ export const developmentImplementationReportInputSchema = {
   idempotencyKey: idSchema,
 };
 
+export const developmentMergeConfirmationInputSchema = {
+  ...developmentWorkReadInputSchema,
+  runtimeSessionId: idSchema,
+  bindingEpoch: z.number().int().positive(),
+  expectedManagedWorkVersion: z.number().int().positive(),
+  exactSha: fullShaSchema,
+  idempotencyKey: idSchema,
+};
+
+export const developmentMergeReportInputSchema = {
+  ...developmentMergeConfirmationInputSchema,
+  mergeCommitSha: fullShaSchema.describe('Full merge commit SHA produced by ChatGPT Desktop native Git tools.'),
+};
+
 type ProjectReadInput = {
   protocolVersion: number;
   projectId: string;
@@ -126,6 +140,9 @@ type ImplementationReportInput = WorkReadInput & {
   idempotencyKey: string;
 };
 
+type MergeConfirmationInput = ImplementationReportInput;
+type MergeReportInput = MergeConfirmationInput & { mergeCommitSha: string };
+
 export async function handleDevelopmentProjectRead(input: ProjectReadInput): Promise<ToolResult> {
   const query = new URLSearchParams({ protocolVersion: String(input.protocolVersion) });
   return requestDesktopLoop(
@@ -152,6 +169,14 @@ export async function handleDevelopmentWorkHeartbeat(input: WorkHeartbeatInput):
 
 export async function handleDevelopmentImplementationReport(input: ImplementationReportInput): Promise<ToolResult> {
   return requestDesktopLoop('/api/desktop-development-loop/v1/implementation', input);
+}
+
+export async function handleDevelopmentMergeConfirmationRecord(input: MergeConfirmationInput): Promise<ToolResult> {
+  return requestDesktopLoop('/api/desktop-development-loop/v1/merge-confirmation', input);
+}
+
+export async function handleDevelopmentMergeReport(input: MergeReportInput): Promise<ToolResult> {
+  return requestDesktopLoop('/api/desktop-development-loop/v1/merge-report', input);
 }
 
 async function requestDesktopLoop(path: string, body?: object): Promise<ToolResult> {
@@ -249,6 +274,36 @@ export const desktopDevelopmentLoopTools = [
     governance: {
       implementationExport: 'handleDevelopmentImplementationReport',
       action: 'report-implementation',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles,
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_development_merge_confirmation_record',
+    description:
+      'Record the operators explicit merge confirmation from the current ChatGPT Desktop chat after the exact SHA has a green, zero-finding consensus. ' +
+      'This is lifecycle evidence only: it does not execute Git, merge, push, deploy, or grant repository authority; a superseded chat epoch cannot reuse it.',
+    inputSchema: developmentMergeConfirmationInputSchema,
+    handler: handleDevelopmentMergeConfirmationRecord,
+    governance: {
+      implementationExport: 'handleDevelopmentMergeConfirmationRecord',
+      action: 'record-merge-confirmation',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles,
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_development_merge_report',
+    description:
+      'Report the merge commit SHA after ChatGPT Desktop has completed the merge with its native Git tools. ' +
+      'The server validates current-chat confirmation during manual pilots and records only the receipt; it never executes Git, merge, push, or deploy.',
+    inputSchema: developmentMergeReportInputSchema,
+    handler: handleDevelopmentMergeReport,
+    governance: {
+      implementationExport: 'handleDevelopmentMergeReport',
+      action: 'report-merge',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
       targetExposure: 'profile-gated',

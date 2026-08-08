@@ -106,6 +106,13 @@ export interface DesktopDevelopmentResumePacket {
   readonly currentSha: string;
   readonly lastCommittedSha: string;
   readonly worktreePresent: boolean;
+  readonly mergeMode: DesktopDevelopmentMergeMode;
+  readonly successfulManualPilotCount: 0 | 1 | 2;
+  readonly autoMergeAvailable: boolean;
+  /** True only for a confirmation recorded by the current binding epoch. */
+  readonly mergeConfirmed: boolean;
+  readonly merged: boolean;
+  readonly acceptancePending: boolean;
   readonly reviewRoundId: string | null;
   readonly reviewPhase: 'independent' | 'cross_review' | 'consensus_ready' | 'complete' | null;
   readonly reviewRoundVersion: number | null;

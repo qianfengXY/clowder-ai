@@ -86,6 +86,12 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     currentSha: 'a'.repeat(40),
     lastCommittedSha: 'a'.repeat(40),
     worktreePresent: true,
+    mergeMode: 'manual_confirm_in_chatgpt',
+    successfulManualPilotCount: 0,
+    autoMergeAvailable: false,
+    mergeConfirmed: false,
+    merged: false,
+    acceptancePending: false,
     reviewRoundId: null,
     reviewPhase: null,
     reviewRoundVersion: null,
@@ -117,6 +123,18 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       reportImplementation: async (input) => {
         calls.push(['reportImplementation', input]);
         return { ...packet, reviewRoundId: 'round-1', reviewPhase: 'independent' };
+      },
+      confirmMerge: async (input) => {
+        calls.push(['confirmMerge', input]);
+        return { ...packet, mergeConfirmed: true, nextLegalActions: ['merge_with_native_git'] };
+      },
+      reportMerged: async (input) => {
+        calls.push(['reportMerged', input]);
+        return { ...packet, merged: true, acceptancePending: true, nextLegalActions: ['wait_for_final_acceptance'] };
+      },
+      recordAcceptance: async (input) => {
+        calls.push(['recordAcceptance', input]);
+        return { ...packet, workLifecycle: input.accepted ? 'accepted' : 'rejected', nextLegalActions: [] };
       },
     };
     const app = Fastify();
@@ -282,5 +300,84 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       payload: common,
     });
     assert.equal(response.statusCode, 404);
+  });
+
+  test('records current-chat confirmation and merge receipt without exposing a merge primitive', async () => {
+    const { app, calls } = await createApp();
+    const headers = { authorization: 'Bearer desktop-secret' };
+    const common = {
+      protocolVersion: 1,
+      projectId: 'project-1',
+      workId: 'work-1',
+      attemptId: 'attempt-1',
+      runtimeSessionId: 'runtime-1',
+      bindingEpoch: 2,
+      expectedManagedWorkVersion: 7,
+      exactSha: 'a'.repeat(40),
+      idempotencyKey: 'merge-flow-1',
+    };
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/merge-confirmation',
+      headers,
+      payload: common,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().mergeConfirmed, true);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/desktop-development-loop/v1/merge-report',
+      headers,
+      payload: { ...common, idempotencyKey: 'merge-flow-2', mergeCommitSha: 'b'.repeat(40) },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().acceptancePending, true);
+    assert.deepEqual(
+      calls.map(([name]) => name),
+      ['confirmMerge', 'reportMerged'],
+    );
+    assert.equal(
+      calls.every(([, input]) => input.ownerUserId === 'server-owner'),
+      true,
+    );
+  });
+
+  test('keeps final acceptance on the authenticated Cat Cafe user surface', async () => {
+    const { app, calls } = await createApp();
+    const payload = {
+      protocolVersion: 1,
+      attemptId: 'attempt-1',
+      expectedManagedWorkVersion: 9,
+      exactSha: 'a'.repeat(40),
+      accepted: true,
+      idempotencyKey: 'acceptance-1',
+    };
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/acceptance',
+      payload,
+    });
+    assert.equal(response.statusCode, 401);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/acceptance',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().workLifecycle, 'accepted');
+    assert.deepEqual(calls, [
+      [
+        'recordAcceptance',
+        {
+          ...payload,
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
+        },
+      ],
+    ]);
   });
 });

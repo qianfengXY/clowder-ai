@@ -511,5 +511,225 @@ describe(
       assert.equal(reviewEvidence[0].reviewRoundId, roundId);
       assert.equal(reviewEvidence[0].checksPassed, true);
     });
+
+    test('requires current-chat merge confirmation, records merge, and counts acceptance once', async () => {
+      const { project, bundle } = await arrange();
+      let packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-merge-flow',
+        leaseDurationMs: 60_000,
+        workspace: workspace(),
+        now: 2_000,
+      });
+      packet = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'report-merge-flow',
+        now: 3_000,
+      });
+      await assert.rejects(
+        () =>
+          service.confirmMerge({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            runtimeSessionId: 'runtime-1',
+            bindingEpoch: packet.bindingEpoch,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            exactSha: SHA_A,
+            idempotencyKey: 'confirm-too-early',
+            now: 3_500,
+          }),
+        /approved.*green review/i,
+      );
+
+      const roundId = packet.reviewRoundId;
+      const hubThreadId = `project-review-hub:${project.id}`;
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        await reviewCoordinator.submitDraft({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedDraftVersion: 0,
+          idempotencyKey: `draft-${reviewerCatId}-merge-flow`,
+          verdict: 'approve',
+          findings: [],
+          now: 4_000,
+        });
+      }
+      let round = (await reviewRounds.readSafe({ ownerUserId: 'owner-1', roundId })).round;
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        round = await reviewCoordinator.finishIndependent({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedRoundVersion: round.version,
+          idempotencyKey: `independent-${reviewerCatId}-merge-flow`,
+          now: 5_000,
+        });
+      }
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        round = await reviewCoordinator.finishCrossReview({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedRoundVersion: round.version,
+          idempotencyKey: `cross-${reviewerCatId}-merge-flow`,
+          now: 6_000,
+        });
+      }
+      await reviewCoordinator.publishConsensus({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'consensus-merge-flow',
+        verdict: 'approved',
+        checksPassed: true,
+        findings: [],
+        resolvedFindingIds: [],
+        now: 7_000,
+      });
+      packet = await service.readWork({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        now: 7_100,
+      });
+      assert.deepEqual(packet.nextLegalActions, ['request_merge_confirmation']);
+
+      packet = await service.confirmMerge({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'confirm-merge-flow',
+        now: 8_000,
+      });
+      assert.equal(packet.mergeConfirmed, true);
+      assert.deepEqual(packet.nextLegalActions, ['merge_with_native_git']);
+
+      packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-2',
+        expectedBindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'rebind-before-merge',
+        leaseDurationMs: 60_000,
+        workspace: workspace(),
+        now: 9_000,
+      });
+      assert.equal(packet.mergeConfirmed, false);
+      await assert.rejects(
+        () =>
+          service.reportMerged({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            runtimeSessionId: 'runtime-2',
+            bindingEpoch: packet.bindingEpoch,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            exactSha: SHA_A,
+            mergeCommitSha: 'b'.repeat(40),
+            idempotencyKey: 'merge-with-stale-confirmation',
+            now: 9_500,
+          }),
+        /current ChatGPT binding/i,
+      );
+
+      packet = await service.confirmMerge({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-2',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'reconfirm-merge-flow',
+        now: 10_000,
+      });
+      packet = await service.reportMerged({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-2',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        mergeCommitSha: 'b'.repeat(40),
+        idempotencyKey: 'report-merged-flow',
+        now: 11_000,
+      });
+      assert.equal(packet.acceptancePending, true);
+      assert.deepEqual(packet.nextLegalActions, ['wait_for_final_acceptance']);
+
+      packet = await service.recordAcceptance({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        accepted: true,
+        idempotencyKey: 'accept-merge-flow',
+        now: 12_000,
+      });
+      assert.equal(packet.workLifecycle, 'accepted');
+      assert.deepEqual(packet.nextLegalActions, []);
+      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
+
+      await service.recordAcceptance({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        accepted: true,
+        idempotencyKey: 'accept-merge-flow',
+        now: 13_000,
+      });
+      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
+    });
   },
 );

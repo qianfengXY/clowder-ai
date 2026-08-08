@@ -3,8 +3,10 @@ import {
   type CatId,
   CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
   DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
+  DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
   type DesktopDevelopmentResumePacket,
   type DesktopSessionBinding,
+  type ManagedWorkConsumerSnapshot,
   type PublicDesktopDevelopmentProject,
   type ReviewRoundSafeView,
   toPublicDesktopDevelopmentProject,
@@ -61,6 +63,37 @@ export interface ReportDesktopImplementationInput {
   readonly exactSha: string;
   readonly idempotencyKey: string;
   readonly recorderCatId?: CatId;
+  readonly now?: number;
+}
+
+export interface ConfirmDesktopMergeInput {
+  readonly protocolVersion: number;
+  readonly ownerUserId: string;
+  readonly projectId: string;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly runtimeSessionId: string;
+  readonly bindingEpoch: number;
+  readonly expectedManagedWorkVersion: number;
+  readonly exactSha: string;
+  readonly idempotencyKey: string;
+  readonly now?: number;
+}
+
+export interface ReportDesktopMergedInput extends ConfirmDesktopMergeInput {
+  readonly mergeCommitSha: string;
+}
+
+export interface RecordDesktopAcceptanceInput {
+  readonly protocolVersion: number;
+  readonly ownerUserId: string;
+  readonly projectId: string;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly expectedManagedWorkVersion: number;
+  readonly exactSha: string;
+  readonly accepted: boolean;
+  readonly idempotencyKey: string;
   readonly now?: number;
 }
 
@@ -215,6 +248,141 @@ export class DesktopDevelopmentLoopService {
     );
   }
 
+  async confirmMerge(input: ConfirmDesktopMergeInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    const now = input.now ?? Date.now();
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const session = await this.assertCurrentSession(input, now, true);
+    const exactSha = input.exactSha.toLowerCase();
+    this.assertSessionImplementationSha(session, exactSha);
+    const identity = this.managedIdentity(input);
+    const [managed, review] = await Promise.all([
+      this.managedWork.read(identity),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    this.assertApprovedGreenReview(exactSha, managed, review);
+    const existing = managed.evidence.find(
+      (evidence) =>
+        evidence.kind === 'merge_confirmed' &&
+        evidence.exactSha === exactSha &&
+        evidence.bindingEpoch === session.bindingEpoch,
+    );
+    if (existing) return this.readWork(input, managed.state.version);
+
+    const appended = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:merge-confirmation`,
+      evidence: {
+        kind: 'merge_confirmed',
+        exactSha,
+        bindingEpoch: session.bindingEpoch,
+        confirmedByUserId: input.ownerUserId,
+      },
+      now,
+    });
+    return this.readWork(input, appended.state.version);
+  }
+
+  async reportMerged(input: ReportDesktopMergedInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    const now = input.now ?? Date.now();
+    const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const session = await this.assertCurrentSession(input, now, true);
+    const exactSha = input.exactSha.toLowerCase();
+    const mergeCommitSha = input.mergeCommitSha.toLowerCase();
+    this.assertSessionImplementationSha(session, exactSha);
+    const identity = this.managedIdentity(input);
+    const [managed, review] = await Promise.all([
+      this.managedWork.read(identity),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    this.assertApprovedGreenReview(exactSha, managed, review);
+
+    const existing = managed.evidence.find((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha);
+    if (existing?.kind === 'merged') {
+      if (existing.mergeCommitSha !== mergeCommitSha) {
+        throw new Error('Merge receipt conflicts with the existing merge commit SHA');
+      }
+      return this.readWork(input, managed.state.version);
+    }
+
+    if (project.desktopDevelopment.mergeMode !== 'automatic') {
+      const currentConfirmation = managed.evidence.some(
+        (evidence) =>
+          evidence.kind === 'merge_confirmed' &&
+          evidence.exactSha === exactSha &&
+          evidence.bindingEpoch === session.bindingEpoch &&
+          evidence.confirmedByUserId === input.ownerUserId,
+      );
+      if (!currentConfirmation) {
+        throw new Error('Manual merge requires confirmation from the current ChatGPT binding');
+      }
+    }
+
+    const appended = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:merged`,
+      evidence: { kind: 'merged', exactSha, mergeCommitSha },
+      now,
+    });
+    return this.readWork(input, appended.state.version);
+  }
+
+  async recordAcceptance(input: RecordDesktopAcceptanceInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    const now = input.now ?? Date.now();
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const exactSha = input.exactSha.toLowerCase();
+    const identity = this.managedIdentity(input);
+    const managed = await this.managedWork.read(identity);
+    const review = await this.reviewRounds.readCurrentSafe({
+      ownerUserId: input.ownerUserId,
+      projectId: input.projectId,
+      workId: input.workId,
+    });
+    this.assertApprovedGreenReview(exactSha, managed, review);
+    if (!managed.evidence.some((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha)) {
+      throw new Error('Final acceptance requires a matching merge receipt');
+    }
+
+    if (managed.state.lifecycle !== 'active') {
+      const expectedLifecycle = input.accepted ? 'accepted' : 'rejected';
+      if (managed.state.lifecycle !== expectedLifecycle || managed.state.terminalExactSha !== exactSha) {
+        throw new Error('Final acceptance conflicts with the terminal managed-work state');
+      }
+      if (input.accepted) await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+      return this.readWork(input, managed.state.version);
+    }
+
+    const acceptance = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:acceptance`,
+      evidence: { kind: 'acceptance_recorded', exactSha, accepted: input.accepted },
+      now,
+    });
+    const terminal = await this.managedWork.transition({
+      ...identity,
+      target: input.accepted ? 'accepted' : 'rejected',
+      exactSha,
+      expectedVersion: acceptance.state.version,
+      idempotencyKey: `${input.idempotencyKey}:terminal`,
+      now,
+    });
+    if (input.accepted) await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+    return this.readWork(input, terminal.version);
+  }
+
   async readWork(input: ReadDesktopWorkInput, knownManagedVersion?: number): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
@@ -241,6 +409,14 @@ export class DesktopDevelopmentLoopService {
         evidenceRefs: finding.evidence,
         status: 'open' as const,
       }));
+    const exactSha = session.workspace.currentSha;
+    const mergeConfirmed = managed.evidence.some(
+      (evidence) =>
+        evidence.kind === 'merge_confirmed' &&
+        evidence.exactSha === exactSha &&
+        evidence.bindingEpoch === session.bindingEpoch,
+    );
+    const merged = managed.evidence.some((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha);
     return {
       protocolVersion: DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
       projectId: project.id,
@@ -257,12 +433,24 @@ export class DesktopDevelopmentLoopService {
       currentSha: session.workspace.currentSha,
       lastCommittedSha: session.workspace.lastCommittedSha,
       worktreePresent: session.workspace.worktreePresent,
+      mergeMode: project.desktopDevelopment.mergeMode,
+      successfulManualPilotCount: project.desktopDevelopment.successfulManualPilotCount,
+      autoMergeAvailable: project.desktopDevelopment.successfulManualPilotCount >= DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
+      mergeConfirmed,
+      merged,
+      acceptancePending: managed.state.lifecycle === 'active' && merged,
       reviewRoundId: review?.round.roundId ?? null,
       reviewPhase: review?.round.phase ?? null,
       reviewRoundVersion: review?.round.version ?? null,
       reviewCurrentForWork: review?.currentForWork ?? false,
       openFindings,
-      nextLegalActions: deriveNextLegalActions({ managedLifecycle: managed.state.lifecycle, session, review }),
+      nextLegalActions: deriveNextLegalActions({
+        managedLifecycle: managed.state.lifecycle,
+        session,
+        review,
+        managed,
+        mergeMode: project.desktopDevelopment.mergeMode,
+      }),
     };
   }
 
@@ -318,6 +506,38 @@ export class DesktopDevelopmentLoopService {
     }
   }
 
+  private assertSessionImplementationSha(session: DesktopSessionBinding, exactSha: string): void {
+    if (session.workspace.currentSha !== exactSha || session.workspace.lastCommittedSha !== exactSha) {
+      throw new Error('Merge SHA must equal the current committed workspace SHA');
+    }
+  }
+
+  private assertApprovedGreenReview(
+    exactSha: string,
+    managed: ManagedWorkConsumerSnapshot,
+    review: ReviewRoundSafeView | null,
+  ): asserts review is ReviewRoundSafeView {
+    const validReview =
+      review?.round.phase === 'complete' &&
+      review.currentForWork &&
+      review.round.exactSha === exactSha &&
+      review.consensus?.verdict === 'approved' &&
+      review.consensus.checksPassed &&
+      review.consensus.openFindingCount === 0 &&
+      !review.findings.some((finding) => finding.status === 'open');
+    const canonicalEvidence = managed.evidence.some(
+      (evidence) =>
+        evidence.kind === 'review_completed' &&
+        evidence.exactSha === exactSha &&
+        evidence.reviewRoundId === review?.round.roundId &&
+        evidence.openFindingCount === 0 &&
+        evidence.checksPassed,
+    );
+    if (!validReview || !canonicalEvidence) {
+      throw new Error('Merge requires the current exact SHA to have an approved, green review with zero findings');
+    }
+  }
+
   private assertProtocol(protocolVersion: number): void {
     if (protocolVersion !== DESKTOP_DEVELOPMENT_PROTOCOL_VERSION) {
       throw new Error(
@@ -327,15 +547,20 @@ export class DesktopDevelopmentLoopService {
   }
 }
 
-function deriveNextLegalActions(input: {
+interface NextLegalActionsInput {
   managedLifecycle: 'active' | 'accepted' | 'rejected';
   session: DesktopSessionBinding;
   review: ReviewRoundSafeView | null;
-}): readonly string[] {
+  managed: ManagedWorkConsumerSnapshot;
+  mergeMode: 'manual_confirm_in_chatgpt' | 'automatic';
+}
+
+function deriveNextLegalActions(input: NextLegalActionsInput): readonly string[] {
   if (input.managedLifecycle !== 'active') return [];
   if (input.session.status !== 'active') return ['rebind_session'];
   if (!input.review) return ['implement_and_report_committed_sha'];
   if (input.review.round.exactSha !== input.session.workspace.currentSha) return ['report_new_committed_sha'];
+  if (input.review.round.phase === 'complete') return deriveCompletedReviewActions(input);
   switch (input.review.round.phase) {
     case 'independent':
       return ['wait_for_independent_review'];
@@ -343,11 +568,34 @@ function deriveNextLegalActions(input: {
       return ['wait_for_cross_review'];
     case 'consensus_ready':
       return ['wait_for_consensus'];
-    case 'complete':
-      if (input.review.consensus?.verdict === 'changes_requested') return ['fix_open_findings'];
-      if (input.review.consensus?.verdict === 'approved' && input.review.currentForWork) {
-        return ['request_merge_confirmation'];
-      }
-      return ['report_new_committed_sha'];
   }
+}
+
+function deriveCompletedReviewActions(input: NextLegalActionsInput): readonly string[] {
+  const review = input.review;
+  if (!review || review.round.phase !== 'complete') return ['report_new_committed_sha'];
+  if (review.consensus?.verdict === 'changes_requested') return ['fix_open_findings'];
+  if (review.consensus?.verdict !== 'approved' || !review.currentForWork) return ['report_new_committed_sha'];
+  const exactSha = review.round.exactSha;
+  const reviewCompleted = input.managed.evidence.some(
+    (evidence) =>
+      evidence.kind === 'review_completed' &&
+      evidence.exactSha === exactSha &&
+      evidence.reviewRoundId === review.round.roundId &&
+      evidence.openFindingCount === 0 &&
+      evidence.checksPassed,
+  );
+  if (!reviewCompleted) return ['wait_for_review_evidence'];
+  const merged = input.managed.evidence.some(
+    (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
+  );
+  if (merged) return ['wait_for_final_acceptance'];
+  const currentConfirmation = input.managed.evidence.some(
+    (evidence) =>
+      evidence.kind === 'merge_confirmed' &&
+      evidence.exactSha === exactSha &&
+      evidence.bindingEpoch === input.session.bindingEpoch,
+  );
+  if (input.mergeMode === 'automatic' || currentConfirmation) return ['merge_with_native_git'];
+  return ['request_merge_confirmation'];
 }

@@ -160,6 +160,22 @@ describe('ExternalProjectStore', () => {
     assert.equal(first.desktopDevelopment.successfulManualPilotCount, 1);
     assert.equal(duplicate.desktopDevelopment.successfulManualPilotCount, 1);
     assert.deepEqual((await store.getById(created.id)).desktopDevelopment.successfulManualPilotWorkIds, ['work-1']);
+    await assert.rejects(
+      () =>
+        store.updateDesktopDevelopment(created.id, {
+          expectedVersion: duplicate.desktopDevelopment.version,
+          mergeMode: 'automatic',
+        }),
+      /requires two successful manual pilots/i,
+    );
+
+    const second = await store.recordAcceptedManualPilot(created.id, 'work-2');
+    assert.equal(second.desktopDevelopment.successfulManualPilotCount, 2);
+    const automatic = await store.updateDesktopDevelopment(created.id, {
+      expectedVersion: second.desktopDevelopment.version,
+      mergeMode: 'automatic',
+    });
+    assert.equal(automatic.desktopDevelopment.mergeMode, 'automatic');
   });
 
   test('update() returns null for nonexistent id', async () => {

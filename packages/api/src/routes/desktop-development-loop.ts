@@ -76,6 +76,30 @@ const implementationSchema = z
     idempotencyKey: idSchema,
   })
   .strict();
+const mergeConfirmationSchema = z
+  .object({
+    ...commonMutationSchema,
+    bindingEpoch: z.number().int().positive(),
+    expectedManagedWorkVersion: z.number().int().positive(),
+    exactSha: fullShaSchema,
+    idempotencyKey: idSchema,
+  })
+  .strict();
+const mergeReportSchema = mergeConfirmationSchema
+  .extend({
+    mergeCommitSha: fullShaSchema,
+  })
+  .strict();
+const acceptanceSchema = z
+  .object({
+    protocolVersion: protocolSchema,
+    attemptId: idSchema,
+    expectedManagedWorkVersion: z.number().int().positive(),
+    exactSha: fullShaSchema,
+    accepted: z.boolean(),
+    idempotencyKey: idSchema,
+  })
+  .strict();
 
 export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopmentLoopRoutesOptions> = async (
   app,
@@ -117,7 +141,7 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
       ? 404
       : /protocol mismatch/i.test(message)
         ? 426
-        : /conflict|belongs|binding|lease|configured|repository|current committed/i.test(message)
+        : /conflict|belongs|binding|lease|configured|repository|current committed|requires/i.test(message)
           ? 409
           : 400;
     return reply.status(status).send({ error: message });
@@ -197,6 +221,50 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
     try {
       return reply.send(await desktopDevelopmentLoopService.reportImplementation({ ...parsed.data, ownerUserId }));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.post('/api/desktop-development-loop/v1/merge-confirmation', async (request, reply) => {
+    const ownerUserId = requireDesktopPrincipal(request, reply);
+    if (!ownerUserId || !desktopDevelopmentLoopService) return;
+    const parsed = mergeConfirmationSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
+    try {
+      return reply.send(await desktopDevelopmentLoopService.confirmMerge({ ...parsed.data, ownerUserId }));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.post('/api/desktop-development-loop/v1/merge-report', async (request, reply) => {
+    const ownerUserId = requireDesktopPrincipal(request, reply);
+    if (!ownerUserId || !desktopDevelopmentLoopService) return;
+    const parsed = mergeReportSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: 'Invalid request', details: parsed.error.issues });
+    try {
+      return reply.send(await desktopDevelopmentLoopService.reportMerged({ ...parsed.data, ownerUserId }));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.post('/api/external-projects/:projectId/development-loop/works/:workId/acceptance', async (request, reply) => {
+    const ownerUserId = requireUserId(request, reply);
+    if (!ownerUserId) return;
+    if (!desktopDevelopmentLoopService) {
+      return reply.status(503).send({ error: 'Desktop development loop is unavailable' });
+    }
+    const params = z.object({ projectId: idSchema, workId: idSchema }).strict().safeParse(request.params);
+    const parsed = acceptanceSchema.safeParse(request.body);
+    if (!params.success || !parsed.success) {
+      return reply.status(400).send({ error: 'Invalid request' });
+    }
+    try {
+      return reply.send(
+        await desktopDevelopmentLoopService.recordAcceptance({ ...params.data, ...parsed.data, ownerUserId }),
+      );
     } catch (error) {
       return sendError(reply, error);
     }
