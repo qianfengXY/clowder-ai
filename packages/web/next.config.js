@@ -93,13 +93,22 @@ module.exports = withPWA({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
   reloadOnOnline: false,
-  // Start URL is a static shell; precache it so PWA cold-open does not block on network.
-  dynamicStartUrl: false,
+  // The app shell contains hashed chunk references. Precaching `/` can keep a
+  // mobile client on an old build indefinitely after a production restart.
+  cacheStartUrl: false,
+  dynamicStartUrl: true,
   // Keep default page/document runtime caching and only override what we need.
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
     disableDevLogs: true,
     runtimeCaching: [
+      {
+        // Never fall back to an old HTML shell. Hashed static assets remain
+        // cacheable, while navigations must discover the current build.
+        urlPattern: ({ request }) => request.mode === 'navigate',
+        handler: 'NetworkOnly',
+        options: { cacheName: 'pages' },
+      },
       {
         // API calls: never cache — always fresh chat data
         urlPattern: /^https?:\/\/.*\/api\//,

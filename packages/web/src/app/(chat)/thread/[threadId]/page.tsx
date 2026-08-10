@@ -4,6 +4,9 @@ interface ThreadPageProps {
   };
 }
 
+// Keep thread-entry HTML aligned with the currently deployed client bundle.
+export const dynamic = 'force-dynamic';
+
 /**
  * Thread page — ChatContainer is rendered by the (chat) layout.
  *

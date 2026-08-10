@@ -107,4 +107,12 @@ describe('next.config rewrites', () => {
       'Realtime chat must reconnect without next-pwa injecting location.reload() on the online event',
     );
   });
+
+  it('never precaches or runtime-caches the versioned application shell', () => {
+    const pwaOptions = loadConfigWithPwaCapture();
+
+    assert.equal(pwaOptions?.cacheStartUrl, false);
+    const pagesRule = pwaOptions?.workboxOptions?.runtimeCaching?.find((entry) => entry.options?.cacheName === 'pages');
+    assert.equal(pagesRule?.handler, 'NetworkOnly');
+  });
 });
