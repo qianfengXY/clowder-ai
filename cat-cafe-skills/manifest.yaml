@@ -359,6 +359,29 @@ skills:
     sop_step: 3
     merged_from: null
 
+  # ── Cat Café × ChatGPT Desktop 执行 ──
+  catcafe-desktop-executor:
+    category: "开发流程"
+    description: >
+      ChatGPT Desktop 侧执行 Cat Café 项目中的权威 managed work，并把精确提交交回同一 Review Hub 闭环。
+      Use when: 用户在 ChatGPT Desktop 中要求实现、恢复或修复一个已经绑定 Cat Café 的 GitHub 项目。
+      Not for: Cat Café 猫猫自己写代码、没有项目绑定的任意仓库任务、替用户开启权限或自动合入。
+      Output: 可恢复的 Desktop binding + 精确 commit SHA + 最新 Resume Packet，或明确的安全阻断原因。
+    triggers:
+      - "实现 Cat Café 方案"
+      - "连接 Cat Café 项目"
+      - "继续修复检视意见"
+      - "恢复 Desktop 开发"
+      - "Cat Café review"
+    not_for:
+      - "Cat Café 猫猫自己实现"
+      - "未绑定项目的仓库任务"
+      - "替用户修改 runtime 配置或权限"
+    output: "Recoverable Desktop binding + exact commit SHA + latest Resume Packet or fail-closed reason"
+    next: []
+    sop_step: 1
+    merged_from: null
+
   # ── 接收 Review ──
   receive-review:
     category: "开发流程"

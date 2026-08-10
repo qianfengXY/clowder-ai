@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const skill = readFileSync(`${repoRoot}cat-cafe-skills/catcafe-desktop-executor/SKILL.md`, 'utf8');
+const manifest = readFileSync(`${repoRoot}cat-cafe-skills/manifest.yaml`, 'utf8');
+
+describe('F289 Desktop executor skill contract', () => {
+  test('discovers canonical project/work state and never invents identity', () => {
+    assert.match(skill, /cat_cafe_development_project_read/);
+    assert.match(skill, /managedWorkDiscovery\.works/);
+    assert.match(skill, /lifecycle=active/);
+    assert.match(skill, /fallback ledger/);
+  });
+
+  test('fences replaced chats and limits recovery to committed state', () => {
+    assert.match(skill, /expectedBindingEpoch=0/);
+    assert.match(skill, /binding epoch/);
+    assert.match(skill, /lastCommittedSha/);
+    assert.match(skill, /last committed SHA/);
+  });
+
+  test('keeps merge confirmation and final acceptance at their intended user gates', () => {
+    assert.match(skill, /cat_cafe_development_merge_confirmation_record/);
+    assert.match(skill, /acceptance_pending/);
+    assert.match(skill, /auto-merge/);
+  });
+
+  test('does not promise unsupported background polling or project-specific publication', () => {
+    assert.match(skill, /Scheduled Task/);
+    assert.match(skill, /GitHub Issue/);
+    assert.doesNotMatch(skill, /GITHUB_TOKEN|github_issues_bilingual|TraqenGitHubIssuePublisher/);
+  });
+
+  test('is registered in the canonical manifest', () => {
+    assert.match(manifest, /^ {2}catcafe-desktop-executor:/m);
+    assert.match(manifest, /Recoverable Desktop binding \+ exact commit SHA/);
+  });
+});

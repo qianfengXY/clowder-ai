@@ -1,8 +1,8 @@
 import { isAbsolute } from 'node:path';
 import {
   assertValidDesktopDefaultBranch,
-  normalizeGitHubRepository,
   type DesktopSessionBinding,
+  normalizeGitHubRepository,
   type WorkspaceBinding,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -60,6 +60,7 @@ if receiptJson then
   if receipt.fingerprint ~= ARGV[3] then
     return cjson.encode({ kind = 'idempotency_conflict' })
   end
+  redis.call('SADD', KEYS[2], ARGV[5])
   return cjson.encode({ kind = 'ok', binding = receipt.binding })
 end
 
@@ -86,6 +87,7 @@ redis.call('HSET', KEYS[1],
   'currentEpoch', tostring(binding.bindingEpoch),
   'current', bindingJson,
   operationField, cjson.encode(receipt))
+redis.call('SADD', KEYS[2], ARGV[5])
 return cjson.encode({ kind = 'ok', binding = binding })
 `;
 
@@ -151,12 +153,14 @@ export class DesktopSessionStore {
     if (this.redis) {
       const raw = await this.redis.eval(
         BIND_LUA,
-        1,
+        2,
         key,
+        projectSessionsKey(normalized.projectId),
         String(normalized.expectedEpoch),
         normalized.idempotencyKey,
         fingerprint,
         JSON.stringify(template),
+        normalized.workId,
       );
       return unwrapResult(parseStoreResult(raw));
     }
@@ -247,12 +251,41 @@ export class DesktopSessionStore {
     const key = sessionKey(projectId, workId);
     const current = this.redis
       ? parseBinding(await this.redis.hget(key, 'current'))
-      : this.states.get(key)?.current ?? null;
+      : (this.states.get(key)?.current ?? null);
     if (!current) return null;
     if (current.status === 'active' && current.leaseExpiresAt <= now) {
       return cloneBinding({ ...current, status: 'detached' });
     }
     return cloneBinding(current);
+  }
+
+  async listCurrentByProject(projectId: string, now = Date.now()): Promise<readonly DesktopSessionBinding[]> {
+    assertId(projectId, 'projectId');
+    assertTimestamp(now, 'now');
+    let bindings: DesktopSessionBinding[];
+    if (this.redis) {
+      const workIds = (await this.redis.smembers(projectSessionsKey(projectId))).sort();
+      if (workIds.length === 0) return [];
+      const pipeline = this.redis.multi();
+      for (const workId of workIds) pipeline.hget(sessionKey(projectId, workId), 'current');
+      const rows = await pipeline.exec();
+      bindings = (rows ?? []).flatMap(([error, value]) => {
+        if (error) throw error;
+        const binding = parseBinding(value);
+        return binding ? [binding] : [];
+      });
+    } else {
+      bindings = [...this.states.values()].flatMap((state) =>
+        state.current?.projectId === projectId ? [state.current] : [],
+      );
+    }
+    return bindings
+      .map((binding) =>
+        binding.status === 'active' && binding.leaseExpiresAt <= now
+          ? cloneBinding({ ...binding, status: 'detached' })
+          : cloneBinding(binding),
+      )
+      .sort((left, right) => left.workId.localeCompare(right.workId));
   }
 
   async getByEpoch(projectId: string, workId: string, epoch: number): Promise<DesktopSessionBinding | null> {
@@ -352,6 +385,10 @@ function normalizeWorkspace(input: WorkspaceBinding): WorkspaceBinding {
 
 function sessionKey(projectId: string, workId: string): string {
   return `desktop-development:session:${encodeURIComponent(projectId)}:${encodeURIComponent(workId)}`;
+}
+
+function projectSessionsKey(projectId: string): string {
+  return `desktop-development:project-sessions:${encodeURIComponent(projectId)}`;
 }
 
 function parseStoreResult(value: unknown): StoreResult {

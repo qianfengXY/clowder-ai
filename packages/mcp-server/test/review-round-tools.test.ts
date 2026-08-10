@@ -62,6 +62,17 @@ describe('F289 project Review Hub tools', () => {
     );
   });
 
+  it('documents routing, exclusions, output, and every top-level input parameter', () => {
+    for (const tool of reviewRoundTools) {
+      assert.match(tool.description, /Use when:/);
+      assert.match(tool.description, /NOT for:/);
+      assert.match(tool.description, /Output:/);
+      for (const [name, schema] of Object.entries(tool.inputSchema)) {
+        assert.ok(schema.description, `${tool.name}.${name} must have an MCP input description`);
+      }
+    }
+  });
+
   it('reads through callback auth without caller-supplied identity', async () => {
     const result = await handleReviewRoundRead({ roundId: 'round-1' });
     assert.equal(result.isError, undefined);

@@ -58,6 +58,17 @@ describe('F289 ChatGPT Desktop development-loop tools', () => {
     );
   });
 
+  it('documents routing, exclusions, output, and every top-level input parameter', () => {
+    for (const tool of desktopDevelopmentLoopTools) {
+      assert.match(tool.description, /Use when:/);
+      assert.match(tool.description, /NOT for:/);
+      assert.match(tool.description, /Output:/);
+      for (const [name, schema] of Object.entries(tool.inputSchema)) {
+        assert.ok(schema.description, `${tool.name}.${name} must have an MCP input description`);
+      }
+    }
+  });
+
   it('uses the provider credential internally and never sends caller identity', async () => {
     const result = await handleDevelopmentProjectRead({ protocolVersion: 1, projectId: 'project-1' });
     assert.equal(result.isError, undefined);
@@ -65,6 +76,28 @@ describe('F289 ChatGPT Desktop development-loop tools', () => {
     assert.match(requests[0].url, /projects\/project-1\?protocolVersion=1$/);
     assert.equal(new Headers(requests[0].init?.headers).get('authorization'), 'Bearer desktop-secret');
     assert.equal(new Headers(requests[0].init?.headers).get('x-cat-cafe-user'), null);
+  });
+
+  it('resolves the Cat Cafe project from the repository when Desktop does not know projectId', async () => {
+    const result = await handleDevelopmentProjectRead({ protocolVersion: 1, repository: 'owner/repo' });
+    assert.equal(result.isError, undefined);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /projects\/resolve\?protocolVersion=1&repository=owner%2Frepo$/);
+  });
+
+  it('requires exactly one project selector', async () => {
+    let result = await handleDevelopmentProjectRead({ protocolVersion: 1 });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /exactly one/i);
+
+    result = await handleDevelopmentProjectRead({
+      protocolVersion: 1,
+      projectId: 'project-1',
+      repository: 'owner/repo',
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /exactly one/i);
+    assert.equal(requests.length, 0);
   });
 
   it('fails closed without the provider token and makes no request', async () => {

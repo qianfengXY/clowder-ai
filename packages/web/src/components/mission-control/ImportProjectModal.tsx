@@ -73,14 +73,22 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="import-project-title"
+      tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
-      onClick={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose();
+      }}
     >
-      <div
-        className="w-full max-w-md rounded-xl bg-[var(--console-card-bg)] p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-4 text-base font-bold text-cafe">导入项目</h2>
+      <div className="w-full max-w-md rounded-xl bg-[var(--console-card-bg)] p-6 shadow-lg">
+        <h2 id="import-project-title" className="mb-4 text-base font-bold text-cafe">
+          导入项目
+        </h2>
 
         <div className="space-y-3">
           <label className="block">
@@ -108,7 +116,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
           </label>
 
           {enableDesktopLoop && (
-            <div className="space-y-3 rounded-[10px] border border-[var(--console-border-soft)] p-3">
+            <div className="space-y-3 rounded-[10px] bg-[var(--console-shell-bg)] p-3">
               <label className="block">
                 <span className="text-xs font-medium text-cafe-secondary">GitHub 仓库 *</span>
                 <input

@@ -1,4 +1,4 @@
-import type { CreateDesktopDevelopmentProjectBindingInput } from '@cat-cafe/shared';
+import type { CreateDesktopDevelopmentProjectBindingInput, DesktopDevelopmentResumePacket } from '@cat-cafe/shared';
 
 export interface DesktopDevelopmentFormValues {
   enabled: boolean;
@@ -25,5 +25,22 @@ export function buildDesktopDevelopmentCreateInput(
     defaultReviewers,
     allowPush: values.allowPush,
     allowPullRequest: values.allowPullRequest,
+  };
+}
+
+type AcceptanceResumePacket = Pick<
+  DesktopDevelopmentResumePacket,
+  'protocolVersion' | 'projectId' | 'workId' | 'attemptId' | 'managedWorkVersion' | 'currentSha' | 'acceptancePending'
+>;
+
+export function buildDesktopAcceptanceRequest(work: AcceptanceResumePacket, accepted: boolean) {
+  if (!work.acceptancePending) throw new Error('Work is not awaiting final acceptance');
+  return {
+    protocolVersion: work.protocolVersion,
+    attemptId: work.attemptId,
+    expectedManagedWorkVersion: work.managedWorkVersion,
+    exactSha: work.currentSha,
+    accepted,
+    idempotencyKey: `acceptance:${work.workId}:${work.currentSha}:${accepted ? 'accepted' : 'rejected'}`,
   };
 }

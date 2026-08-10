@@ -17,74 +17,106 @@ const fullShaSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i);
 const protocolVersionSchema = z.number().int().positive().describe('Protocol version returned by project discovery.');
 const repositorySchema = z
   .object({
-    host: z.literal('github.com'),
-    owner: z.string().min(1).max(39),
-    name: z.string().min(1).max(100),
-    fullName: z.string().min(3).max(140),
+    host: z.literal('github.com').describe('Repository host; must be exactly "github.com".'),
+    owner: z.string().min(1).max(39).describe('GitHub repository owner, for example "openai".'),
+    name: z.string().min(1).max(100).describe('GitHub repository name without the owner, for example "codex".'),
+    fullName: z.string().min(3).max(140).describe('Canonical GitHub owner/name, for example "openai/codex".'),
   })
-  .strict();
+  .strict()
+  .describe('Repository identity read from the current committed workspace.');
 const workspaceSchema = z
   .object({
     repository: repositorySchema,
-    branch: z.string().min(1).max(244),
-    baseSha: fullShaSchema,
-    currentSha: fullShaSchema,
-    lastCommittedSha: fullShaSchema,
-    worktreePresent: z.boolean(),
-    worktreePath: z.string().min(1).max(4096),
-    validatedAt: z.number().int().positive(),
+    branch: z.string().min(1).max(244).describe('Current Git branch name, for example "feat/f289-loop".'),
+    baseSha: fullShaSchema.describe('Full 40- or 64-hex SHA used as the implementation base.'),
+    currentSha: fullShaSchema.describe('Full 40- or 64-hex SHA currently checked out.'),
+    lastCommittedSha: fullShaSchema.describe('Full 40- or 64-hex SHA that can be recovered after worktree loss.'),
+    worktreePresent: z.boolean().describe('Whether the permanent implementation worktree currently exists.'),
+    worktreePath: z
+      .string()
+      .min(1)
+      .max(4096)
+      .describe('Absolute local path to the permanent implementation worktree; never returned by the server.'),
+    validatedAt: z
+      .number()
+      .int()
+      .positive()
+      .describe('Unix epoch timestamp in milliseconds when Git state was validated.'),
   })
-  .strict();
+  .strict()
+  .describe('Validated committed Git workspace state for the current Desktop implementation session.');
 
 export const developmentProjectReadInputSchema = {
   protocolVersion: protocolVersionSchema,
-  projectId: idSchema.describe('Clowder AI project id already bound to this repository.'),
+  projectId: idSchema.optional().describe('Exact Clowder AI project id; provide this or repository, but not both.'),
+  repository: z
+    .string()
+    .min(3)
+    .max(300)
+    .optional()
+    .describe(
+      'GitHub owner/name or clone URL used to find the bound project; provide this or projectId, but not both.',
+    ),
 };
 
 export const developmentWorkReadInputSchema = {
   protocolVersion: protocolVersionSchema,
-  projectId: idSchema,
-  workId: idSchema,
-  attemptId: idSchema,
+  projectId: idSchema.describe('Clowder AI project id bound to the managed work.'),
+  workId: idSchema.describe('Canonical F275 managed-work id returned by Cat Café.'),
+  attemptId: idSchema.describe('Current canonical F275 attempt id for this work.'),
 };
 
 export const developmentWorkConnectInputSchema = {
   ...developmentWorkReadInputSchema,
   runtimeSessionId: idSchema.describe('Stable ChatGPT Desktop runtime session id.'),
   chatRef: z.string().min(1).max(1000).optional().describe('Optional opaque ChatGPT chat reference for recovery.'),
-  expectedBindingEpoch: z.number().int().nonnegative(),
-  expectedManagedWorkVersion: z.number().int().positive(),
-  idempotencyKey: idSchema,
-  leaseDurationMs: z.number().int().min(1_000).max(86_400_000),
+  expectedBindingEpoch: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe('Last observed Desktop binding epoch; use 0 for the first connection.'),
+  expectedManagedWorkVersion: z.number().int().positive().describe('Last observed F275 managed-work version for CAS.'),
+  idempotencyKey: idSchema.describe('Stable retry key unique to this connect or rebind operation.'),
+  leaseDurationMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(86_400_000)
+    .describe('Requested active session lease duration in milliseconds, from 1000 to 86400000.'),
   workspace: workspaceSchema,
 };
 
 export const developmentWorkHeartbeatInputSchema = {
   ...developmentWorkReadInputSchema,
-  runtimeSessionId: idSchema,
-  bindingEpoch: z.number().int().positive(),
-  expectedSessionVersion: z.number().int().positive(),
-  idempotencyKey: idSchema,
-  leaseDurationMs: z.number().int().min(1_000).max(86_400_000),
-  workspace: workspaceSchema.optional(),
+  runtimeSessionId: idSchema.describe('Stable ChatGPT Desktop runtime session id that owns the current binding.'),
+  bindingEpoch: z.number().int().positive().describe('Current fenced Desktop binding epoch from the Resume Packet.'),
+  expectedSessionVersion: z.number().int().positive().describe('Last observed session binding version for CAS.'),
+  idempotencyKey: idSchema.describe('Stable retry key unique to this heartbeat operation.'),
+  leaseDurationMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(86_400_000)
+    .describe('Requested renewed lease duration in milliseconds, from 1000 to 86400000.'),
+  workspace: workspaceSchema.optional().describe('Optional freshly validated committed workspace state.'),
 };
 
 export const developmentImplementationReportInputSchema = {
   ...developmentWorkReadInputSchema,
-  runtimeSessionId: idSchema,
-  bindingEpoch: z.number().int().positive(),
-  expectedManagedWorkVersion: z.number().int().positive(),
+  runtimeSessionId: idSchema.describe('Stable ChatGPT Desktop runtime session id that owns the current binding.'),
+  bindingEpoch: z.number().int().positive().describe('Current fenced Desktop binding epoch from the Resume Packet.'),
+  expectedManagedWorkVersion: z.number().int().positive().describe('Last observed F275 managed-work version for CAS.'),
   exactSha: fullShaSchema.describe('Full committed SHA currently checked out in the bound workspace.'),
-  idempotencyKey: idSchema,
+  idempotencyKey: idSchema.describe('Stable retry key unique to this implementation report.'),
 };
 
 export const developmentMergeConfirmationInputSchema = {
   ...developmentWorkReadInputSchema,
-  runtimeSessionId: idSchema,
-  bindingEpoch: z.number().int().positive(),
-  expectedManagedWorkVersion: z.number().int().positive(),
-  exactSha: fullShaSchema,
-  idempotencyKey: idSchema,
+  runtimeSessionId: idSchema.describe('Stable ChatGPT Desktop runtime session id that owns the current binding.'),
+  bindingEpoch: z.number().int().positive().describe('Current fenced Desktop binding epoch from the Resume Packet.'),
+  expectedManagedWorkVersion: z.number().int().positive().describe('Last observed F275 managed-work version for CAS.'),
+  exactSha: fullShaSchema.describe('Full approved implementation SHA to which the confirmation applies.'),
+  idempotencyKey: idSchema.describe('Stable retry key unique to this merge confirmation.'),
 };
 
 export const developmentMergeReportInputSchema = {
@@ -94,10 +126,13 @@ export const developmentMergeReportInputSchema = {
 
 type ProjectReadInput = {
   protocolVersion: number;
-  projectId: string;
+  projectId?: string;
+  repository?: string;
 };
 
-type WorkReadInput = ProjectReadInput & {
+type WorkReadInput = {
+  protocolVersion: number;
+  projectId: string;
   workId: string;
   attemptId: string;
 };
@@ -144,9 +179,20 @@ type MergeConfirmationInput = ImplementationReportInput;
 type MergeReportInput = MergeConfirmationInput & { mergeCommitSha: string };
 
 export async function handleDevelopmentProjectRead(input: ProjectReadInput): Promise<ToolResult> {
+  const hasProjectId = Boolean(input.projectId);
+  const hasRepository = Boolean(input.repository);
+  if (hasProjectId === hasRepository) {
+    return errorResult(
+      'Invalid project selector. Expected exactly one of projectId or repository. Example: repository="owner/repo"',
+    );
+  }
   const query = new URLSearchParams({ protocolVersion: String(input.protocolVersion) });
+  if (input.repository) {
+    query.set('repository', input.repository);
+    return requestDesktopLoop(`/api/desktop-development-loop/v1/projects/resolve?${query}`);
+  }
   return requestDesktopLoop(
-    `/api/desktop-development-loop/v1/projects/${encodeURIComponent(input.projectId)}?${query}`,
+    `/api/desktop-development-loop/v1/projects/${encodeURIComponent(input.projectId ?? '')}?${query}`,
   );
 }
 
@@ -209,7 +255,9 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_project_read',
     description:
       'Read the server-owned public project/repository binding before starting or resuming implementation. ' +
-      'This never returns a local checkout path or credential.',
+      'Use when: ChatGPT Desktop knows either the Cat Café project id or its exact GitHub owner/name and needs repository, reviewer, pilot, or Review Hub policy. ' +
+      'NOT for: fuzzy project search, reading a work attempt, or obtaining a local path or credential. ' +
+      'Output: a read-only public project binding and deterministic Review Hub id.',
     inputSchema: developmentProjectReadInputSchema,
     handler: handleDevelopmentProjectRead,
     governance: {
@@ -223,7 +271,10 @@ export const desktopDevelopmentLoopTools = [
   defineTool({
     name: 'cat_cafe_development_work_read',
     description:
-      'Resume one managed implementation attempt and read only its current lifecycle, fenced session epoch, exact SHA, barrier-safe consensus findings, and next legal actions.',
+      'Read one managed implementation attempt as a server-derived Resume Packet. ' +
+      'Use when: starting a turn, resuming after restart, or checking review, merge, or acceptance progress. ' +
+      'NOT for: claiming a work attempt, extending a lease, mutating Git, or reading private reviewer drafts. ' +
+      'Output: current lifecycle, fenced session epoch, exact SHA, barrier-safe findings, and next legal actions.',
     inputSchema: developmentWorkReadInputSchema,
     handler: handleDevelopmentWorkRead,
     governance: {
@@ -238,7 +289,10 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_work_connect',
     description:
       'Claim or rebind one managed work attempt to the current ChatGPT Desktop session. ' +
-      'A rebind advances the session epoch so a deleted or replaced chat cannot mutate the work.',
+      'Use when: the first Desktop chat starts the attempt or a replacement chat resumes it after deletion or lease loss. ' +
+      'NOT for: creating managed work, reviewing code, committing, pushing, merging, or deploying. ' +
+      'Output: a Resume Packet with the newly active fenced epoch and next legal actions. ' +
+      'GOTCHA: a successful rebind advances the epoch, so the previous chat immediately loses write authority.',
     inputSchema: developmentWorkConnectInputSchema,
     handler: handleDevelopmentWorkConnect,
     governance: {
@@ -253,7 +307,9 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_work_heartbeat',
     description:
       'Renew the current fenced ChatGPT Desktop session lease and optionally refresh committed workspace metadata. ' +
-      'A stale session or epoch is rejected.',
+      'Use when: a long implementation is still active or the committed workspace SHA changed. ' +
+      'NOT for: reconnecting a deleted chat, reporting finished implementation, mutating Git, or keeping uncommitted work recoverable. ' +
+      'Output: an updated Resume Packet and lease/session version. GOTCHA: stale sessions or epochs are rejected.',
     inputSchema: developmentWorkHeartbeatInputSchema,
     handler: handleDevelopmentWorkHeartbeat,
     governance: {
@@ -268,7 +324,9 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_implementation_report',
     description:
       'Report the full committed implementation SHA owned by the current fenced Desktop session. ' +
-      'This opens or reuses one exact-SHA multi-cat review round in the project Review Hub; it does not merge, push, deploy, or publish findings externally.',
+      'Use when: implementation and checks are committed and the exact checked-out SHA is ready for multi-cat review. ' +
+      'NOT for: uncommitted work, a missing worktree, Git push, merge, deploy, or external finding publication. ' +
+      'Output: an updated Resume Packet and one opened or reused exact-SHA ReviewRound in the project Review Hub.',
     inputSchema: developmentImplementationReportInputSchema,
     handler: handleDevelopmentImplementationReport,
     governance: {
@@ -282,8 +340,10 @@ export const desktopDevelopmentLoopTools = [
   defineTool({
     name: 'cat_cafe_development_merge_confirmation_record',
     description:
-      'Record the operators explicit merge confirmation from the current ChatGPT Desktop chat after the exact SHA has a green, zero-finding consensus. ' +
-      'This is lifecycle evidence only: it does not execute Git, merge, push, deploy, or grant repository authority; a superseded chat epoch cannot reuse it.',
+      "Record the operator's explicit merge confirmation from the current ChatGPT Desktop chat. " +
+      'Use when: a manual pilot has a current exact-SHA approved review with green checks and zero findings, and the operator confirms merge in this chat. ' +
+      'NOT for: executing Git, granting repository authority, auto-merge, push, deploy, or confirmations from superseded chats. ' +
+      'Output: scoped merge-confirmation lifecycle evidence and an updated Resume Packet.',
     inputSchema: developmentMergeConfirmationInputSchema,
     handler: handleDevelopmentMergeConfirmationRecord,
     governance: {
@@ -298,7 +358,9 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_merge_report',
     description:
       'Report the merge commit SHA after ChatGPT Desktop has completed the merge with its native Git tools. ' +
-      'The server validates current-chat confirmation during manual pilots and records only the receipt; it never executes Git, merge, push, or deploy.',
+      'Use when: native Git has already merged the current approved exact SHA and the receipt must enter lifecycle truth. ' +
+      'NOT for: asking Cat Café to execute Git, merge, push, deploy, or bypass manual-pilot confirmation. ' +
+      'Output: a validated merge receipt, acceptance-pending state, and updated Resume Packet.',
     inputSchema: developmentMergeReportInputSchema,
     handler: handleDevelopmentMergeReport,
     governance: {

@@ -23,7 +23,7 @@ doc_anchors:
   - docs/features/F289-chatgpt-desktop-development-loop.md
   - docs/design/F289-chatgpt-desktop-development-loop.md
   - feature-specs/2026-08-05-chatgpt-desktop-development-loop.md
-static_scan_hints: [DesktopDevelopmentProjectBinding, ProjectReviewHub, chatgpt-desktop-dev, successfulManualPilotCount, desktop-dev-loop, ReviewRound]
+static_scan_hints: [DesktopDevelopmentProjectBinding, ProjectReviewHub, chatgpt-desktop-dev, successfulManualPilotCount, desktop:development-loop, ReviewRound]
 cited_by:
   - {feature: F289, date: 2026-08-07, delta: "new project binding and deterministic one-Review-Hub foundation"}
 ---
@@ -36,7 +36,7 @@ Architecture cell: desktop-development-loop
 
 F289 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, one deterministic Review Hub view per project, Desktop session/workspace bindings, Resume Packet projection, and the two-successful-pilot merge rollout gate.
 
-The cell is not a workflow identity root. F275 remains canonical for whole work, ordered attempts, evidence and terminal state. F253 remains canonical for exact-SHA independent review, barrier, consensus and finding closure. F211 owns runtime-session provenance, while F286 owns MCP inventory and authority.
+The cell is not a workflow identity root. F275 remains canonical for whole work, ordered attempts, evidence and terminal state. F253 remains canonical for exact-SHA independent review, barrier, consensus and finding closure. F289 owns only the external Desktop session binding over those IDs. F211 remains canonical for Cat runtime sessions with CatId/agent-key/Antigravity provenance and is intentionally not extended for the Desktop developer external actor. F286 owns MCP inventory and authority.
 
 ## Durable Invariants
 
@@ -46,13 +46,13 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
 5. Desktop author identity is distinct from reviewer CatIds and cannot appear in the reviewer roster.
 6. Chat/lease disappearance never deletes work, ReviewRound, evidence or pilot state.
-7. Missing F275/F253/F211/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers.
+7. Missing F275/F253/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers, and never falls through to F211 by impersonating a Cat session.
 
 ## Extend By
 
-- Add session/workspace state as a project/work-scoped F289 adapter that references F275 IDs and F211 provenance.
+- Add session/workspace state as a project/work-scoped F289 adapter that references F275 IDs and preserves external-actor provenance independently from F211 Cat sessions.
 - Add ReviewRound persistence through the F253 review-coordination boundary; expose only barrier-safe consensus to Desktop.
-- Add lifecycle tools only through the F286 strict `desktop-dev-loop` profile with server-derived actor, scope and legal actions.
+- Add lifecycle tools only through the F286 strict `desktop:development-loop` profile with server-derived actor, scope and legal actions.
 - Add optional repository publication adapters as downstream consumers of consensus; never make them core round-completion requirements.
 
 ## Do NOT Unify With

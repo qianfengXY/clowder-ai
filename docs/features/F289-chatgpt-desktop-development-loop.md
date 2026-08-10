@@ -2,7 +2,7 @@
 description: "把 Cat Café 的项目/方案/多猫 Review 与 ChatGPT Desktop 的实现会话连接为可恢复、可重复的开发闭环。"
 related_features: [F167, F211, F253, F275, F286]
 topics: [chatgpt-desktop, project-binding, review-hub, managed-work, mcp]
-tips_exempt: implementation in progress; the Desktop MCP profile is not yet activated
+tips_exempt: activation-bound Desktop capability; the user must explicitly enable the scoped profile and credential after independent review
 ---
 
 # F289: ChatGPT Desktop Development Loop
@@ -10,7 +10,7 @@ tips_exempt: implementation in progress; the Desktop MCP profile is not yet acti
 > Status: implementation<br>
 > Owner: CodeX (@cat-idwxwjba, GPT-5)<br>
 > Priority: P1<br>
-> Architecture cell: `desktop-development-loop` (new), consuming `managed-work`, `identity-session`, `review-coordination` and `mcp-surface-governance`
+> Architecture cell: `desktop-development-loop` (new), consuming `managed-work`, `review-coordination` and `mcp-surface-governance`; F211 remains an unchanged Cat-runtime compatibility boundary
 
 ## Finish line
 
@@ -46,7 +46,7 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 - Review Hub 身份由 `projectId` 确定，长期复用。
 - ReviewRound 是 Hub 内的持久对象；一个 SHA 对应一个 immutable round。
 - Hub 对应的 Cat Café thread 是可见视图。软删除后可原位恢复；不得因为软删除就创建第二个 Hub。
-- 只有底层 thread 已被不可恢复地移除时，系统才可创建 replacement view，并提升 binding epoch；ReviewRound 真相仍不变。
+- 底层 thread 即使被不可恢复地移除，也只按同一个 deterministic Hub ID 重建可见视图；ReviewRound 真相不复制、不迁移。
 
 ### 聊天窗口不是状态根
 
@@ -70,8 +70,8 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 | 对象 | 真相所有者 | 身份与持久状态 | 关键不变量 |
 |---|---|---|---|
 | `DesktopDevelopmentProjectBinding` | F289 | `projectId`、repo、default branch、本地 checkout 引用、reviewer roster、merge policy、pilot count、protocol version、version | TTL=0；路径仅本地返回；不得从目录/聊天猜绑定 |
-| `ProjectReviewHub` | F289 + existing ThreadStore view | deterministic `hubId/projectId`、thread view、binding epoch | 每项目至多一个 active Hub；软删除原位恢复 |
-| `DesktopSessionBinding` | F289 consuming F211 | project/work、runtime session、chat ref、lease、binding epoch、status | 同一 work 仅最高 epoch 可写；窗口消失不终止 work |
+| `ProjectReviewHub` | F289 + existing ThreadStore view | deterministic `hubId/projectId`、thread view | 每项目至多一个 active Hub；软删除原位恢复；视图丢失仍按同一 ID 重建 |
+| `DesktopSessionBinding` | F289 | project/work、external actor runtime session、chat ref、lease、binding epoch、status | 同一 work 仅最高 epoch 可写；窗口消失不终止 work；不伪装成 F211 Cat session |
 | `WorkspaceBinding` | F289 | repo identity、永久 worktree、branch、base/current SHA、validation time | 不对公共消息暴露路径；丢失只恢复 committed truth |
 | `WorkAdmission` / `WorkAttempt` / terminal evidence | F275 | canonical work root、ordered attempts、typed evidence、whole-work terminal | F289 不创建平行 job/attempt/terminal ledger |
 | `ReviewRound` | F253 review coordination | work/attempt、full SHA、private drafts、barrier、consensus、finding status、version | full SHA immutable；两名非作者；barrier 前草稿隔离 |
@@ -112,15 +112,17 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 
 ## MCP 合同
 
-新增 strict profile `desktop-dev-loop`，只包含：
+新增 strict runtime profile `desktop:development-loop`（启动模式 `development-loop`），只包含 7 个 Desktop lifecycle 工具：
 
-- `cat_cafe_development_project_read`：读取项目绑定、Review Hub 与可恢复 work 摘要。
+- `cat_cafe_development_project_read`：按 project ID 或精确 GitHub repo 读取项目绑定、Review Hub，以及由项目 Backlog + Workflow SOP 导出的权威 managed-work candidates；多候选时 Desktop 必须请用户选择。
 - `cat_cafe_development_work_read`：读取 Resume Packet、当前 attempt、检查证据与 legal actions。
-- `cat_cafe_development_work_action`：claim/heartbeat/report/release/request_review；无 merge/deploy 动作。
-- `cat_cafe_review_round_read`：只读 barrier-safe verdict/consensus findings。
-- `cat_cafe_review_round_action`：仅 reviewer actor 可提交私有草稿、finish、cross-review、consensus。
-- F211 external runtime session 的 `chatgpt-desktop` register/list/read。
-- 最小 scoped context/message 工具，用于读取设计来源和发布状态。
+- `cat_cafe_development_work_connect`：claim/rebind 当前 Desktop chat，提升 binding epoch。
+- `cat_cafe_development_work_heartbeat`：续租并可刷新 committed workspace metadata。
+- `cat_cafe_development_implementation_report`：报告 committed exact SHA 并触发同一 Review Hub 的新 round。
+- `cat_cafe_development_merge_confirmation_record`：记录前两次试点中当前 chat 的用户确认；不执行 Git。
+- `cat_cafe_development_merge_report`：记录 Desktop 原生 Git 已产生的 merge receipt；不执行 Git。
+
+Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-scoped 工具完成 private draft、barrier、cross-review 与 consensus。F211 的 `antigravity-desktop` Cat session registry 不承载 `chatgpt-desktop-dev` external actor，避免伪造 `CatId`、agent-key principal 或 Antigravity provenance。
 
 每个写动作带 side-effect annotation，返回更新后的 resource/version 与 server-derived `nextLegalActions`。
 
@@ -129,50 +131,50 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 - **managed-work（F275）**：拥有 work/attempt/evidence/accepted-rejected 真相；F289 只消费命名接口。
 - **successor lease（F167）**：只用于 Cat Café 内部把 Review 棒交给猫猫，不用于 Desktop execution lease。
 - **review coordination（F253）**：拥有 independent-first、exact-SHA、barrier、cross-review、repeat-until-zero 语义。
-- **external runtime session（F211）**：登记 ChatGPT Desktop 会话来源与恢复 metadata，不把聊天变成 work truth。
+- **Cat runtime session（F211 compatibility boundary）**：继续只登记具备 CatId/agent-key/Antigravity provenance 的 Cat session；F289 不改写也不复用这套身份模型。
 - **MCP governance（F286）**：约束 strict profile、authority、annotation 和 fail-closed capability negotiation。
 
 ## Acceptance Criteria
 
 ### Project / Hub
 
-- [ ] AC-P1: 创建或更新 Cat Café 项目可绑定规范化 GitHub repo、默认分支、本地 checkout 与默认 reviewers；Desktop actor 不能进入 reviewer roster。
-- [ ] AC-P2: 每个项目只会 resolve 到一个 Review Hub；10 个并发 ensure 请求仍只创建/恢复一个 Hub thread。
-- [ ] AC-P3: Hub thread 软删除后原位恢复且 round/history 不变；不可恢复删除时 replacement view 提升 epoch，不复制 lifecycle truth。
-- [ ] AC-P4: 项目绑定和 pilot count 在服务重启后仍存在；本地路径不出现在公开 DTO/消息/日志。
+- [x] AC-P1: 创建或更新 Cat Café 项目可绑定规范化 GitHub repo、默认分支、本地 checkout 与默认 reviewers；Desktop actor 不能进入 reviewer roster。（`desktop-development-loop.test.js`、`external-project-routes.test.js`、`desktop-development-form.test.ts`）
+- [x] AC-P2: 每个项目只会 resolve 到一个 Review Hub；10 个并发 ensure 请求仍只创建/恢复一个 Hub thread。（`project-review-hub-service.test.js`）
+- [x] AC-P3: Hub thread 软删除后原位恢复且 round/history 不变；底层视图不可恢复地丢失时按同一 deterministic Hub ID 重建，不复制 lifecycle truth。（`project-review-hub-service.test.js`）
+- [x] AC-P4: 项目绑定和 pilot count 在服务重启后仍存在；本地路径不出现在公开 DTO/消息/日志。（`external-project-store.test.js`、`desktop-development-loop.test.js`）
 
 ### Desktop session / recovery
 
-- [ ] AC-S1: F211 可登记 `chatgpt-desktop`，且原有 `antigravity-desktop` 行为不回归。
-- [ ] AC-S2: 新 chat rebind 提升 epoch；旧 epoch 的 heartbeat/report 被拒绝。
-- [ ] AC-S3: chat/app 消失、lease 过期或 Cat Café 重启后，同一 work 可通过 Resume Packet 恢复且不重复 attempt/commit/round。
-- [ ] AC-S4: worktree 丢失返回 committed recovery point 和明确人工/自动重建动作，不声称恢复未提交数据。
+- [x] AC-S1: F289 以独立 external actor 持久化 Desktop session provenance；F211 继续只接受 `antigravity-desktop` Cat session，既有行为零修改。（`desktop-session-store.test.js` + source inventory）
+- [x] AC-S2: 新 chat rebind 提升 epoch；旧 epoch 的 heartbeat/report 被拒绝。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`）
+- [x] AC-S3: chat/app 消失、lease 过期或 Cat Café 重启后，同一 work 可通过 Resume Packet 恢复且不重复 attempt/commit/round。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`）
+- [x] AC-S4: worktree 丢失返回 committed recovery point 和明确人工/自动重建动作，不声称恢复未提交数据。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`、`desktop-executor-skill.test.ts`）
 
 ### Review / feedback loop
 
 - [x] AC-R1: 至少两名非作者在同一 full SHA 上独立完成后 barrier 才打开，并发 finish 不会提前泄露草稿。（`review-round-store.test.js`）
 - [x] AC-R2: 共识 finding 有稳定 finding ID/evidence/status；Desktop 只能读取 barrier-safe projection。（`review-round-store.test.js`）
 - [x] AC-R3: 新 SHA 使旧 round stale；有 open finding 时不能 merge；零 finding 只批准最新 SHA。（work-current + atomic consensus regression）
-- [ ] AC-R4: 同一 Review Hub 可连续承载多个 feature、delivery cycle、attempt 与 round，不产生窗口爆炸。
+- [x] AC-R4: 同一 Review Hub 可连续承载多个 feature、delivery cycle、attempt 与 round，不产生窗口爆炸。（`project-review-hub-service.test.js`、`desktop-development-loop-service.test.js`）
 
 ### Merge / acceptance
 
-- [ ] AC-M1: 前两次成功试点必须在当前 ChatGPT binding 中取得用户确认；没有确认 token/evidence 时 merge 不可执行。
-- [ ] AC-M2: pilot count 只在 merge + final acceptance 后幂等增加；rejected/aborted cycle 不计数。
-- [ ] AC-M3: 两次成功后只能由用户显式启用 auto-merge；开启后仍受 exact-SHA/review/check/branch policy gate。
-- [ ] AC-M4: merge 后进入 `acceptance_pending`；只有用户验收可进入 `accepted`，拒绝开启新的 delivery cycle。
+- [x] AC-M1: 前两次成功试点必须在当前 ChatGPT binding 中取得用户确认；没有确认 token/evidence 时 merge 不可执行。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`）
+- [x] AC-M2: pilot count 只在 merge + final acceptance 后幂等增加；rejected/aborted cycle 不计数。（`desktop-development-loop-service.test.js`、`managed-work-consumer-port.test.js`）
+- [x] AC-M3: 两次成功后只能由用户显式启用 auto-merge；开启后仍受 exact-SHA/review/check/branch policy gate。（`desktop-development-loop.test.js`、`review-round-store.test.js`）
+- [x] AC-M4: merge 后进入 `acceptance_pending`；只有用户验收可进入 `accepted`，拒绝开启新的 delivery cycle。（`desktop-development-loop-service.test.js`、`managed-work-consumer-port.test.js`、`desktop-development-form.test.ts`）
 
 ### Security / compatibility
 
-- [ ] AC-C1: `desktop-dev-loop` profile 不包含 shell、任意文件写、Git mutation、merge 或 deploy primitive。
-- [ ] AC-C2: 所有写操作验证 actor/scope/version/epoch/idempotency；跨项目、过期 actor、作者自审全部 fail closed。
-- [ ] AC-C3: client protocol/capability 不兼容时禁止写，返回兼容性原因和安全升级指引。
-- [ ] AC-C4: 不把任一试点项目的 Issue、语言、ledger 或 PR comment 规则提升为 F289 核心契约。
+- [x] AC-C1: `desktop:development-loop` profile 不包含 shell、任意文件写、Git mutation、merge 或 deploy primitive。（`desktop-mode.test.ts`、`desktop-development-loop-tools.test.ts`）
+- [x] AC-C2: 所有写操作验证 actor/scope/version/epoch/idempotency；跨项目、过期 actor、作者自审全部 fail closed。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`review-round-callback-routes.test.js`）
+- [x] AC-C3: client protocol/capability 不兼容时禁止写，返回兼容性原因和安全升级指引。（`desktop-development-loop-routes.test.js`、`desktop-development-loop-service.test.js`）
+- [x] AC-C4: 不把任一试点项目的 Issue、语言、ledger 或 PR comment 规则提升为 F289 核心契约。（`desktop-executor-skill.test.ts`、MCP inventory tests）
 
 ## 分阶段交付
 
 1. **Contract + Project/Hub foundation**：类型、项目绑定、唯一 Review Hub、软删除恢复、UI 配置面。
-2. **Session + Resume**：`chatgpt-desktop` runtime source、binding epoch、lease、Resume Packet。
+2. **Session + Resume**：F289 external Desktop session source、binding epoch、lease、Resume Packet；F211 Cat session contract 不变。
 3. **Managed work port**：接通 F275 ordered attempt/evidence/terminal 接口；不可用时 fail closed。
 4. **Review coordinator**：F253 durable round、private barrier、consensus/finding closure。
 5. **Strict MCP + Desktop skill**：治理 profile、executor skill、Scheduled Task 幂等 polling/recovery。

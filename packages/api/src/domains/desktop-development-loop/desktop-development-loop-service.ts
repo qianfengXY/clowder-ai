@@ -1,4 +1,5 @@
 import {
+  type BacklogStatus,
   buildProjectReviewHubId,
   type CatId,
   CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
@@ -7,12 +8,16 @@ import {
   type DesktopDevelopmentResumePacket,
   type DesktopSessionBinding,
   type ManagedWorkConsumerSnapshot,
+  type ManagedWorkLifecycle,
+  normalizeGitHubRepository,
   type PublicDesktopDevelopmentProject,
   type ReviewRoundSafeView,
   toPublicDesktopDevelopmentProject,
   type WorkspaceBinding,
 } from '@cat-cafe/shared';
+import type { IBacklogStore } from '../cats/services/stores/ports/BacklogStore.js';
 import type { IManagedWorkConsumerPort } from '../cats/services/stores/ports/ManagedWorkConsumerPort.js';
+import type { IWorkflowSopStore } from '../cats/services/stores/ports/WorkflowSopStore.js';
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
@@ -110,6 +115,23 @@ export interface ReadDesktopWorkInput {
 export interface DesktopProjectReadResult {
   readonly project: PublicDesktopDevelopmentProject;
   readonly reviewHubId: string;
+  readonly managedWorkDiscovery: {
+    readonly status: 'available';
+    readonly works: readonly DesktopManagedWorkCandidate[];
+  };
+}
+
+export interface DesktopManagedWorkCandidate {
+  readonly backlogItemId: string;
+  readonly title: string;
+  readonly backlogStatus: BacklogStatus;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly attemptNumber: number;
+  readonly lifecycle: ManagedWorkLifecycle;
+  readonly managedWorkVersion: number;
+  readonly connected: boolean;
+  readonly sessionStatus: DesktopSessionBinding['status'] | 'stale_attempt' | null;
 }
 
 export class DesktopDevelopmentLoopService {
@@ -120,15 +142,19 @@ export class DesktopDevelopmentLoopService {
     private readonly managedWork: IManagedWorkConsumerPort,
     private readonly reviewRounds: IReviewRoundStore,
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
+    private readonly backlogStore: Pick<IBacklogStore, 'listByUser'>,
+    private readonly workflowSopStore: Pick<IWorkflowSopStore, 'getManagedWorkAdmission'>,
   ) {}
 
   async readProject(input: {
     protocolVersion: number;
     ownerUserId: string;
     projectId: string;
+    now?: number;
   }): Promise<DesktopProjectReadResult> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireProject(input.projectId, input.ownerUserId);
+    const managedWorks = await this.discoverManagedWorks(input.ownerUserId, project.id, input.now ?? Date.now());
     return {
       project: toPublicDesktopDevelopmentProject({
         projectId: project.id,
@@ -136,7 +162,79 @@ export class DesktopDevelopmentLoopService {
         binding: project.desktopDevelopment ?? null,
       }),
       reviewHubId: buildProjectReviewHubId(project.id),
+      managedWorkDiscovery: { status: 'available', works: managedWorks },
     };
+  }
+
+  async readProjectByRepository(input: {
+    protocolVersion: number;
+    ownerUserId: string;
+    repository: string;
+    now?: number;
+  }): Promise<DesktopProjectReadResult> {
+    this.assertProtocol(input.protocolVersion);
+    const repository = normalizeGitHubRepository(input.repository).fullName.toLowerCase();
+    const matches = (await this.externalProjects.listByUser(input.ownerUserId)).filter(
+      (project) => project.desktopDevelopment?.repository.fullName.toLowerCase() === repository,
+    );
+    if (matches.length === 0) throw new Error('Project not found');
+    if (matches.length > 1) {
+      throw new Error('Repository is bound to multiple Cat Cafe projects; use the exact projectId');
+    }
+    const project = matches[0];
+    if (!project) throw new Error('Project not found');
+    return this.readProject({ ...input, projectId: project.id });
+  }
+
+  private async discoverManagedWorks(
+    ownerUserId: string,
+    projectId: string,
+    now = Date.now(),
+  ): Promise<readonly DesktopManagedWorkCandidate[]> {
+    const [items, sessions] = await Promise.all([
+      this.backlogStore.listByUser(ownerUserId),
+      this.sessions.listCurrentByProject(projectId, now),
+    ]);
+    const sessionsByWorkId = new Map(sessions.map((session) => [session.workId, session]));
+    const candidates = await Promise.all(
+      items
+        .filter((item) => item.projectId === projectId)
+        .map(async (item): Promise<DesktopManagedWorkCandidate | null> => {
+          const bundle = await this.workflowSopStore.getManagedWorkAdmission(ownerUserId, item.id);
+          if (!bundle) return null;
+          let snapshot = await this.managedWork.read({
+            consumerId: CONSUMER_ID,
+            ownerUserId,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+          });
+          if (snapshot.state.currentAttemptId !== snapshot.attempt.attemptId) {
+            snapshot = await this.managedWork.read({
+              consumerId: CONSUMER_ID,
+              ownerUserId,
+              workId: bundle.admission.workId,
+              attemptId: snapshot.state.currentAttemptId,
+            });
+          }
+          const session = sessionsByWorkId.get(bundle.admission.workId);
+          const sessionMatchesAttempt = session?.attemptId === snapshot.attempt.attemptId;
+          return {
+            backlogItemId: item.id,
+            title: item.title,
+            backlogStatus: item.status,
+            workId: bundle.admission.workId,
+            attemptId: snapshot.attempt.attemptId,
+            attemptNumber: snapshot.attempt.attemptNumber,
+            lifecycle: snapshot.state.lifecycle,
+            managedWorkVersion: snapshot.state.version,
+            connected: sessionMatchesAttempt,
+            sessionStatus: session ? (sessionMatchesAttempt ? session.status : 'stale_attempt') : null,
+          };
+        }),
+    );
+    return candidates
+      .filter((candidate): candidate is DesktopManagedWorkCandidate => candidate !== null)
+      .sort((left, right) => left.backlogItemId.localeCompare(right.backlogItemId));
   }
 
   async connect(input: ConnectDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
@@ -182,6 +280,30 @@ export class DesktopDevelopmentLoopService {
       attemptId: input.attemptId,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
+  }
+
+  async listProjectWorks(input: {
+    protocolVersion: number;
+    ownerUserId: string;
+    projectId: string;
+    now?: number;
+  }): Promise<readonly DesktopDevelopmentResumePacket[]> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const now = input.now ?? Date.now();
+    const sessions = await this.sessions.listCurrentByProject(input.projectId, now);
+    return Promise.all(
+      sessions.map((session) =>
+        this.readWork({
+          protocolVersion: input.protocolVersion,
+          ownerUserId: input.ownerUserId,
+          projectId: input.projectId,
+          workId: session.workId,
+          attemptId: session.attemptId,
+          now,
+        }),
+      ),
+    );
   }
 
   async heartbeat(input: HeartbeatDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {

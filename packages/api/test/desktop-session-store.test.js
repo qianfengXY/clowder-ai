@@ -156,6 +156,23 @@ describe('F289 DesktopSessionStore', () => {
     assert.equal(binding.workspace.lastCommittedSha, '3'.repeat(40));
   });
 
+  test('lists only the current bindings for one project and derives detached status', async () => {
+    const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
+    const store = new DesktopSessionStore();
+    await store.bind(bindInput({ workId: 'work-b', idempotencyKey: 'bind-b', leaseDurationMs: 1_000 }));
+    await store.bind(bindInput({ workId: 'work-a', idempotencyKey: 'bind-a', leaseDurationMs: 60_000 }));
+    await store.bind(bindInput({ projectId: 'ep-2', workId: 'work-c', idempotencyKey: 'bind-c' }));
+
+    const bindings = await store.listCurrentByProject('ep-1', 2_000);
+    assert.deepEqual(
+      bindings.map((binding) => [binding.workId, binding.status]),
+      [
+        ['work-a', 'active'],
+        ['work-b', 'detached'],
+      ],
+    );
+  });
+
   test(
     'Redis backend persists without TTL and atomically selects one rebind winner',
     { skip: !DESKTOP_SESSION_REDIS_URL },
@@ -166,6 +183,7 @@ describe('F289 DesktopSessionStore', () => {
       const projectId = `ep-redis-${suffix}`;
       const workId = `work-redis-${suffix}`;
       const key = `desktop-development:session:${encodeURIComponent(projectId)}:${encodeURIComponent(workId)}`;
+      const projectIndexKey = `desktop-development:project-sessions:${encodeURIComponent(projectId)}`;
       if (!process.env.F289_TEST_REDIS_URL) {
         assertRedisIsolationOrThrow(DESKTOP_SESSION_REDIS_URL, 'desktop-session-store');
       }
@@ -178,6 +196,10 @@ describe('F289 DesktopSessionStore', () => {
 
         const restartedStore = new DesktopSessionStore(redis);
         assert.deepEqual(await restartedStore.getCurrent(projectId, workId, 1_001), first);
+        assert.deepEqual(
+          (await restartedStore.listCurrentByProject(projectId, 1_001)).map((binding) => binding.workId),
+          [workId],
+        );
         const results = await Promise.allSettled(
           Array.from({ length: 8 }, (_, index) =>
             restartedStore.bind(
@@ -194,8 +216,9 @@ describe('F289 DesktopSessionStore', () => {
         assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
         assert.equal((await restartedStore.getCurrent(projectId, workId, 1_001)).bindingEpoch, 2);
         assert.equal(await redis.pttl(key), -1);
+        assert.equal(await redis.pttl(projectIndexKey), -1);
       } finally {
-        await redis.del(key);
+        await redis.del(key, projectIndexKey);
         await redis.quit();
       }
     },

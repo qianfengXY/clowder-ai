@@ -108,6 +108,17 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         calls.push(['readProject', input]);
         return { project: { projectId: input.projectId, localCheckoutBound: true, binding: null }, reviewHubId: 'hub' };
       },
+      readProjectByRepository: async (input) => {
+        calls.push(['readProjectByRepository', input]);
+        return {
+          project: { projectId: 'project-from-repo', localCheckoutBound: true, binding: null },
+          reviewHubId: 'hub',
+        };
+      },
+      listProjectWorks: async (input) => {
+        calls.push(['listProjectWorks', input]);
+        return [packet];
+      },
       readWork: async (input) => {
         calls.push(['readWork', input]);
         return packet;
@@ -156,7 +167,26 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       headers: { authorization: 'Bearer desktop-secret' },
     });
     assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), {
+      error: 'Desktop development authentication is not configured',
+      code: 'desktop_development_auth_unavailable',
+      action: 'Configure the scoped Desktop development credential before retrying.',
+    });
     assert.deepEqual(unavailable.calls, []);
+
+    const capabilityUnavailable = await createApp({ desktopDevelopmentLoopService: undefined });
+    response = await capabilityUnavailable.app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/project-1?protocolVersion=1',
+      headers: { authorization: 'Bearer desktop-secret' },
+    });
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), {
+      error: 'Desktop managed-work capability is unavailable',
+      code: 'managed_work_capability_unavailable',
+      action: 'Upgrade or enable the F275 managed-work consumer capability before retrying.',
+    });
+    assert.deepEqual(capabilityUnavailable.calls, []);
 
     const invalid = await createApp();
     response = await invalid.app.inject({
@@ -166,6 +196,29 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     });
     assert.equal(response.statusCode, 401);
     assert.deepEqual(invalid.calls, []);
+  });
+
+  test('returns a structured safe-upgrade response for protocol mismatch', async () => {
+    const { app, calls } = await createApp({
+      desktopDevelopmentLoopService: {
+        readProject: async () => {
+          throw new Error('Desktop development protocol mismatch: received 2, supported 1');
+        },
+      },
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/project-1?protocolVersion=2',
+      headers: { authorization: 'Bearer desktop-secret' },
+    });
+    assert.equal(response.statusCode, 426);
+    assert.deepEqual(response.json(), {
+      error: 'Desktop development protocol mismatch: received 2, supported 1',
+      code: 'desktop_development_protocol_mismatch',
+      supportedProtocolVersion: 1,
+      action: 'Upgrade or reconfigure the Desktop client to protocol version 1 before any write.',
+    });
+    assert.deepEqual(calls, []);
   });
 
   test('derives owner identity server-side and rejects caller-supplied identity fields', async () => {
@@ -212,6 +265,40 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     });
     assert.equal(rejected.statusCode, 400);
     assert.equal(calls.length, 1);
+  });
+
+  test('resolves the project from an exact repository without exposing owner identity', async () => {
+    const { app, calls } = await createApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/desktop-development-loop/v1/projects/resolve?protocolVersion=1&repository=owner%2Frepo',
+      headers: { authorization: 'Bearer desktop-secret', 'x-cat-cafe-user': 'spoofed-owner' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().project.projectId, 'project-from-repo');
+    assert.deepEqual(calls, [
+      ['readProjectByRepository', { protocolVersion: 1, ownerUserId: 'server-owner', repository: 'owner/repo' }],
+    ]);
+  });
+
+  test('lists project work for the authenticated Cat Cafe acceptance surface', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'GET',
+      url: '/api/external-projects/project-1/development-loop/works?protocolVersion=1',
+    });
+    assert.equal(response.statusCode, 401);
+
+    response = await app.inject({
+      method: 'GET',
+      url: '/api/external-projects/project-1/development-loop/works?protocolVersion=1',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().works[0].workId, 'work-1');
+    assert.deepEqual(calls, [
+      ['listProjectWorks', { protocolVersion: 1, ownerUserId: 'operator-1', projectId: 'project-1' }],
+    ]);
   });
 
   test('exposes only the bounded project, work, connect, heartbeat, and implementation surface', async () => {

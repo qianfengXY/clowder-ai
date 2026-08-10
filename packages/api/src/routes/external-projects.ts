@@ -97,7 +97,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const { id } = request.params as { id: string };
     if (!(await requireOwnedProject(id, userId, reply))) return;
     const body = request.body as Partial<DesktopDevelopmentPolicyUpdate>;
-    if (!Number.isInteger(body.expectedVersion) || Number(body.expectedVersion) < 1) {
+    if (!isValidDesktopDevelopmentVersion(body.expectedVersion)) {
       return reply.status(400).send({ error: 'expectedVersion is required' });
     }
     try {
@@ -105,8 +105,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       if (!project) return reply.status(404).send({ error: 'Project not found' });
       return reply.send({ project });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      const status = /version conflict/i.test(message) ? 409 : 400;
+      const { message, status } = describeDesktopDevelopmentUpdateError(error);
       return reply.status(status).send({ error: message });
     }
   });
@@ -216,3 +215,12 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     return reply.send({ frame });
   });
 };
+
+function isValidDesktopDevelopmentVersion(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
+}
+
+function describeDesktopDevelopmentUpdateError(error: unknown): { message: string; status: 400 | 409 } {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+  return { message, status: /version conflict/i.test(message) ? 409 : 400 };
+}

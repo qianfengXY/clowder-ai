@@ -29,9 +29,7 @@ describe('F289 ProjectReviewHubService', () => {
   });
 
   test('concurrent ensure calls resolve one deterministic Review Hub', async () => {
-    const results = await Promise.all(
-      Array.from({ length: 10 }, () => service.ensureForProject(project.id, 'user1')),
-    );
+    const results = await Promise.all(Array.from({ length: 10 }, () => service.ensureForProject(project.id, 'user1')));
     const ids = new Set(results.map((item) => item.threadId));
     assert.deepEqual([...ids], [`project-review-hub:${project.id}`]);
 
@@ -50,6 +48,18 @@ describe('F289 ProjectReviewHubService', () => {
     assert.equal(restored.threadId, first.threadId);
     assert.equal(restored.status, 'restored');
     assert.equal((await threadStore.get(first.threadId)).deletedAt, null);
+  });
+
+  test('irrecoverably missing thread view is recreated at the same deterministic Hub id', async () => {
+    const first = await service.ensureForProject(project.id, 'user1');
+    assert.equal(await threadStore.delete(first.threadId), true);
+    assert.equal(await threadStore.get(first.threadId), null);
+
+    const recreated = await service.ensureForProject(project.id, 'user1');
+    assert.equal(recreated.threadId, first.threadId);
+    assert.equal(recreated.hubId, first.hubId);
+    assert.equal(recreated.status, 'active');
+    assert.equal((await threadStore.list('user1')).filter((item) => item.id === first.threadId).length, 1);
   });
 
   test('reuses one Hub across delivery cycles and rejects cross-user access', async () => {

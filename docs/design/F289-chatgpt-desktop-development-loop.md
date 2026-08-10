@@ -6,7 +6,7 @@ Feature truth: `docs/features/F289-chatgpt-desktop-development-loop.md`
 
 ## Decision summary
 
-F289 is a project-scoped bridge, not a second workflow engine. Cat Café owns the durable project, design context and Review Hub view; F275 owns work/attempt/terminal truth; F253 owns ReviewRound semantics; F211 records external Desktop sessions; F286 governs the strict MCP profile. ChatGPT Desktop owns repository mutation through its native local tools.
+F289 is a project-scoped bridge, not a second workflow engine. Cat Café owns the durable project, design context and Review Hub view; F275 owns work/attempt/terminal truth; F253 owns ReviewRound semantics; F289 owns the external Desktop session binding; F286 governs the strict MCP profile. ChatGPT Desktop owns repository mutation through its native local tools. F211 remains unchanged because its runtime-session records require a CatId, agent-key principal and Antigravity provenance, none of which is valid for the `chatgpt-desktop-dev` external actor.
 
 The central UX decision is **one project, one Review Hub**. Delivery cycles and code SHAs create durable objects inside that Hub, never a new visible Cat Café window. Both Cat Café and ChatGPT chats are replaceable bindings over persisted state.
 
@@ -36,9 +36,10 @@ Cat Café Project
 | Visible Review Hub | F289 resolver + ThreadStore | deterministic hub identity; ensure/restore same thread |
 | Work/attempt/evidence/terminal | F275 managed-work | consume named port; no fallback identity/state |
 | Independent review/barrier/consensus | F253 review coordination | add durable project/work/SHA records behind shared interface |
-| Desktop session provenance | F211 identity-session | add `chatgpt-desktop` source and F289 binding epoch |
+| Desktop session provenance | F289 | persist the external actor session, chat ref, lease and binding epoch without impersonating a Cat session |
+| Existing Cat runtime sessions | F211 identity-session | remain `antigravity-desktop` only; no F289 write or schema expansion |
 | Desktop execution lease | F289 | narrow work/session claim, distinct from F167 cat baton lease |
-| MCP inventory/authority | F286 | strict `desktop-dev-loop` profile and annotations |
+| MCP inventory/authority | F286 | strict `desktop:development-loop` profile and annotations |
 | Repository writes | ChatGPT Desktop | native workspace/Git tools; absent from MCP |
 
 ## Persistent records
@@ -69,7 +70,7 @@ type DesktopDevelopmentProjectBinding = {
 - `hubId = project-review-hub:<projectId>`.
 - The ThreadStore thread ID is deterministic and idempotently ensured.
 - `deletedAt != null` means hidden view; resolver calls existing restore semantics and returns the same ID.
-- Hard-loss recovery may create a replacement thread only after recording a higher view epoch. The project/work/round records do not move.
+- Hard-loss recovery re-creates the same deterministic thread ID. The project/work/round records do not move or get copied.
 - Concurrent ensure is safe because the identity is deterministic and the store operation is idempotent.
 
 ### DesktopSessionBinding
@@ -94,6 +95,10 @@ Only the highest active epoch can mutate. Rebind is a CAS transaction that super
 ### ReviewRound
 
 Round identity includes project/work/attempt and full SHA. Full SHA and roster are immutable. Private drafts are stored separately from the barrier-safe projection. Atomic finish logic opens the barrier only when every required reviewer independently finishes. Consensus/finding status changes are versioned/idempotent.
+
+### Managed-work discovery
+
+Desktop resolves a project from the exact GitHub `owner/name`, then receives `managedWorkDiscovery` built from project-scoped Backlog items and their Workflow SOP admissions. Each candidate carries the canonical F275 work ID, current attempt, lifecycle and consumer version plus its F289 session status. F289 never creates a work root during discovery. If several active candidates remain after matching the user request, Desktop must ask the user to choose instead of using list order, branch or chat history.
 
 ## Derived Resume Packet
 
@@ -150,7 +155,7 @@ Confirmation is evidence scoped to `{projectId, workId, exactSha, bindingEpoch}`
 
 ## MCP security design
 
-The `desktop-dev-loop` runtime profile contains only typed lifecycle/context/session tools. It has no arbitrary thread/user scope, shell, filesystem write, Git mutation, merge, deploy, credential or configuration tool. The authenticated service actor is mapped server-side; clients cannot submit an actor ID to impersonate another role.
+The `desktop:development-loop` runtime profile contains only seven typed lifecycle/session tools. It has no arbitrary thread/user scope, shell, filesystem write, Git mutation, merge, deploy, credential or configuration tool. The authenticated service actor is mapped server-side; clients cannot submit an actor ID to impersonate another role.
 
 Every write validates:
 
@@ -164,7 +169,7 @@ Every write validates:
 
 ## Compatibility choices
 
-- `antigravity-desktop` remains valid; `chatgpt-desktop` is additive.
+- F211 `antigravity-desktop` remains valid and unchanged. F289's `chatgpt-desktop-dev` session binding is additive in its own project/work-scoped store, not a new F211 runtime variant.
 - Existing projects without a binding behave exactly as before and show an opt-in setup surface.
 - Existing ordinary threads remain ordinary; only the deterministic Review Hub receives ReviewRound projection.
 - Optional project publication adapters may consume consensus later, but cannot block or redefine core round completion.

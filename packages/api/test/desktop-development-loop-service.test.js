@@ -20,6 +20,7 @@ describe(
     let reviewCoordinator;
     let reviewHubEnsureCount;
     let reviewDispatches;
+    let backlogItems;
     let connected = false;
 
     before(async () => {
@@ -70,6 +71,9 @@ describe(
           reviewDispatches.push(input);
         },
       };
+      const backlogStore = {
+        listByUser: async (userId) => backlogItems.filter((item) => item.userId === userId),
+      };
       service = new DesktopDevelopmentLoopService(
         externalProjects,
         reviewHubs,
@@ -77,6 +81,8 @@ describe(
         managedWork,
         reviewRounds,
         reviewDispatcher,
+        backlogStore,
+        workflowStore,
       );
       reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork, reviewDispatcher);
     });
@@ -97,6 +103,7 @@ describe(
       if (!connected) return t.skip('Redis not connected');
       reviewHubEnsureCount = 0;
       reviewDispatches = [];
+      backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
         'external-project:*',
         'workflow:sop:*',
@@ -121,6 +128,13 @@ describe(
       });
       await workflowStore.upsert('backlog-1', 'F289', {}, 'cat-codex', 'owner-1');
       const bundle = await workflowStore.getManagedWorkAdmission('owner-1', 'backlog-1');
+      backlogItems.push({
+        id: 'backlog-1',
+        userId: 'owner-1',
+        projectId: project.id,
+        title: 'Implement the Desktop loop',
+        status: 'approved',
+      });
       return { project, bundle };
     }
 
@@ -143,6 +157,23 @@ describe(
       assert.equal(result.project.projectId, project.id);
       assert.equal(result.project.localCheckoutBound, true);
       assert.equal(result.reviewHubId, `project-review-hub:${project.id}`);
+      assert.deepEqual(result.managedWorkDiscovery, {
+        status: 'available',
+        works: [
+          {
+            backlogItemId: 'backlog-1',
+            title: 'Implement the Desktop loop',
+            backlogStatus: 'approved',
+            workId: result.managedWorkDiscovery.works[0].workId,
+            attemptId: result.managedWorkDiscovery.works[0].attemptId,
+            attemptNumber: 1,
+            lifecycle: 'active',
+            managedWorkVersion: 1,
+            connected: false,
+            sessionStatus: null,
+          },
+        ],
+      });
       assert.doesNotMatch(JSON.stringify(result), /Volumes\/WorkSSD/);
       await assert.rejects(
         () => service.readProject({ protocolVersion: 2, ownerUserId: 'owner-1', projectId: project.id }),
@@ -151,6 +182,26 @@ describe(
       await assert.rejects(
         () => service.readProject({ protocolVersion: 1, ownerUserId: 'owner-2', projectId: project.id }),
         /project not found/i,
+      );
+
+      const resolved = await service.readProjectByRepository({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        repository: 'https://github.com/owner/repo.git',
+      });
+      assert.equal(resolved.project.projectId, project.id);
+      await assert.rejects(
+        () =>
+          service.readProjectByRepository({
+            protocolVersion: 1,
+            ownerUserId: 'owner-2',
+            repository: 'owner/repo',
+          }),
+        /project not found/i,
+      );
+      assert.deepEqual(
+        await service.listProjectWorks({ protocolVersion: 1, ownerUserId: 'owner-1', projectId: project.id }),
+        [],
       );
     });
 
@@ -176,6 +227,16 @@ describe(
       assert.equal(first.reviewRoundId, null);
       assert.deepEqual(first.nextLegalActions, ['implement_and_report_committed_sha']);
       assert.doesNotMatch(JSON.stringify(first), /example-worktree/);
+
+      const connectedProject = await service.readProject({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        now: 2_500,
+      });
+      assert.equal(connectedProject.managedWorkDiscovery.works[0].connected, true);
+      assert.equal(connectedProject.managedWorkDiscovery.works[0].sessionStatus, 'active');
+      assert.equal(connectedProject.managedWorkDiscovery.works[0].managedWorkVersion, 2);
 
       const second = await service.connect({
         protocolVersion: 1,

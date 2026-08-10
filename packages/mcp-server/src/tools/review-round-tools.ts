@@ -15,12 +15,21 @@ const idSchema = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const findingSchema = z
   .object({
-    severity: z.enum(['P1', 'P2', 'P3']),
-    title: z.string().min(1).max(500),
-    details: z.string().min(1).max(10_000),
-    evidence: z.array(z.string().min(1).max(2_000)).max(100).optional(),
+    severity: z.enum(['P1', 'P2', 'P3']).describe('Finding severity: P1 blocking, P2 should fix, or P3 nice to have.'),
+    title: z.string().min(1).max(500).describe('Concise finding title describing the concrete defect or risk.'),
+    details: z
+      .string()
+      .min(1)
+      .max(10_000)
+      .describe('Actionable technical explanation including impact and required correction.'),
+    evidence: z
+      .array(z.string().min(1).max(2_000))
+      .max(100)
+      .optional()
+      .describe('Optional exact file, line, test, command, or runtime evidence references.'),
   })
-  .strict();
+  .strict()
+  .describe('One severity-ranked review finding for the immutable exact SHA.');
 
 export const reviewRoundReadInputSchema = {
   roundId: idSchema.describe('ReviewRound id from the project Review Hub request.'),
@@ -28,25 +37,38 @@ export const reviewRoundReadInputSchema = {
 
 export const reviewDraftSubmitInputSchema = {
   ...reviewRoundReadInputSchema,
-  expectedDraftVersion: z.number().int().nonnegative(),
-  idempotencyKey: idSchema,
-  verdict: z.enum(['approve', 'findings']),
-  findings: z.array(findingSchema).max(200),
+  expectedDraftVersion: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe('Last observed private draft version; use 0 for the first draft.'),
+  idempotencyKey: idSchema.describe('Stable retry key unique to this private draft write.'),
+  verdict: z.enum(['approve', 'findings']).describe('Independent verdict for the exact SHA: approve or findings.'),
+  findings: z.array(findingSchema).max(200).describe('Independent findings; must be empty when verdict is approve.'),
 };
 
 export const reviewStageFinishInputSchema = {
   ...reviewRoundReadInputSchema,
-  expectedRoundVersion: z.number().int().positive(),
-  idempotencyKey: idSchema,
+  expectedRoundVersion: z.number().int().positive().describe('Last observed ReviewRound version for CAS.'),
+  idempotencyKey: idSchema.describe('Stable retry key unique to this stage-finish operation.'),
 };
 
 export const reviewConsensusPublishInputSchema = {
   ...reviewStageFinishInputSchema,
-  expectedManagedWorkVersion: z.number().int().positive(),
-  verdict: z.enum(['changes_requested', 'approved']),
-  checksPassed: z.boolean(),
-  findings: z.array(findingSchema).max(200),
-  resolvedFindingIds: z.array(idSchema).max(200),
+  expectedManagedWorkVersion: z
+    .number()
+    .int()
+    .positive()
+    .describe('Last observed F275 managed-work version for evidence CAS.'),
+  verdict: z
+    .enum(['changes_requested', 'approved'])
+    .describe('Final barrier-safe consensus verdict for the exact SHA.'),
+  checksPassed: z.boolean().describe('Whether the recorder verified the required checks for the exact SHA.'),
+  findings: z.array(findingSchema).max(200).describe('Canonical consensus findings for this round.'),
+  resolvedFindingIds: z
+    .array(idSchema)
+    .max(200)
+    .describe('Stable finding ids from earlier rounds proven closed by this exact SHA.'),
 };
 
 type FindingInput = {
@@ -118,7 +140,9 @@ export const reviewRoundTools = [
     name: 'cat_cafe_review_round_read',
     description:
       'Read the barrier-safe state and consensus findings for one exact-SHA ReviewRound. ' +
-      'The server derives reviewer, owner, and project Review Hub from callback authentication.',
+      'Use when: a Review Hub turn needs the current phase, roster-safe state, or completed consensus. ' +
+      'NOT for: reading private drafts before the barrier, changing the round, or supplying reviewer identity. ' +
+      'Output: callback-scoped ReviewRound state and only barrier-safe findings.',
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewRoundRead,
     governance: {
@@ -131,7 +155,10 @@ export const reviewRoundTools = [
   defineTool({
     name: 'cat_cafe_review_private_draft_read',
     description:
-      'Read only your own private independent-review draft before the barrier opens. Other reviewers drafts remain hidden.',
+      "Read only the authenticated reviewer's private independent-review draft. " +
+      'Use when: resuming or verifying your own draft before finishing the independent stage. ' +
+      'NOT for: reading another reviewer, cross-review, or consensus publication. ' +
+      'Output: your current private draft and version; other reviewers remain hidden.',
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewPrivateDraftRead,
     governance: {
@@ -144,7 +171,10 @@ export const reviewRoundTools = [
   defineTool({
     name: 'cat_cafe_review_draft_submit',
     description:
-      'Create or replace your versioned private exact-SHA review draft. No other reviewer can read it before every reviewer finishes independently.',
+      "Create or replace the authenticated reviewer's versioned private exact-SHA draft. " +
+      'Use when: independent review has produced a complete approve verdict or severity-ranked findings. ' +
+      'NOT for: finishing the stage, reading peers, publishing consensus, or reviewing a different SHA. ' +
+      'Output: the updated private draft and draft version; peers cannot read it before the barrier.',
     inputSchema: reviewDraftSubmitInputSchema,
     handler: handleReviewDraftSubmit,
     governance: {
@@ -157,7 +187,10 @@ export const reviewRoundTools = [
   defineTool({
     name: 'cat_cafe_review_independent_finish',
     description:
-      'Fence your current independent draft as finished. The draft barrier opens only after every assigned reviewer finishes independently.',
+      "Fence the authenticated reviewer's current independent draft as finished. " +
+      'Use when: your private draft is final and must count toward opening the independent-review barrier. ' +
+      'NOT for: submitting a draft, skipping another reviewer, cross-review, or publishing consensus. ' +
+      'Output: updated round phase/version; the barrier opens only after every assigned reviewer finishes.',
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewIndependentFinish,
     governance: {
@@ -170,7 +203,10 @@ export const reviewRoundTools = [
   defineTool({
     name: 'cat_cafe_review_barrier_drafts_read',
     description:
-      'Read all assigned reviewers drafts after the independent-review barrier has opened, for explicit cross-review and corroboration.',
+      'Read all assigned reviewer drafts after the independent barrier opens. ' +
+      'Use when: performing explicit cross-review, corroboration, and contradiction checks. ' +
+      'NOT for: pre-barrier access, editing drafts, or publishing consensus. ' +
+      'Output: the barrier-open set of immutable independent drafts.',
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewBarrierDraftsRead,
     governance: {
@@ -183,7 +219,10 @@ export const reviewRoundTools = [
   defineTool({
     name: 'cat_cafe_review_cross_finish',
     description:
-      'Record that you completed cross-review against the barrier-open reviewer drafts. Consensus remains blocked until every reviewer finishes.',
+      'Record that the authenticated reviewer completed cross-review of the barrier-open drafts. ' +
+      'Use when: you compared every independent draft and resolved corroborations or contradictions. ' +
+      'NOT for: independent review, draft submission, or unilateral consensus. ' +
+      'Output: updated round phase/version; consensus remains blocked until every reviewer finishes.',
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewCrossFinish,
     governance: {
@@ -197,7 +236,9 @@ export const reviewRoundTools = [
     name: 'cat_cafe_review_consensus_publish',
     description:
       'Publish the final barrier-safe consensus for an exact-SHA round and append its canonical managed-work review evidence. ' +
-      'Only the server-designated recorder in the project Review Hub can succeed; this never posts an Issue, merges, pushes, or deploys.',
+      'Use when: all reviewers finished cross-review and the server-designated recorder has the canonical verdict, checks, findings, and resolved ids. ' +
+      'NOT for: non-recorders, pre-barrier publication, GitHub Issues, Git merge, push, deploy, or project-specific publication policy. ' +
+      'Output: completed ReviewRound consensus, durable findings, and canonical F275 review evidence.',
     inputSchema: reviewConsensusPublishInputSchema,
     handler: handleReviewConsensusPublish,
     governance: {

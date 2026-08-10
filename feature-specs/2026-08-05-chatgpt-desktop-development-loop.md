@@ -4,7 +4,7 @@
 
 **Goal:** deliver a project-scoped, durable Cat Café ↔ ChatGPT Desktop development loop with one reusable Review Hub, replaceable chat bindings, two manual merge pilots and an explicit per-project auto-merge opt-in.
 
-**Architecture:** extend ExternalProject with a versioned F289 binding; resolve one deterministic Review Hub thread per project; reuse F275 work/attempt/terminal truth, F253 ReviewRound semantics, F211 external runtime sessions and F286 MCP governance. Resume Packet is a projection, not another state root.
+**Architecture:** extend ExternalProject with a versioned F289 binding; resolve one deterministic Review Hub thread per project; reuse F275 work/attempt/terminal truth, F253 ReviewRound semantics and F286 MCP governance. F289 owns the external Desktop session binding because F211 is a CatId/agent-key/Antigravity session registry. Resume Packet is a projection, not another state root.
 
 **Finish line:** the integration/recovery suite proves design → Desktop implementation → two-cat exact-SHA review → fix loop → guarded merge → operator acceptance, including deletion/rebinding of both visible chat surfaces.
 
@@ -18,7 +18,6 @@
 - Modify `packages/shared/src/index.ts`
 - Create `docs/architecture/ownership/cells/desktop-development-loop.md`
 - Modify `docs/architecture/ownership/cells/managed-work.md`
-- Modify `docs/architecture/ownership/cells/identity-session.md`
 - Regenerate `docs/architecture/ownership/README.md`
 - Test in the repository's shared contract harness
 
@@ -109,16 +108,16 @@ pnpm check:features
 
 ## Phase 2 — Desktop session and Resume Packet
 
-### Task 2.1: additive F211 runtime source
+### Task 2.1: external Desktop provenance without Cat identity impersonation
 
 **Files**
 
-- Modify runtime-session metadata/registration types and validators
-- Modify external-runtime-session API/MCP tests and routes
+- Keep F211 runtime-session metadata/registration types and validators unchanged
+- Persist external Desktop runtime session/chat provenance in the F289 project/work binding store
 
-**Red**: `chatgpt-desktop` register/list/read; `antigravity-desktop` regression; spoofed source/user denial.
+**Red**: rebind/list/read F289 Desktop sessions; stale epoch denial; source/user spoof denial; source inventory proves F211 remains `antigravity-desktop` only.
 
-**Green**: add provenance source only; do not copy Antigravity's execution bridge.
+**Green**: preserve the distinct `chatgpt-desktop-dev` external actor; do not mint a CatId, accept an agent key, or copy Antigravity's execution bridge.
 
 ### Task 2.2: binding epoch, lease and workspace record
 
@@ -219,11 +218,11 @@ Dispatch CodeX + Kimi using existing Cat Café invocation semantics, pin identic
 - Update skill manifest and wakeup index
 - Add deterministic guard tests
 
-The skill reads Resume Packet, reuses a permanent worktree, implements/tests/commits through Desktop native tools, reports exact SHA/checks, fixes all safe findings, and stops for the correct merge/acceptance gate. It never infers state from chat history when the server packet is available.
+The skill resolves the exact repository to one project, selects only a canonical project-scoped Workflow SOP managed-work candidate, reads Resume Packet, reuses a permanent worktree, implements/tests/commits through Desktop native tools, reports exact SHA/checks, fixes all safe findings, and stops for the correct merge/acceptance gate. It asks the user when several active candidates remain and never infers identity or state from list order, branch, chat history or a fallback ledger.
 
-### Task 5.3: Scheduled Task recovery contract
+### Task 5.3: Idempotent wake/recovery contract
 
-Polling is idempotent and may reconnect the same current chat. The task reference is non-authoritative metadata. Deleting the task/chat cannot delete work. Empty polls and transient MCP failures are non-terminal.
+Polling is idempotent and may reconnect the same current chat. When the active Desktop profile has no scheduler tools, the skill resumes on the next app wake or user message and must not claim background polling. Any optional task reference is non-authoritative metadata. Deleting the task/chat cannot delete work. Empty polls and transient MCP failures are non-terminal.
 
 ## Phase 6 — Merge pilot and end-to-end verification
 

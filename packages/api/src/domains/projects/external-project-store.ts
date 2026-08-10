@@ -6,12 +6,12 @@
 import { resolve } from 'node:path';
 import {
   applyDesktopDevelopmentPolicyUpdate,
-  createDesktopDevelopmentProjectBinding,
-  recordAcceptedManualPilot,
   type CreateExternalProjectInput,
+  createDesktopDevelopmentProjectBinding,
   type DesktopDevelopmentPolicyUpdate,
   type DesktopDevelopmentProjectBinding,
   type ExternalProject,
+  recordAcceptedManualPilot,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../cats/services/stores/ports/MessageStore.js';
@@ -115,10 +115,7 @@ export class ExternalProjectStore {
     return updated;
   }
 
-  async updateDesktopDevelopment(
-    id: string,
-    patch: DesktopDevelopmentPolicyUpdate,
-  ): Promise<ExternalProject | null> {
+  async updateDesktopDevelopment(id: string, patch: DesktopDevelopmentPolicyUpdate): Promise<ExternalProject | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
     if (!existing.desktopDevelopment) {

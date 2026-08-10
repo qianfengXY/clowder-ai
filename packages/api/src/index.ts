@@ -4308,7 +4308,7 @@ async function main(): Promise<void> {
   let reviewRoundCoordinatorService:
     | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
     | undefined;
-  if (redis) {
+  if (redis && workflowSopStore) {
     const [serviceMod, coordinatorMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
       import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
       import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
@@ -4333,6 +4333,8 @@ async function main(): Promise<void> {
       managedWorkConsumerPort,
       reviewRoundStore,
       reviewRoundDispatcher,
+      backlogStore,
+      workflowSopStore,
     );
     reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
       reviewRoundStore,

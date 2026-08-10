@@ -396,9 +396,7 @@ function normalizeClaim(input: ClaimManagedWorkAttemptInput): Required<ClaimMana
   return { ...input, now };
 }
 
-function normalizeNextAttempt(
-  input: CreateNextManagedWorkAttemptInput,
-): Required<CreateNextManagedWorkAttemptInput> {
+function normalizeNextAttempt(input: CreateNextManagedWorkAttemptInput): Required<CreateNextManagedWorkAttemptInput> {
   assertConsumer(input.consumerId);
   assertId(input.ownerUserId, 'ownerUserId');
   assertId(input.workId, 'workId');
@@ -411,9 +409,7 @@ function normalizeNextAttempt(
   return { ...input, now };
 }
 
-function normalizeEvidenceAppend(
-  input: AppendManagedWorkEvidenceInput,
-): Required<AppendManagedWorkEvidenceInput> {
+function normalizeEvidenceAppend(input: AppendManagedWorkEvidenceInput): Required<AppendManagedWorkEvidenceInput> {
   normalizeIdentity(input);
   assertPositiveInteger(input.expectedVersion, 'expectedVersion');
   assertId(input.idempotencyKey, 'idempotencyKey');
@@ -496,11 +492,7 @@ function parseAttempt(raw: string | null, workId: string, attemptId: string): Wo
     : { ...attempt, executorActor: { kind: 'cat', catId: attempt.executorCatId } };
 }
 
-function parseState(
-  raw: string | null,
-  consumerId: ManagedWorkConsumerId,
-  workId: string,
-): ManagedWorkConsumerState {
+function parseState(raw: string | null, consumerId: ManagedWorkConsumerId, workId: string): ManagedWorkConsumerState {
   if (!raw) throw new Error('Managed-work consumer state is unavailable');
   const state = parseJson<ManagedWorkConsumerState>(raw, 'managed-work consumer state');
   if (state.consumerId !== consumerId || state.workId !== workId) {
@@ -517,11 +509,7 @@ function parseEvidenceResult(raw: unknown): ManagedWorkEvidenceAppendResult {
   return parseTaggedResult<ManagedWorkEvidenceAppendResult>(raw);
 }
 
-function parseStateResult(
-  raw: unknown,
-  consumerId: ManagedWorkConsumerId,
-  workId: string,
-): ManagedWorkConsumerState {
+function parseStateResult(raw: unknown, consumerId: ManagedWorkConsumerId, workId: string): ManagedWorkConsumerState {
   const state = parseTaggedResult<ManagedWorkConsumerState>(raw);
   if (state.consumerId !== consumerId || state.workId !== workId) {
     throw new Error('Managed-work consumer state is invalid');

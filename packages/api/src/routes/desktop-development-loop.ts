@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { DESKTOP_DEVELOPMENT_PROTOCOL_VERSION } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { DesktopDevelopmentLoopService } from '../domains/desktop-development-loop/desktop-development-loop-service.js';
@@ -122,8 +123,20 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
   }
 
   function requireDesktopPrincipal(request: FastifyRequest, reply: FastifyReply): string | null {
-    if (!desktopDevelopmentLoopService || !desktopDevelopmentToken || !desktopDevelopmentOwnerUserId) {
-      void reply.status(503).send({ error: 'Desktop development authentication is not configured' });
+    if (!desktopDevelopmentLoopService) {
+      void reply.status(503).send({
+        error: 'Desktop managed-work capability is unavailable',
+        code: 'managed_work_capability_unavailable',
+        action: 'Upgrade or enable the F275 managed-work consumer capability before retrying.',
+      });
+      return null;
+    }
+    if (!desktopDevelopmentToken || !desktopDevelopmentOwnerUserId) {
+      void reply.status(503).send({
+        error: 'Desktop development authentication is not configured',
+        code: 'desktop_development_auth_unavailable',
+        action: 'Configure the scoped Desktop development credential before retrying.',
+      });
       return null;
     }
     const authorization = request.headers.authorization;
@@ -137,13 +150,19 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
 
   function sendError(reply: FastifyReply, error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
+    if (/protocol mismatch/i.test(message)) {
+      return reply.status(426).send({
+        error: message,
+        code: 'desktop_development_protocol_mismatch',
+        supportedProtocolVersion: DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
+        action: `Upgrade or reconfigure the Desktop client to protocol version ${DESKTOP_DEVELOPMENT_PROTOCOL_VERSION} before any write.`,
+      });
+    }
     const status = /not found/i.test(message)
       ? 404
-      : /protocol mismatch/i.test(message)
-        ? 426
-        : /conflict|belongs|binding|lease|configured|repository|current committed|requires/i.test(message)
-          ? 409
-          : 400;
+      : /conflict|belongs|binding|lease|configured|repository|current committed|requires/i.test(message)
+        ? 409
+        : 400;
     return reply.status(status).send({ error: message });
   }
 
@@ -154,6 +173,21 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     try {
       const reviewHub = await projectReviewHubService.ensureForProject(id, userId);
       return reply.send({ reviewHub });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.get('/api/desktop-development-loop/v1/projects/resolve', async (request, reply) => {
+    const ownerUserId = requireDesktopPrincipal(request, reply);
+    if (!ownerUserId || !desktopDevelopmentLoopService) return;
+    const query = z
+      .object({ protocolVersion: protocolSchema, repository: z.string().min(3).max(300) })
+      .strict()
+      .safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ error: 'Invalid request' });
+    try {
+      return reply.send(await desktopDevelopmentLoopService.readProjectByRepository({ ...query.data, ownerUserId }));
     } catch (error) {
       return sendError(reply, error);
     }
@@ -185,6 +219,30 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     if (!params.success || !query.success) return reply.status(400).send({ error: 'Invalid request' });
     try {
       return reply.send(await desktopDevelopmentLoopService.readWork({ ...params.data, ...query.data, ownerUserId }));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.get('/api/external-projects/:projectId/development-loop/works', async (request, reply) => {
+    const ownerUserId = requireUserId(request, reply);
+    if (!ownerUserId) return;
+    if (!desktopDevelopmentLoopService) {
+      return reply.status(503).send({
+        error: 'Desktop managed-work capability is unavailable',
+        code: 'managed_work_capability_unavailable',
+      });
+    }
+    const params = z.object({ projectId: idSchema }).strict().safeParse(request.params);
+    const query = z.object({ protocolVersion: protocolSchema }).strict().safeParse(request.query);
+    if (!params.success || !query.success) return reply.status(400).send({ error: 'Invalid request' });
+    try {
+      const works = await desktopDevelopmentLoopService.listProjectWorks({
+        ...params.data,
+        ...query.data,
+        ownerUserId,
+      });
+      return reply.send({ works });
     } catch (error) {
       return sendError(reply, error);
     }
