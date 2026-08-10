@@ -76,7 +76,9 @@ function rememberScrollState(threadId: string, el: HTMLElement) {
   });
 }
 
-const HISTORY_PAGE_SIZE = 50;
+// Keep the initial payload small enough for mobile clients behind a tunnel.
+// Older messages remain available through the existing cursor pagination.
+const HISTORY_PAGE_SIZE = 10;
 // A tunnel can leave fetch() pending indefinitely without actually closing the
 // connection. Bound history reads so loadingRef is released and the existing
 // catch-up retry loop can try again after connectivity returns.

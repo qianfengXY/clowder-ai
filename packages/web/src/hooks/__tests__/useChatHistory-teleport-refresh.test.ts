@@ -135,7 +135,7 @@ describe('useChatHistory approval-card teleport refresh', () => {
     });
 
     const historyCall = apiFetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/messages?'));
-    expect(historyCall?.[0]).toBe(`/api/messages?limit=50&threadId=${THREAD_ID}`);
+    expect(historyCall?.[0]).toBe(`/api/messages?limit=10&threadId=${THREAD_ID}`);
     expect(useChatStore.getState().messages.map((message) => message.id)).toContain(APPROVAL_CARD.id);
     expect(peekPendingTeleport(THREAD_ID)).toBeNull();
   });
@@ -154,7 +154,7 @@ describe('useChatHistory approval-card teleport refresh', () => {
     });
 
     const historyCall = apiFetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/messages?'));
-    expect(historyCall?.[0]).toBe(`/api/messages?limit=50&threadId=${THREAD_ID}`);
+    expect(historyCall?.[0]).toBe(`/api/messages?limit=10&threadId=${THREAD_ID}`);
     expect(useChatStore.getState().messages.map((message) => message.id)).toContain(CROSS_POST_SOURCE.id);
     expect(peekPendingCrossPostScroll(THREAD_ID)).toBeNull();
   });
