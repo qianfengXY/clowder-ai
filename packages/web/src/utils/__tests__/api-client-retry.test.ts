@@ -164,4 +164,74 @@ describe('apiFetch 401 retry', () => {
     expect(sessionCalls.length).toBe(2);
     expect(messageCalls.length).toBe(1);
   });
+
+  it('releases a stuck session gate after its timeout so the next call can recover', async () => {
+    vi.useFakeTimers();
+    let sessionAttempts = 0;
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/api/session')) {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+              once: true,
+            });
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    });
+    globalThis.fetch = mockFetch;
+
+    const { apiFetch } = await loadApiModules();
+    const first = apiFetch('/api/messages');
+    const firstRejection = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await firstRejection;
+
+    await expect(apiFetch('/api/messages')).resolves.toMatchObject({ status: 200 });
+    expect(sessionAttempts).toBe(2);
+    vi.useRealTimers();
+  });
+
+  it('retries a timed-out GET once on a fresh connection', async () => {
+    vi.useFakeTimers();
+    let messageAttempts = 0;
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/api/session')) return Promise.resolve({ ok: true, status: 200 });
+      messageAttempts += 1;
+      if (messageAttempts === 1) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+            once: true,
+          });
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    });
+    globalThis.fetch = mockFetch;
+
+    const { apiFetch } = await loadApiModules();
+    const response = apiFetch('/api/audit/thread/t1');
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    await expect(response).resolves.toMatchObject({ status: 200 });
+    expect(messageAttempts).toBe(2);
+    vi.useRealTimers();
+  });
+
+  it('does not retry a failed mutation', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/session')) return Promise.resolve({ ok: true, status: 200 });
+      return Promise.reject(new Error('tunnel reset'));
+    });
+    globalThis.fetch = mockFetch;
+
+    const { apiFetch } = await loadApiModules();
+    await expect(apiFetch('/api/messages', { method: 'POST', body: '{}' })).rejects.toThrow('tunnel reset');
+
+    const messageCalls = mockFetch.mock.calls.filter((call) => (call[0] as string).includes('/api/messages'));
+    expect(messageCalls).toHaveLength(1);
+  });
 });

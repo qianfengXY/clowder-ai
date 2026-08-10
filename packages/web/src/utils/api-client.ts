@@ -48,6 +48,27 @@ export const API_URL = resolveApiUrl();
 
 let sessionGate: Promise<void> | null = null;
 let lastSessionFailureToastAt = 0;
+export const SESSION_BOOTSTRAP_TIMEOUT_MS = 5_000;
+export const READ_REQUEST_TIMEOUT_MS = 8_000;
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  if (!timeoutMs) return fetch(url, init);
+
+  const controller = new AbortController();
+  const parentSignal = init.signal;
+  const abortFromParent = () => controller.abort();
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', abortFromParent);
+  });
+}
 
 function notifySessionFailure() {
   const now = Date.now();
@@ -63,7 +84,11 @@ function notifySessionFailure() {
 
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  sessionGate = fetch(`${API_URL}/api/session`, { credentials: 'include' })
+  sessionGate = fetchWithTimeout(
+    `${API_URL}/api/session`,
+    { credentials: 'include' },
+    SESSION_BOOTSTRAP_TIMEOUT_MS,
+  )
     .then((res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
@@ -108,18 +133,32 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   await ensureSession();
   const normalized = ensureBodyForMutation(init);
-  const res = await fetch(`${API_URL}${path}`, {
-    ...normalized,
-    credentials: 'include',
-  });
+  const method = normalized?.method?.toUpperCase() ?? 'GET';
+  const isReadRequest = method === 'GET' || method === 'HEAD';
+  const request = () =>
+    fetchWithTimeout(
+      `${API_URL}${path}`,
+      {
+        ...normalized,
+        credentials: 'include',
+      },
+      isReadRequest ? READ_REQUEST_TIMEOUT_MS : undefined,
+    );
+
+  let res: Response;
+  try {
+    res = await request();
+  } catch (err) {
+    // A cpolar data connection can remain half-open indefinitely. Retrying a
+    // read is safe and opens a fresh proxy connection; never replay mutations.
+    if (!isReadRequest || normalized?.signal?.aborted) throw err;
+    res = await request();
+  }
   if (res.status === 401) {
     // Session expired (API restart, cookie cleared). Re-establish and retry once.
     sessionGate = null;
     await ensureSession();
-    const retryRes = await fetch(`${API_URL}${path}`, {
-      ...normalized,
-      credentials: 'include',
-    });
+    const retryRes = await request();
     if (retryRes.status === 401) {
       notifySessionFailure();
     }
