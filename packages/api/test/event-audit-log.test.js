@@ -89,6 +89,25 @@ describe('EventAuditLog', () => {
     assert.ok(t1Events.every((e) => e.threadId === 't1'));
   });
 
+  test('readByThread limit returns only the newest matching events', async () => {
+    const realNow = Date.now;
+    let timestamp = realNow();
+    Date.now = () => timestamp++;
+    try {
+      await auditLog.append({ type: 'first', threadId: 't1', data: {} });
+      await auditLog.append({ type: 'second', threadId: 't1', data: {} });
+      await auditLog.append({ type: 'third', threadId: 't1', data: {} });
+    } finally {
+      Date.now = realNow;
+    }
+
+    const events = await auditLog.readByThread('t1', { days: 1, limit: 2 });
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ['third', 'second'],
+    );
+  });
+
   test('readByDate returns empty array for nonexistent date', async () => {
     const events = await auditLog.readByDate('1999-01-01');
     assert.deepEqual(events, []);

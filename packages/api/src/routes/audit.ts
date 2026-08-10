@@ -21,35 +21,40 @@ export interface AuditRoutesOptions {
 export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, opts) => {
   const { threadStore } = opts;
 
-  app.get<{ Params: { threadId: string } }>('/api/audit/thread/:threadId', async (request, reply) => {
-    const { threadId } = request.params;
-    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+  app.get<{ Params: { threadId: string }; Querystring: { limit?: string } }>(
+    '/api/audit/thread/:threadId',
+    async (request, reply) => {
+      const { threadId } = request.params;
+      const requestedLimit = Number(request.query.limit ?? 100);
+      const limit = Number.isFinite(requestedLimit) ? Math.min(500, Math.max(1, Math.trunc(requestedLimit))) : 100;
+      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
 
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
-    }
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      }
 
-    const thread = await threadStore.get(threadId);
-    if (!thread) {
-      reply.status(404);
-      return { error: 'Thread not found' };
-    }
+      const thread = await threadStore.get(threadId);
+      if (!thread) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
 
-    if (thread.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Access denied' };
-    }
+      if (thread.createdBy !== userId) {
+        reply.status(403);
+        return { error: 'Access denied' };
+      }
 
-    const auditLog = getEventAuditLog();
-    const events = await auditLog.readByThread(threadId, { days: 7 });
-    const logFiles = await auditLog.listFiles();
+      const auditLog = getEventAuditLog();
+      const events = await auditLog.readByThread(threadId, { days: 7, limit });
+      const logFiles = await auditLog.listFiles();
 
-    // logPath 仅在开发环境或显式开关下暴露 (避免生产路径泄露)
-    const env = process.env;
-    const exposePath = env.EXPOSE_LOG_PATH === 'true' || env.NODE_ENV !== 'production';
-    const logPath = exposePath ? auditLog.getLogPath() : null;
+      // logPath 仅在开发环境或显式开关下暴露 (避免生产路径泄露)
+      const env = process.env;
+      const exposePath = env.EXPOSE_LOG_PATH === 'true' || env.NODE_ENV !== 'production';
+      const logPath = exposePath ? auditLog.getLogPath() : null;
 
-    return { events, logPath, logFiles };
-  });
+      return { events, logPath, logFiles };
+    },
+  );
 };

@@ -43,7 +43,7 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
     setLoading(true);
     setError(false);
     try {
-      const res = await apiFetch(`/api/audit/thread/${threadId}`);
+      const res = await apiFetch(`/api/audit/thread/${threadId}?limit=100`);
       if (!res.ok) {
         setError(true);
         return;

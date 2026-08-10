@@ -56,7 +56,7 @@ describe('AuditEventsTab', () => {
 
     await renderTab();
 
-    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/audit/thread/t1');
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/audit/thread/t1?limit=100');
     expect(container.textContent).toContain('debate_winner');
     expect(container.textContent).toContain('phase_completed');
     expect(container.textContent).toContain('invocation_error');

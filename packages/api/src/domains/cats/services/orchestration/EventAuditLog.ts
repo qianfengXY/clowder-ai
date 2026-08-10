@@ -118,8 +118,9 @@ export class EventAuditLog {
   /**
    * Read all events for a specific thread.
    */
-  async readByThread(threadId: string, options?: { days?: number }): Promise<AuditEvent[]> {
+  async readByThread(threadId: string, options?: { days?: number; limit?: number }): Promise<AuditEvent[]> {
     const days = options?.days ?? 30;
+    const limit = options?.limit;
     const events: AuditEvent[] = [];
 
     for (let i = 0; i < days; i++) {
@@ -127,9 +128,11 @@ export class EventAuditLog {
       date.setDate(date.getDate() - i);
       const dayEvents = await this.readByDate(date);
       events.push(...dayEvents.filter((e) => e.threadId === threadId));
+      if (limit !== undefined && events.length >= limit) break;
     }
 
-    return events.sort((a, b) => b.timestamp - a.timestamp);
+    const sorted = events.sort((a, b) => b.timestamp - a.timestamp);
+    return limit === undefined ? sorted : sorted.slice(0, limit);
   }
 
   /**
