@@ -7,6 +7,19 @@ export const DESKTOP_DEVELOPMENT_REQUIRED_PILOTS = 2 as const;
 export type DesktopDevelopmentProtocolVersion = typeof DESKTOP_DEVELOPMENT_PROTOCOL_VERSION;
 export type DesktopDevelopmentActor = typeof CHATGPT_DESKTOP_DEVELOPMENT_ACTOR;
 export type DesktopDevelopmentMergeMode = 'manual_confirm_in_chatgpt' | 'automatic';
+export type DesktopDevelopmentPhase =
+  | 'ready_for_desktop'
+  | 'implementing'
+  | 'implementation_ready'
+  | 'independent_review'
+  | 'cross_review'
+  | 'fix_required'
+  | 'approved_for_merge'
+  | 'awaiting_manual_merge_confirmation'
+  | 'auto_merge_ready'
+  | 'acceptance_pending'
+  | 'accepted'
+  | 'rejected';
 
 export interface GitHubRepositoryIdentity {
   readonly host: 'github.com';
@@ -97,6 +110,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly defaultBranch: string;
   readonly workId: string;
   readonly attemptId: string;
+  readonly attemptNumber: number;
+  readonly phase: DesktopDevelopmentPhase;
   readonly workLifecycle: 'active' | 'accepted' | 'rejected';
   readonly managedWorkVersion: number;
   readonly bindingEpoch: number;

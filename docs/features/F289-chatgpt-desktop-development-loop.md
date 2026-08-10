@@ -117,6 +117,8 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 - `cat_cafe_development_project_read`：按 project ID 或精确 GitHub repo 读取项目绑定、Review Hub，以及由项目 Backlog + Workflow SOP 导出的权威 managed-work candidates；多候选时 Desktop 必须请用户选择。
 - `cat_cafe_development_work_read`：读取 Resume Packet、当前 attempt、检查证据与 legal actions。
 - `cat_cafe_development_work_connect`：claim/rebind 当前 Desktop chat，提升 binding epoch。
+- 当 Resume Packet 为 `fix_required` 时，同一 connect 工具幂等创建下一 F275 attempt 并把当前 chat 绑定到
+  新 attempt；返回递增的 `attemptNumber`，不新增第八个 lifecycle 工具或 F289 私有 attempt ledger。
 - `cat_cafe_development_work_heartbeat`：续租并可刷新 committed workspace metadata。
 - `cat_cafe_development_implementation_report`：报告 committed exact SHA 并触发同一 Review Hub 的新 round。
 - `cat_cafe_development_merge_confirmation_record`：记录前两次试点中当前 chat 的用户确认；不执行 Git。

@@ -5,6 +5,7 @@ import {
   CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
   DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
   DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
+  type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
   type DesktopSessionBinding,
   type ManagedWorkConsumerSnapshot,
@@ -244,7 +245,30 @@ export class DesktopDevelopmentLoopService {
 
     const identity = this.managedIdentity(input);
     let snapshot = await this.managedWork.read(identity);
-    if (!snapshot.attempt.executorActor && !snapshot.attempt.executorCatId) {
+    const review = await this.reviewRounds.readCurrentSafe({
+      ownerUserId: input.ownerUserId,
+      projectId: input.projectId,
+      workId: input.workId,
+    });
+    const startsFixAttempt =
+      review?.round.phase === 'complete' &&
+      review.round.attemptId === input.attemptId &&
+      review.currentForWork &&
+      review.consensus?.verdict === 'changes_requested';
+    if (startsFixAttempt) {
+      snapshot = await this.managedWork.createNextAttempt({
+        consumerId: CONSUMER_ID,
+        ownerUserId: input.ownerUserId,
+        workId: input.workId,
+        fromAttemptId: input.attemptId,
+        executor: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
+        expectedVersion: input.expectedManagedWorkVersion,
+        idempotencyKey: `${input.idempotencyKey}:next-attempt`,
+        ...(input.now === undefined ? {} : { now: input.now }),
+      });
+    } else if (snapshot.state.currentAttemptId !== snapshot.attempt.attemptId) {
+      throw new Error(`Managed-work stale attempt: current ${snapshot.state.currentAttemptId}`);
+    } else if (!snapshot.attempt.executorActor && !snapshot.attempt.executorCatId) {
       snapshot = await this.managedWork.claimAttempt({
         ...identity,
         executor: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
@@ -262,7 +286,7 @@ export class DesktopDevelopmentLoopService {
     await this.sessions.bind({
       projectId: input.projectId,
       workId: input.workId,
-      attemptId: input.attemptId,
+      attemptId: snapshot.attempt.attemptId,
       runtimeSessionId: input.runtimeSessionId,
       ...(input.chatRef ? { chatRef: input.chatRef } : {}),
       expectedEpoch: input.expectedBindingEpoch,
@@ -277,7 +301,7 @@ export class DesktopDevelopmentLoopService {
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
       workId: input.workId,
-      attemptId: input.attemptId,
+      attemptId: snapshot.attempt.attemptId,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
   }
@@ -554,6 +578,13 @@ export class DesktopDevelopmentLoopService {
         evidence.bindingEpoch === session.bindingEpoch,
     );
     const merged = managed.evidence.some((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha);
+    const derived = deriveDesktopDevelopmentState({
+      managedLifecycle: managed.state.lifecycle,
+      session,
+      review,
+      managed,
+      mergeMode: project.desktopDevelopment.mergeMode,
+    });
     return {
       protocolVersion: DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
       projectId: project.id,
@@ -561,6 +592,8 @@ export class DesktopDevelopmentLoopService {
       defaultBranch: project.desktopDevelopment.defaultBranch,
       workId: managed.state.workId,
       attemptId: managed.attempt.attemptId,
+      attemptNumber: managed.attempt.attemptNumber,
+      phase: derived.phase,
       workLifecycle: managed.state.lifecycle,
       managedWorkVersion: knownManagedVersion ?? managed.state.version,
       bindingEpoch: session.bindingEpoch,
@@ -581,13 +614,7 @@ export class DesktopDevelopmentLoopService {
       reviewRoundVersion: review?.round.version ?? null,
       reviewCurrentForWork: review?.currentForWork ?? false,
       openFindings,
-      nextLegalActions: deriveNextLegalActions({
-        managedLifecycle: managed.state.lifecycle,
-        session,
-        review,
-        managed,
-        mergeMode: project.desktopDevelopment.mergeMode,
-      }),
+      nextLegalActions: derived.nextLegalActions,
     };
   }
 
@@ -684,7 +711,7 @@ export class DesktopDevelopmentLoopService {
   }
 }
 
-interface NextLegalActionsInput {
+interface DesktopDevelopmentStateInput {
   managedLifecycle: 'active' | 'accepted' | 'rejected';
   session: DesktopSessionBinding;
   review: ReviewRoundSafeView | null;
@@ -692,28 +719,59 @@ interface NextLegalActionsInput {
   mergeMode: 'manual_confirm_in_chatgpt' | 'automatic';
 }
 
-function deriveNextLegalActions(input: NextLegalActionsInput): readonly string[] {
-  if (input.managedLifecycle !== 'active') return [];
-  if (input.session.status !== 'active') return ['rebind_session'];
-  if (!input.session.workspace.worktreePresent) return ['rebuild_worktree_from_last_committed_sha'];
-  if (!input.review) return ['implement_and_report_committed_sha'];
-  if (input.review.round.exactSha !== input.session.workspace.currentSha) return ['report_new_committed_sha'];
-  if (input.review.round.phase === 'complete') return deriveCompletedReviewActions(input);
+interface DesktopDevelopmentDerivedState {
+  readonly phase: DesktopDevelopmentPhase;
+  readonly nextLegalActions: readonly string[];
+}
+
+function deriveDesktopDevelopmentState(input: DesktopDevelopmentStateInput): DesktopDevelopmentDerivedState {
+  if (input.managedLifecycle === 'accepted') return { phase: 'accepted', nextLegalActions: [] };
+  if (input.managedLifecycle === 'rejected') return { phase: 'rejected', nextLegalActions: [] };
+  if (input.session.status !== 'active') {
+    return { phase: 'ready_for_desktop', nextLegalActions: ['rebind_session'] };
+  }
+  if (!input.session.workspace.worktreePresent) {
+    return { phase: 'ready_for_desktop', nextLegalActions: ['rebuild_worktree_from_last_committed_sha'] };
+  }
+  if (!input.review) {
+    return { phase: 'implementing', nextLegalActions: ['implement_and_report_committed_sha'] };
+  }
+  if (input.review.round.attemptId !== input.session.attemptId) {
+    if (input.review.round.exactSha === input.session.workspace.currentSha) {
+      return { phase: 'implementing', nextLegalActions: ['fix_open_findings'] };
+    }
+    return workspaceImplementationState(input.session.workspace);
+  }
+  if (input.review.round.exactSha !== input.session.workspace.currentSha) {
+    return workspaceImplementationState(input.session.workspace);
+  }
+  if (input.review.round.phase === 'complete') return deriveCompletedReviewState(input);
   switch (input.review.round.phase) {
     case 'independent':
-      return ['wait_for_independent_review'];
+      return { phase: 'independent_review', nextLegalActions: ['wait_for_independent_review'] };
     case 'cross_review':
-      return ['wait_for_cross_review'];
+      return { phase: 'cross_review', nextLegalActions: ['wait_for_cross_review'] };
     case 'consensus_ready':
-      return ['wait_for_consensus'];
+      return { phase: 'cross_review', nextLegalActions: ['wait_for_consensus'] };
   }
 }
 
-function deriveCompletedReviewActions(input: NextLegalActionsInput): readonly string[] {
+function workspaceImplementationState(workspace: WorkspaceBinding): DesktopDevelopmentDerivedState {
+  if (workspace.currentSha === workspace.lastCommittedSha) {
+    return { phase: 'implementation_ready', nextLegalActions: ['report_new_committed_sha'] };
+  }
+  return { phase: 'implementing', nextLegalActions: ['commit_changes_before_report'] };
+}
+
+function deriveCompletedReviewState(input: DesktopDevelopmentStateInput): DesktopDevelopmentDerivedState {
   const review = input.review;
-  if (!review || review.round.phase !== 'complete') return ['report_new_committed_sha'];
-  if (review.consensus?.verdict === 'changes_requested') return ['fix_open_findings'];
-  if (review.consensus?.verdict !== 'approved' || !review.currentForWork) return ['report_new_committed_sha'];
+  if (!review || review.round.phase !== 'complete') return workspaceImplementationState(input.session.workspace);
+  if (review.consensus?.verdict === 'changes_requested') {
+    return { phase: 'fix_required', nextLegalActions: ['start_fix_attempt'] };
+  }
+  if (review.consensus?.verdict !== 'approved' || !review.currentForWork) {
+    return workspaceImplementationState(input.session.workspace);
+  }
   const exactSha = review.round.exactSha;
   const reviewCompleted = input.managed.evidence.some(
     (evidence) =>
@@ -723,17 +781,24 @@ function deriveCompletedReviewActions(input: NextLegalActionsInput): readonly st
       evidence.openFindingCount === 0 &&
       evidence.checksPassed,
   );
-  if (!reviewCompleted) return ['wait_for_review_evidence'];
+  if (!reviewCompleted) {
+    return { phase: 'approved_for_merge', nextLegalActions: ['wait_for_review_evidence'] };
+  }
   const merged = input.managed.evidence.some(
     (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
   );
-  if (merged) return ['wait_for_final_acceptance'];
+  if (merged) return { phase: 'acceptance_pending', nextLegalActions: ['wait_for_final_acceptance'] };
   const currentConfirmation = input.managed.evidence.some(
     (evidence) =>
       evidence.kind === 'merge_confirmed' &&
       evidence.exactSha === exactSha &&
       evidence.bindingEpoch === input.session.bindingEpoch,
   );
-  if (input.mergeMode === 'automatic' || currentConfirmation) return ['merge_with_native_git'];
-  return ['request_merge_confirmation'];
+  if (input.mergeMode === 'automatic' || currentConfirmation) {
+    return { phase: 'auto_merge_ready', nextLegalActions: ['merge_with_native_git'] };
+  }
+  return {
+    phase: 'awaiting_manual_merge_confirmation',
+    nextLegalActions: ['request_merge_confirmation'],
+  };
 }

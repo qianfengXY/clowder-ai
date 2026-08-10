@@ -255,15 +255,32 @@ async function readCurrentThreads(): Promise<Thread[] | null> {
 }
 
 function describeWorkState(work: DesktopDevelopmentResumePacket): string {
-  if (work.workLifecycle === 'accepted') return '已验收';
-  if (work.workLifecycle === 'rejected') return '验收未通过';
-  if (work.acceptancePending) return '等待最终验收';
-  if (work.merged) return '已合入';
-  if (work.reviewPhase === 'complete') return work.openFindings.length > 0 ? '等待修复' : 'Review 已通过';
-  if (work.reviewPhase === 'consensus_ready') return '等待共识';
-  if (work.reviewPhase === 'cross_review') return '交叉检视中';
-  if (work.reviewPhase === 'independent') return '独立检视中';
-  return '实现中';
+  switch (work.phase) {
+    case 'accepted':
+      return '已验收';
+    case 'rejected':
+      return '验收未通过';
+    case 'acceptance_pending':
+      return '等待最终验收';
+    case 'approved_for_merge':
+      return 'Review 已通过';
+    case 'awaiting_manual_merge_confirmation':
+      return '等待合入确认';
+    case 'auto_merge_ready':
+      return '可以合入';
+    case 'fix_required':
+      return '等待修复';
+    case 'cross_review':
+      return work.reviewPhase === 'consensus_ready' ? '等待共识' : '交叉检视中';
+    case 'independent_review':
+      return '独立检视中';
+    case 'ready_for_desktop':
+      return '等待 Desktop 恢复';
+    case 'implementation_ready':
+      return '等待提交 Review';
+    case 'implementing':
+      return '实现中';
+  }
 }
 
 function Info({ label, value }: { label: string; value: string }) {

@@ -5,6 +5,7 @@ import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers
 const REDIS_URL = process.env.REDIS_URL;
 const REDIS_ISOLATED = process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1';
 const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
 
 describe(
   'F289 DesktopDevelopmentLoopService',
@@ -223,6 +224,8 @@ describe(
         now: 2_000,
       });
       assert.equal(first.bindingEpoch, 1);
+      assert.equal(first.attemptNumber, 1);
+      assert.equal(first.phase, 'implementing');
       assert.equal(first.managedWorkVersion, 2);
       assert.equal(first.reviewRoundId, null);
       assert.deepEqual(first.nextLegalActions, ['implement_and_report_committed_sha']);
@@ -287,6 +290,7 @@ describe(
         now: 4_000,
       });
       assert.equal(reported.reviewPhase, 'independent');
+      assert.equal(reported.phase, 'independent_review');
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
       assert.equal(reviewHubEnsureCount, 1);
@@ -449,7 +453,85 @@ describe(
         ['Consensus P1'],
       );
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
-      assert.deepEqual(packet.nextLegalActions, ['fix_open_findings']);
+      assert.deepEqual(packet.nextLegalActions, ['start_fix_attempt']);
+      assert.equal(packet.phase, 'fix_required');
+
+      const fixAttempt = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        chatRef: 'chat-1',
+        expectedBindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'connect-fix-attempt',
+        leaseDurationMs: 60_000,
+        workspace: workspace(),
+        now: 8_000,
+      });
+      assert.notEqual(fixAttempt.attemptId, bundle.attempt.attemptId);
+      assert.equal(fixAttempt.attemptNumber, 2);
+      assert.equal(fixAttempt.bindingEpoch, packet.bindingEpoch + 1);
+      assert.equal(fixAttempt.phase, 'implementing');
+      assert.deepEqual(fixAttempt.nextLegalActions, ['fix_open_findings']);
+
+      const replayedFixAttempt = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        chatRef: 'chat-1',
+        expectedBindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'connect-fix-attempt',
+        leaseDurationMs: 60_000,
+        workspace: workspace(),
+        now: 8_500,
+      });
+      assert.equal(replayedFixAttempt.attemptId, fixAttempt.attemptId);
+      assert.equal(replayedFixAttempt.bindingEpoch, fixAttempt.bindingEpoch);
+      assert.equal(replayedFixAttempt.managedWorkVersion, fixAttempt.managedWorkVersion);
+
+      const fixedWorkspace = workspace(SHA_B);
+      const fixed = await service.heartbeat({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: fixAttempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: fixAttempt.bindingEpoch,
+        expectedSessionVersion: fixAttempt.sessionVersion,
+        idempotencyKey: 'heartbeat-fixed-sha',
+        leaseDurationMs: 60_000,
+        workspace: fixedWorkspace,
+        now: 9_000,
+      });
+      assert.equal(fixed.phase, 'implementation_ready');
+      assert.deepEqual(fixed.nextLegalActions, ['report_new_committed_sha']);
+
+      const rereview = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: fixAttempt.attemptId,
+        runtimeSessionId: 'runtime-1',
+        bindingEpoch: fixAttempt.bindingEpoch,
+        expectedManagedWorkVersion: fixed.managedWorkVersion,
+        exactSha: SHA_B,
+        idempotencyKey: 'report-fixed-sha',
+        now: 10_000,
+      });
+      assert.equal(rereview.attemptId, fixAttempt.attemptId);
+      assert.equal(rereview.attemptNumber, 2);
+      assert.equal(rereview.currentSha, SHA_B);
+      assert.equal(rereview.phase, 'independent_review');
+      assert.notEqual(rereview.reviewRoundId, roundId);
     });
 
     test('returns an explicit committed-SHA recovery action when the permanent worktree is missing', async () => {
@@ -753,6 +835,7 @@ describe(
         attemptId: bundle.attempt.attemptId,
         now: 7_100,
       });
+      assert.equal(packet.phase, 'awaiting_manual_merge_confirmation');
       assert.deepEqual(packet.nextLegalActions, ['request_merge_confirmation']);
 
       packet = await service.confirmMerge({
@@ -769,6 +852,7 @@ describe(
         now: 8_000,
       });
       assert.equal(packet.mergeConfirmed, true);
+      assert.equal(packet.phase, 'auto_merge_ready');
       assert.deepEqual(packet.nextLegalActions, ['merge_with_native_git']);
 
       packet = await service.connect({
@@ -786,6 +870,7 @@ describe(
         now: 9_000,
       });
       assert.equal(packet.mergeConfirmed, false);
+      assert.equal(packet.phase, 'awaiting_manual_merge_confirmation');
       await assert.rejects(
         () =>
           service.reportMerged({
@@ -833,6 +918,7 @@ describe(
         now: 11_000,
       });
       assert.equal(packet.acceptancePending, true);
+      assert.equal(packet.phase, 'acceptance_pending');
       assert.deepEqual(packet.nextLegalActions, ['wait_for_final_acceptance']);
 
       packet = await service.recordAcceptance({
@@ -848,6 +934,7 @@ describe(
         now: 12_000,
       });
       assert.equal(packet.workLifecycle, 'accepted');
+      assert.equal(packet.phase, 'accepted');
       assert.deepEqual(packet.nextLegalActions, []);
       assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
 

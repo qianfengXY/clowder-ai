@@ -60,6 +60,11 @@ Cat Café 保管项目、工作、Review 与验收真相；Desktop 只用原生�
 
 连接后只执行 Resume Packet 的 `nextLegalActions`。不要从旧聊天、旧卡片或记忆推断当前阶段。
 
+当 `phase=fix_required` / `nextLegalActions=[start_fix_attempt]` 时，先用当前 Resume Packet 的 attempt、
+managed-work version 和 binding epoch 再调用一次 `cat_cafe_development_work_connect`。服务端会幂等创建下一个
+F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `attemptNumber` 必须递增且 phase 回到
+`implementing`。未取得新 attempt 前不得报告修复 SHA。
+
 ## 3. 实现、测试与提交
 
 在项目的永久 worktree 中使用 ChatGPT Desktop 原生文件、终端和 Git 能力：
@@ -80,7 +85,8 @@ implementation report 会在项目唯一 Review Hub 中启动精确 SHA 的多�
 `cat_cafe_development_work_read` 读取 barrier-safe Resume Packet：
 
 - `review_in_progress`：保持幂等读取；没有调度能力时明确说将在下一次 app 唤醒或用户消息时继续，禁止声称已在后台轮询。
-- `fix_findings`：处理所有仍 open 且可安全执行的 consensus findings，补测试，提交新 SHA，再次 report。
+- `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
+  findings，补测试，提交新 SHA，再次 report。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
 - 每个新 SHA 都必须开启完整的新 ReviewRound；旧 SHA 的批准不能沿用。
 

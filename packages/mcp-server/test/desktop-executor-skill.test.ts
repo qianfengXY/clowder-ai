@@ -22,6 +22,14 @@ describe('F289 Desktop executor skill contract', () => {
     assert.match(skill, /last committed SHA/);
   });
 
+  test('starts one canonical next attempt before fixing a changes-requested round', () => {
+    assert.match(skill, /phase=fix_required/);
+    assert.match(skill, /start_fix_attempt/);
+    assert.match(skill, /cat_cafe_development_work_connect/);
+    assert.match(skill, /attemptNumber.*递增/s);
+    assert.match(skill, /未取得新 attempt 前不得报告修复 SHA/);
+  });
+
   test('keeps merge confirmation and final acceptance at their intended user gates', () => {
     assert.match(skill, /cat_cafe_development_merge_confirmation_record/);
     assert.match(skill, /acceptance_pending/);

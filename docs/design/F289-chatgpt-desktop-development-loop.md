@@ -114,6 +114,12 @@ Resume Packet is composed on read from project binding, F275 work/attempt, Deskt
 
 It excludes credentials, raw agent keys, private reviewer drafts and public exposure of the local absolute path.
 
+The packet exposes both `attemptId` and `attemptNumber`. `phase` and `nextLegalActions` are produced by one
+server-side derivation, so clients never reverse-engineer lifecycle from action strings. A completed
+`changes_requested` round yields `phase=fix_required` and `start_fix_attempt`; replaying `work_connect` with the same
+idempotency key allocates exactly one next F275 attempt, rebinds the same Desktop chat, and returns
+`phase=implementing` without adding another MCP tool or state root.
+
 ## Merge rollout state machine
 
 ```text
