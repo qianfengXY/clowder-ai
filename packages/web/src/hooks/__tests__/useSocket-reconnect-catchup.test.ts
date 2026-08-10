@@ -16,6 +16,7 @@ const mockSocket = new EventEmitter() as EventEmitter & {
   id: string;
   io: { engine: { transport: { name: string }; on: () => void } };
   emit: (...args: unknown[]) => boolean;
+  connect: () => void;
   disconnect: () => void;
   connected: boolean;
 };
@@ -23,6 +24,7 @@ mockSocket.id = 'mock-socket-id';
 mockSocket.io = { engine: { transport: { name: 'websocket' }, on: vi.fn() } };
 mockSocket.connected = true;
 mockSocket.emit = vi.fn(() => true) as unknown as typeof mockSocket.emit;
+mockSocket.connect = vi.fn();
 mockSocket.disconnect = vi.fn();
 
 vi.mock('socket.io-client', () => ({
@@ -157,6 +159,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     root = createRoot(container);
     vi.clearAllMocks();
     mockSocket.removeAllListeners();
+    mockSocket.connected = true;
     configureDebug({ enabled: false });
 
     // Default: store has active invocation (simulates "was processing before disconnect")
@@ -359,6 +362,42 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       expect(activeCount).toBe(1);
       // Total: 3 distinct threads = 3 calls
       expect(calledThreads).toHaveLength(3);
+    });
+  });
+
+  describe('foreground network recovery', () => {
+    it('reconnects a disconnected socket and requests catch-up when the page becomes visible', () => {
+      mockStoreState.hasActiveInvocation = false;
+      mockSocket.connected = false;
+
+      const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+      });
+
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      expect(mockSocket.connect).toHaveBeenCalledTimes(1);
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+    });
+
+    it('reconnects a disconnected socket and requests catch-up when the network comes online', () => {
+      mockStoreState.hasActiveInvocation = false;
+      mockSocket.connected = false;
+
+      const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+      });
+
+      act(() => {
+        window.dispatchEvent(new Event('online'));
+      });
+
+      expect(mockSocket.connect).toHaveBeenCalledTimes(1);
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
     });
   });
 });

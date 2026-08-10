@@ -484,6 +484,34 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       auth: { userId: userIdRef.current },
     });
 
+    const requestCatchUpForTrackedThreads = () => {
+      const store = useChatStore.getState();
+      const requested = new Set<string>();
+      const activeThreadId = threadIdRef.current;
+      if (activeThreadId) {
+        store.requestStreamCatchUp(activeThreadId);
+        requested.add(activeThreadId);
+      }
+      for (const room of joinedRoomsRef.current) {
+        if (!room.startsWith('thread:')) continue;
+        const joinedThreadId = room.slice('thread:'.length);
+        if (!joinedThreadId || requested.has(joinedThreadId)) continue;
+        store.requestStreamCatchUp(joinedThreadId);
+        requested.add(joinedThreadId);
+      }
+    };
+
+    // Mobile browsers can suspend JS while a tab is backgrounded. If cpolar
+    // drops the underlying WebSocket during that window, socket.io may not get
+    // a chance to run its reconnect loop until much later. Recover eagerly on
+    // foreground/online and also refetch durable history: `socket.connected`
+    // can briefly remain true for a half-open transport, so reconnect alone is
+    // not sufficient to replace the messages users previously recovered via F5.
+    const recoverForegroundConnection = () => {
+      if (!socket.connected) socket.connect();
+      requestCatchUpForTrackedThreads();
+    };
+
     const getTransportName = () => {
       const engine = socket.io.engine as unknown as SocketIoEngineLike | undefined;
       return engine?.transport?.name ?? 'unknown';
@@ -566,26 +594,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       // useChatHistory's Phase C subscription (debounce + retry + ack +
       // Phase D merge filter); see useChatHistory.ts:872 catchUpVersion.
       if (hasConnectedOnceRef.current) {
-        const store = useChatStore.getState();
-        const bumped = new Set<string>();
-        // Active thread always covered.
-        if (tid) {
-          store.requestStreamCatchUp(tid);
-          bumped.add(tid);
-        }
-        // Cloud R1 P1: iterate joinedRoomsRef (the actual ground truth of
-        // joined socket.io rooms). `threadStates` was a too-narrow proxy —
-        // a room can be joined and receive broadcasts BEFORE any local
-        // thread state is written (e.g., subscription-only rooms, fresh
-        // bg threads with no messages yet). Strip "thread:" prefix to get
-        // the threadId.
-        for (const room of joinedRoomsRef.current) {
-          if (!room.startsWith('thread:')) continue;
-          const bgThreadId = room.slice('thread:'.length);
-          if (bumped.has(bgThreadId)) continue; // dedup with active thread
-          store.requestStreamCatchUp(bgThreadId);
-          bumped.add(bgThreadId);
-        }
+        // joinedRoomsRef is the ground truth for both active and background
+        // subscriptions; the helper deduplicates the active thread.
+        requestCatchUpForTrackedThreads();
       } else {
         hasConnectedOnceRef.current = true;
       }
@@ -1147,17 +1158,27 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     const visibilityHandler =
       typeof document !== 'undefined'
         ? () => {
-            if (document.visibilityState === 'visible') checkForStaleActiveInvocations();
+            if (document.visibilityState === 'visible') {
+              recoverForegroundConnection();
+              checkForStaleActiveInvocations();
+            }
           }
         : null;
     if (visibilityHandler) {
       document.addEventListener('visibilitychange', visibilityHandler);
+    }
+    const onlineHandler = typeof window !== 'undefined' ? () => recoverForegroundConnection() : null;
+    if (onlineHandler) {
+      window.addEventListener('online', onlineHandler);
     }
 
     return () => {
       clearInterval(watchdogTimer);
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
+      }
+      if (onlineHandler) {
+        window.removeEventListener('online', onlineHandler);
       }
       socket.disconnect();
       joinedRoomsRef.current.clear();
