@@ -54,6 +54,12 @@ function loadConfigWithPwaCapture() {
 }
 
 describe('next.config rewrites', () => {
+  it('preserves Socket.IO trailing slashes for WebSocket upgrades', async () => {
+    await withEnv({}, async (config) => {
+      assert.equal(config.skipTrailingSlashRedirect, true);
+    });
+  });
+
   it('proxies /api, /socket.io, and /uploads to default API port', async () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();

@@ -39,6 +39,9 @@ function buildContentSecurityPolicy() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Socket.IO's Engine.IO endpoint is `/socket.io/`. Redirecting it to the
+  // slashless form breaks WebSocket upgrades before the rewrite can proxy it.
+  skipTrailingSlashRedirect: true,
   experimental: { proxyTimeout: 120_000 },
   // Explicitly expose the configured public API URL to browser bundles.
   // Reading process.env through Next's browser shim leaves this value undefined
