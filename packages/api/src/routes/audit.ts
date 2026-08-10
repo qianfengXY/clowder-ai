@@ -11,11 +11,23 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  DEFAULT_THREAD_ID,
+  type IThreadStore,
+  type Thread,
+} from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 export interface AuditRoutesOptions {
   threadStore: IThreadStore;
+}
+
+export function canReadThreadAudit(thread: Pick<Thread, 'id' | 'createdBy'>, userId: string): boolean {
+  if (thread.createdBy === userId) return true;
+  // The lobby is deliberately shared and system-owned. It appears in every
+  // authenticated user's thread list, so its audit view must use the same
+  // access rule as the other lobby/thread endpoints.
+  return thread.id === DEFAULT_THREAD_ID && thread.createdBy === 'system';
 }
 
 export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, opts) => {
@@ -40,7 +52,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
         return { error: 'Thread not found' };
       }
 
-      if (thread.createdBy !== userId) {
+      if (!canReadThreadAudit(thread, userId)) {
         reply.status(403);
         return { error: 'Access denied' };
       }
