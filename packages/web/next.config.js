@@ -82,7 +82,10 @@ const nextConfig = {
       },
       {
         source: '/socket.io/:path*',
-        destination: `${apiBaseUrl}/socket.io/:path*`,
+        // Engine.IO only serves this exact slash-terminated endpoint. When the
+        // wildcard is empty, interpolating `:path*` makes Next proxy the
+        // slashless `/socket.io`, which Fastify handles as a normal 404 route.
+        destination: `${apiBaseUrl}/socket.io/`,
       },
       {
         source: '/uploads/:path*',
