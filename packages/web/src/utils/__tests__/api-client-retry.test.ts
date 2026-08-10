@@ -137,7 +137,7 @@ describe('apiFetch 401 retry', () => {
     expect(toasts[0]?.title).toContain('会话');
   });
 
-  it('retries session bootstrap on the next call after a bootstrap network failure', async () => {
+  it('retries session bootstrap within the same call after a network failure', async () => {
     const calls: string[] = [];
     let sessionAttempts = 0;
     const mockFetch = vi.fn().mockImplementation((url: string) => {
@@ -155,7 +155,6 @@ describe('apiFetch 401 retry', () => {
 
     const { apiFetch } = await loadApiModules();
 
-    await expect(apiFetch('/api/messages')).rejects.toThrow('offline');
     const res = await apiFetch('/api/messages');
 
     expect(res.status).toBe(200);
@@ -165,7 +164,7 @@ describe('apiFetch 401 retry', () => {
     expect(messageCalls.length).toBe(1);
   });
 
-  it('releases a stuck session gate after its timeout so the next call can recover', async () => {
+  it('retries a stuck session bootstrap on a fresh connection after its timeout', async () => {
     vi.useFakeTimers();
     let sessionAttempts = 0;
     const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -185,12 +184,10 @@ describe('apiFetch 401 retry', () => {
     globalThis.fetch = mockFetch;
 
     const { apiFetch } = await loadApiModules();
-    const first = apiFetch('/api/messages');
-    const firstRejection = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    const response = apiFetch('/api/messages');
     await vi.advanceTimersByTimeAsync(5_000);
-    await firstRejection;
 
-    await expect(apiFetch('/api/messages')).resolves.toMatchObject({ status: 200 });
+    await expect(response).resolves.toMatchObject({ status: 200 });
     expect(sessionAttempts).toBe(2);
     vi.useRealTimers();
   });

@@ -49,6 +49,7 @@ export const API_URL = resolveApiUrl();
 let sessionGate: Promise<void> | null = null;
 let lastSessionFailureToastAt = 0;
 export const SESSION_BOOTSTRAP_TIMEOUT_MS = 5_000;
+export const SESSION_BOOTSTRAP_ATTEMPTS = 3;
 export const READ_REQUEST_TIMEOUT_MS = 8_000;
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
@@ -82,22 +83,33 @@ function notifySessionFailure() {
   });
 }
 
-function ensureSession(): Promise<void> {
-  if (sessionGate) return sessionGate;
-  sessionGate = fetchWithTimeout(
-    `${API_URL}/api/session`,
-    { credentials: 'include' },
-    SESSION_BOOTSTRAP_TIMEOUT_MS,
-  )
-    .then((res) => {
+async function establishSession(): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < SESSION_BOOTSTRAP_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetchWithTimeout(
+        `${API_URL}/api/session`,
+        { credentials: 'include' },
+        SESSION_BOOTSTRAP_TIMEOUT_MS,
+      );
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
       }
-    })
-    .catch((err) => {
-      sessionGate = null;
-      throw err;
-    });
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
+export function ensureApiSession(): Promise<void> {
+  if (sessionGate) return sessionGate;
+  sessionGate = establishSession().catch((err) => {
+    sessionGate = null;
+    notifySessionFailure();
+    throw err;
+  });
   return sessionGate;
 }
 
@@ -131,7 +143,7 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
  * @param init - Standard RequestInit options
  */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  await ensureSession();
+  await ensureApiSession();
   const normalized = ensureBodyForMutation(init);
   const method = normalized?.method?.toUpperCase() ?? 'GET';
   const isReadRequest = method === 'GET' || method === 'HEAD';
@@ -157,7 +169,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (res.status === 401) {
     // Session expired (API restart, cookie cleared). Re-establish and retry once.
     sessionGate = null;
-    await ensureSession();
+    await ensureApiSession();
     const retryRes = await request();
     if (retryRes.status === 401) {
       notifySessionFailure();
