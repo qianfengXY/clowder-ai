@@ -77,12 +77,37 @@ function rememberScrollState(threadId: string, el: HTMLElement) {
 }
 
 const HISTORY_PAGE_SIZE = 50;
+// A tunnel can leave fetch() pending indefinitely without actually closing the
+// connection. Bound history reads so loadingRef is released and the existing
+// catch-up retry loop can try again after connectivity returns.
+export const HISTORY_REQUEST_TIMEOUT_MS = 5_000;
 // In export mode (?export=true), load all messages in one request for screenshot capture.
 // Normal browsing still uses 50-per-page pagination.
 const EXPORT_LIMIT = 10000;
 const DRAFT_LIVE_MERGE_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
 function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'AbortError';
+}
+
+/** @internal Exported for regression tests. */
+export function createHistoryRequestSignal(parentSignal: AbortSignal, timeoutMs = HISTORY_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+
+  if (parentSignal.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      parentSignal.removeEventListener('abort', abortFromParent);
+    },
+  };
 }
 
 type ReplaceHydrationMergeStats = {
@@ -876,6 +901,7 @@ export function useChatHistory(threadId: string) {
       loadingRef.current = true;
       setLoadingHistory(true);
       const fetchForThread = threadId; // capture at call time
+      const requestSignal = createHistoryRequestSignal(controller.signal);
       try {
         const isExport =
           typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
@@ -884,7 +910,7 @@ export function useChatHistory(threadId: string) {
         if (cursor) params.set('before', cursor);
         params.set('threadId', fetchForThread);
         const res = await apiFetch(`/api/messages?${params}`, {
-          signal: controller.signal,
+          signal: requestSignal.signal,
         });
         if (!res.ok) return;
         // Stale check: discard if thread changed during fetch
@@ -1093,6 +1119,7 @@ export function useChatHistory(threadId: string) {
         if (isAbortError(err)) return false;
         return false;
       } finally {
+        requestSignal.cleanup();
         // Do not let stale/aborted request clear loading state for a newer thread request.
         if (abortRef.current === controller && threadIdRef.current === fetchForThread) {
           loadingRef.current = false;
