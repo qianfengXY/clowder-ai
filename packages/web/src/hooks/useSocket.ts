@@ -529,13 +529,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
       if (activeThreadId) {
         const activeMessages =
-          store.currentThreadId === activeThreadId
-            ? store.messages
-            : store.getThreadState(activeThreadId).messages;
+          store.currentThreadId === activeThreadId ? store.messages : store.getThreadState(activeThreadId).messages;
         const lastMessage = activeMessages[activeMessages.length - 1];
         const lastActivity = lastMessage?.deliveredAt ?? lastMessage?.timestamp ?? 0;
-        const recentlyWaitingForReply =
-          lastMessage?.type === 'user' && now - lastActivity < STALE_RECENT_ENGAGEMENT_MS;
+        const recentlyWaitingForReply = lastMessage?.type === 'user' && now - lastActivity < STALE_RECENT_ENGAGEMENT_MS;
         if (
           store.hasActiveInvocation ||
           hasStaleActiveThreadPresentation(store, activeThreadId) ||
@@ -1199,10 +1196,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
     // on a still-connected socket (won't trigger reconcile-on-reconnect).
     const watchdogTimer = setInterval(checkForStaleActiveInvocations, STALE_WATCHDOG_INTERVAL_MS);
-    const disconnectedRecoveryTimer = setInterval(
-      recoverThreadsWhileDisconnected,
-      DISCONNECTED_RECOVERY_INTERVAL_MS,
-    );
+    const disconnectedRecoveryTimer = setInterval(recoverThreadsWhileDisconnected, DISCONNECTED_RECOVERY_INTERVAL_MS);
     const visibilityHandler =
       typeof document !== 'undefined'
         ? () => {
