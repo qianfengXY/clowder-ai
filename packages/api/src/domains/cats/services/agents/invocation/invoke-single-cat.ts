@@ -3679,6 +3679,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           },
           'cat retrying invoke (transient CLI exit)',
         );
+        // The retry was previously invisible: the first error is intentionally
+        // suppressed, so a slow upstream reconnect looked identical to a hung
+        // invocation. Keep the retry transient (no timeline bubble) but expose
+        // it through the status channel used by the thinking indicator.
+        const retryStatus: AgentMessage = {
+          type: 'status',
+          catId: catId as CatId,
+          content: '网络波动，正在自动重试（2/2）',
+          timestamp: Date.now(),
+        };
+        for await (const out of streamProcessedOutputs(retryStatus)) {
+          yield out;
+        }
         allowTransientRetry = false;
         continue;
       }

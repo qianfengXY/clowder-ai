@@ -142,6 +142,8 @@ export interface SocketCallbacks {
 }
 
 const RECONNECT_RECONCILE_DELAY_MS = 2000;
+/** While realtime transport is down, reconcile active/recent threads so replies still arrive without F5. */
+const DISCONNECTED_RECOVERY_INTERVAL_MS = 10_000;
 /** Watchdog: how often to scan threadStates for silent active invocations. */
 const STALE_WATCHDOG_INTERVAL_MS = 30_000;
 /** A thread is suspect if hasActiveInvocation but lastActivity is older than this. */
@@ -480,7 +482,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
 
     const socket = io(API_URL, {
-      transports: ['websocket', 'polling'],
+      // Corporate networks and HTTP tunnels may reject WebSocket upgrades while
+      // ordinary HTTP remains healthy. Start from polling (the most compatible
+      // transport), then let Engine.IO upgrade to WebSocket when available.
+      // tryAllTransports also covers the inverse failure mode instead of leaving
+      // the page permanently disconnected after the first transport fails.
+      transports: ['polling', 'websocket'],
+      tryAllTransports: true,
       auth: { userId: userIdRef.current },
     });
 
@@ -510,6 +518,41 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     const recoverForegroundConnection = () => {
       if (!socket.connected) socket.connect();
       requestCatchUpForTrackedThreads();
+    };
+
+    const recoverThreadsWhileDisconnected = () => {
+      if (socket.connected) return;
+      const store = useChatStore.getState();
+      const now = Date.now();
+      const threadsToRecover = new Set<string>();
+      const activeThreadId = threadIdRef.current;
+
+      if (activeThreadId) {
+        const activeMessages =
+          store.currentThreadId === activeThreadId
+            ? store.messages
+            : store.getThreadState(activeThreadId).messages;
+        const lastMessage = activeMessages[activeMessages.length - 1];
+        const lastActivity = lastMessage?.deliveredAt ?? lastMessage?.timestamp ?? 0;
+        const recentlyWaitingForReply =
+          lastMessage?.type === 'user' && now - lastActivity < STALE_RECENT_ENGAGEMENT_MS;
+        if (
+          store.hasActiveInvocation ||
+          hasStaleActiveThreadPresentation(store, activeThreadId) ||
+          recentlyWaitingForReply
+        ) {
+          threadsToRecover.add(activeThreadId);
+        }
+      }
+
+      for (const [joinedThreadId, threadState] of Object.entries(store.threadStates ?? {})) {
+        if (threadState.hasActiveInvocation) threadsToRecover.add(joinedThreadId);
+      }
+
+      for (const recoveryThreadId of threadsToRecover) {
+        store.requestStreamCatchUp(recoveryThreadId);
+        void reconcileThreadWithServer(recoveryThreadId, () => socket.connected, 'Disconnected fallback');
+      }
     };
 
     const getTransportName = () => {
@@ -1108,6 +1151,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     socket.on('connect_error', (error: Error & { description?: unknown; context?: unknown }) => {
       setSocketConnected(false);
+      recoverThreadsWhileDisconnected();
       console.error('[ws] connect_error', {
         message: error.message,
         name: error.name,
@@ -1155,6 +1199,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
     // on a still-connected socket (won't trigger reconcile-on-reconnect).
     const watchdogTimer = setInterval(checkForStaleActiveInvocations, STALE_WATCHDOG_INTERVAL_MS);
+    const disconnectedRecoveryTimer = setInterval(
+      recoverThreadsWhileDisconnected,
+      DISCONNECTED_RECOVERY_INTERVAL_MS,
+    );
     const visibilityHandler =
       typeof document !== 'undefined'
         ? () => {
@@ -1174,6 +1222,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     return () => {
       clearInterval(watchdogTimer);
+      clearInterval(disconnectedRecoveryTimer);
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
       }

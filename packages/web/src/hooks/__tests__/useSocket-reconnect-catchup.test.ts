@@ -27,8 +27,14 @@ mockSocket.emit = vi.fn(() => true) as unknown as typeof mockSocket.emit;
 mockSocket.connect = vi.fn();
 mockSocket.disconnect = vi.fn();
 
+const mockIo = vi.fn((url: string, options: unknown) => {
+  void url;
+  void options;
+  return mockSocket;
+});
+
 vi.mock('socket.io-client', () => ({
-  io: () => mockSocket,
+  io: (url: string, options: unknown) => mockIo(url, options),
 }));
 
 // ── Mock stores ──
@@ -212,6 +218,39 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('thread-1');
     expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('starts with polling and can fall back across transports for tunnel compatibility', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+    });
+
+    expect(mockIo).toHaveBeenCalledWith(
+      'http://localhost:3100',
+      expect.objectContaining({
+        transports: ['polling', 'websocket'],
+        tryAllTransports: true,
+      }),
+    );
+  });
+
+  it('polls durable history while realtime transport remains disconnected', async () => {
+    mockSocket.connected = false;
+    mockStoreState.hasActiveInvocation = true;
+    const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-1/queue');
   });
 
   it('does NOT trigger catch-up when server still has active invocations', async () => {

@@ -3614,6 +3614,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     assert.equal(invokeCount, 2, 'should retry once for transient code:1 exit');
     assert.ok(
+      msgs.some((m) => m.type === 'status' && m.content === '网络波动，正在自动重试（2/2）'),
+      'bounded retry should expose a transient status instead of looking hung',
+    );
+    assert.ok(
       msgs.some((m) => m.type === 'text' && m.content === 'retry-ok'),
       'retry result should be streamed',
     );

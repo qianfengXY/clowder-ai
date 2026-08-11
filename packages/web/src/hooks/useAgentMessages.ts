@@ -4580,6 +4580,13 @@ export function useAgentMessages() {
         }
         if (isAppServerRecoveryStatus(msg.metadata)) {
           setCatStatus(msg.catId, 'spawning');
+          return;
+        }
+        if (msg.content && msg.threadId) {
+          // Generic provider status is transient UI detail, not a timeline
+          // message. This makes bounded network retries distinguishable from
+          // an invocation that has stopped making progress.
+          useChatStore.getState().updateThreadCatStatus(msg.threadId, msg.catId, 'streaming', msg.content);
         }
         return;
       }

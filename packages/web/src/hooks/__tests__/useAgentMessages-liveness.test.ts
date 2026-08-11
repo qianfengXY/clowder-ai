@@ -275,6 +275,30 @@ describe('F118 useAgentMessages liveness warning', () => {
     expect(mockAddMessage).not.toHaveBeenCalled();
   });
 
+  it('shows a generic active-provider retry status as transient thinking detail', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'status',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: '网络波动，正在自动重试（2/2）',
+        timestamp: 123_456,
+      });
+    });
+
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith(
+      'thread-1',
+      'codex',
+      'streaming',
+      '网络波动，正在自动重试（2/2）',
+    );
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
   it('stores background app-server lifecycle from status without a bubble', () => {
     act(() => {
       root.render(React.createElement(Harness));
