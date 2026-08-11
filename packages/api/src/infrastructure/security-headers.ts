@@ -70,7 +70,11 @@ function isHostAllowed(hostname: string, allowlist: HostAllowlist): boolean {
 
 function securityHeaders(app: FastifyInstance, opts: SecurityHeadersOptions, done: () => void) {
   const origins = opts.allowedOrigins ?? resolveFrontendCorsOrigins(process.env);
-  const apiUrl = opts.apiBaseUrl ?? process.env.NEXT_PUBLIC_API_URL;
+  // API_PUBLIC_URL is runtime-only. Keep it separate from NEXT_PUBLIC_API_URL,
+  // which is embedded into browser bundles, so a retired split API tunnel can
+  // remain temporarily reachable while stale PWA clients migrate to the
+  // same-origin frontend without sending new clients back to that tunnel.
+  const apiUrl = opts.apiBaseUrl ?? process.env.API_PUBLIC_URL ?? process.env.NEXT_PUBLIC_API_URL;
   const allowedHosts = buildAllowedHosts(origins, apiUrl);
 
   // F156 D-6: DNS Rebinding defense — validate Host header early

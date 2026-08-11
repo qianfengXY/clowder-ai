@@ -118,6 +118,7 @@ describe('next.config rewrites', () => {
     const pwaOptions = loadConfigWithPwaCapture();
 
     assert.equal(pwaOptions?.cacheStartUrl, false);
+    assert.equal(pwaOptions?.dynamicStartUrl, false);
     const pagesRule = pwaOptions?.workboxOptions?.runtimeCaching?.find((entry) => entry.options?.cacheName === 'pages');
     assert.equal(pagesRule?.handler, 'NetworkOnly');
   });

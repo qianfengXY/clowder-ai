@@ -102,7 +102,11 @@ module.exports = withPWA({
   // The app shell contains hashed chunk references. Precaching `/` can keep a
   // mobile client on an old build indefinitely after a production restart.
   cacheStartUrl: false,
-  dynamicStartUrl: true,
+  // `dynamicStartUrl: true` still registers `/` as NetworkFirst and falls back
+  // to the old cached shell when a tunnel is slow. That resurrects bundles
+  // containing retired API domains even though navigations below are
+  // NetworkOnly.
+  dynamicStartUrl: false,
   // Keep default page/document runtime caching and only override what we need.
   extendDefaultRuntimeCaching: true,
   workboxOptions: {

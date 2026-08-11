@@ -175,6 +175,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'API_PUBLIC_URL',
+    defaultValue: '(未设置)',
+    description: 'API 的公网地址，仅用于服务端 Host 校验；不会写入浏览器代码',
+    category: 'server',
+    sensitive: false,
+  },
+  {
     name: 'DEFAULT_OWNER_USER_ID',
     defaultValue: '(未设置)',
     description: '默认所有者用户 ID（信任锚点，不可从 Hub 修改）',
