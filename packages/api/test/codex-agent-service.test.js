@@ -1881,6 +1881,27 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
 
+  test('exec_json does not emit app-server preparation stage samples', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const records = [];
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      carrierMode: 'exec_json',
+      appServerStageDurationRecorder: {
+        record: (value, attributes) => records.push({ value, attributes }),
+      },
+      monotonicNow: () => 1_000,
+    });
+
+    const promise = collect(service.invoke('exec control'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-exec-control' }]);
+    await promise;
+
+    assert.deepEqual(records, []);
+  });
+
   test('unavailable approval surface keeps Apps writes gated and injects the audited GitHub route', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);

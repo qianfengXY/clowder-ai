@@ -192,6 +192,90 @@ test('pooled host lease observes the invocation abort signal', async () => {
   assert.equal(pool.calls[0].signal, abortController.signal);
 });
 
+test('app-server records provider setup and new carrier acquisition before lifecycle stages', async () => {
+  const pool = new FakeHostPool();
+  const records = [];
+  let nowMs = 1_000;
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    appServerHostPool: pool,
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.3-codex',
+    monotonicNow: () => {
+      nowMs += 125;
+      return nowMs;
+    },
+    appServerStageDurationRecorder: {
+      record: (value, attributes) => records.push({ value, attributes }),
+    },
+  });
+
+  await drain(service.invoke('measure setup', { invocationId: 'invocation-stage-new' }));
+
+  assert.deepEqual(records, [
+    { value: 0.125, attributes: { status: 'provider_setup' } },
+    { value: 0.125, attributes: { status: 'carrier_acquire_new' } },
+  ]);
+});
+
+test('app-server labels acquisition from a bound session host as warm reuse', async () => {
+  const pool = new FakeHostPool();
+  const records = [];
+  let nowMs = 2_000;
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    appServerHostPool: pool,
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.3-codex',
+    monotonicNow: () => {
+      nowMs += 50;
+      return nowMs;
+    },
+    appServerStageDurationRecorder: {
+      record: (value, attributes) => records.push({ value, attributes }),
+    },
+  });
+
+  await drain(
+    service.invoke('measure warm resume', {
+      invocationId: 'invocation-stage-warm',
+      sessionId: 'codex-thread-existing',
+    }),
+  );
+
+  assert.deepEqual(records, [
+    { value: 0.05, attributes: { status: 'provider_setup' } },
+    { value: 0.05, attributes: { status: 'carrier_acquire_warm' } },
+  ]);
+});
+
+test('provider setup failure does not emit a success-classified duration sample', async () => {
+  const pool = new FakeHostPool();
+  const records = [];
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    appServerHostPool: pool,
+    cliCommand: process.execPath,
+    l0CompilerFn: async () => {
+      throw new Error('L0 unavailable');
+    },
+    model: 'gpt-5.3-codex',
+    monotonicNow: () => 3_000,
+    appServerStageDurationRecorder: {
+      record: (value, attributes) => records.push({ value, attributes }),
+    },
+  });
+
+  const output = await drain(service.invoke('fail setup', { invocationId: 'invocation-stage-fail' }));
+
+  assert.equal(output[0].type, 'error');
+  assert.match(output[0].error, /L0 unavailable/);
+  assert.deepEqual(records, []);
+  assert.equal(pool.calls.length, 0);
+});
+
 test('CodexAgentService hides a recovered model-capacity failure from the Clowder AI message stream', async () => {
   const pool = new FakeHostPool();
   pool.turnCompletions.push(

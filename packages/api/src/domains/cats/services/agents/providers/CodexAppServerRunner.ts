@@ -1,4 +1,8 @@
-import { codexAppServerRecovery } from '../../../../../infrastructure/telemetry/instruments.js';
+import { performance } from 'node:perf_hooks';
+import {
+  codexAppServerRecovery,
+  codexAppServerStageDuration,
+} from '../../../../../infrastructure/telemetry/instruments.js';
 import type { AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 import {
   CodexAppServerClient,
@@ -31,6 +35,12 @@ export interface CodexAppServerRecoveryBlockedEvent {
   checkpoint: CodexCapacityRecoveryCheckpointSnapshot;
 }
 
+export type CodexAppServerPreparationStage = 'provider_setup' | 'carrier_acquire_new' | 'carrier_acquire_warm';
+
+export interface CodexAppServerStageDurationRecorder {
+  record(value: number, attributes: { status: CodexAppServerPreparationStage }): void;
+}
+
 export interface CodexAppServerRunnerOptions {
   sessionFactory: AgentCarrierSessionFactory;
   sessionOptions: AgentCarrierSessionOptions;
@@ -41,6 +51,8 @@ export interface CodexAppServerRunnerOptions {
   retryBudget?: number;
   modelCapacityRetryDelaysMs?: readonly number[];
   recoveryAnchor?: CodexCapacityRecoveryAnchor;
+  stageDurationRecorder?: CodexAppServerStageDurationRecorder;
+  monotonicNow?: () => number;
 }
 
 const MODEL_CAPACITY_ERROR = 'Selected model is at capacity. Please try a different model.';
@@ -141,6 +153,8 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   let recoveryInstruction: string | undefined;
   let imagePaths = options.runInput.imagePaths;
   const checkpoint = new CodexCapacityRecoveryCheckpoint(options.recoveryAnchor);
+  const stageDurationRecorder = options.stageDurationRecorder ?? codexAppServerStageDuration;
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
   checkpoint.setNativeThreadId(resumeThreadId);
 
   for (;;) {
@@ -151,9 +165,13 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       // Protocol cancellation is owned by CodexAppServerClient. Passing the
       // caller signal into the raw carrier would race turn/interrupt with SIGINT.
       const { signal: _transportSignal, ...transportOptions } = options.sessionOptions;
+      const carrierAcquireStartedAt = monotonicNow();
       const wire = await options.sessionFactory({
         ...transportOptions,
         ...(resumeThreadId ? { sessionId: resumeThreadId } : {}),
+      });
+      stageDurationRecorder.record(Math.max(0, monotonicNow() - carrierAcquireStartedAt) / 1_000, {
+        status: wire.reusedSessionHost ? 'carrier_acquire_warm' : 'carrier_acquire_new',
       });
       const client = new CodexAppServerClient({
         ...options.clientDeps,

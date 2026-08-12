@@ -68,7 +68,7 @@ Adversarial coverage: async MCP/L0 preparation, exec-json control path, early pr
 ## Task 1: Close provider-setup timing gap
 
 **Files:**
-- Modify: `packages/api/test/codex-agent-service.test.js`
+- Modify: `packages/api/test/codex-app-server-pooling.test.js`
 - Modify: `packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts`
 
 1. Add a failing test proving app-server records exactly one `provider_setup` duration while exec-json records none.
@@ -89,8 +89,17 @@ Adversarial coverage: async MCP/L0 preparation, exec-json control path, early pr
 
 ## Task 3: Regression gate and deployment handoff
 
-1. Format changed files with `pnpm biome format --write <changed files>`.
+1. Format changed files with `pnpm biome check --write <changed files>`.
 2. Run API build and the focused Codex provider/transport/host-pool/telemetry tests.
 3. Run `git diff --check`, hotfix/fallback/architecture ownership checks, and artifact hygiene checks.
 4. Request independent exact-HEAD review before merge.
 5. Merge without modifying runtime config or restarting services; hand off the existing per-cat `cli.carrier=app_server` activation and verification steps to the deployer.
+
+### Operator-owned deployment verification
+
+1. Sync and build the merged `main` in the runtime checkout.
+2. In the existing Hub member editor, set only the target GPT cat's `cli.carrier` to `app_server`; keep other cats on `exec_json`.
+3. Activate the deployment using the operator's normal restart path.
+4. Verify `GET /api/cats` reports `codexCarrier={effective:"app_server",source:"per-cat"}` for the target cat.
+5. Run one cold turn and at least two turns within the five-minute warm-host window. Compare `provider_setup`, `carrier_acquire_new`, `carrier_acquire_warm`, the existing lifecycle stages, and `cat_cafe.codex.first_visible_text.duration`.
+6. Roll back through the same member editor by restoring `cli.carrier=exec_json` if the canary regresses reliability or latency.

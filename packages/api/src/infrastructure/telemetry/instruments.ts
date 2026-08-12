@@ -866,7 +866,7 @@ export const codexAppServerLifecycleTransition = lazy(() =>
 
 export const codexAppServerStageDuration = lazy(() =>
   meter().createHistogram('cat_cafe.codex_app_server.stage_duration', {
-    description: 'Time spent in each Codex app-server lifecycle stage',
+    description: 'Time spent in Codex app-server preparation and lifecycle stages',
     unit: 's',
   }),
 );
