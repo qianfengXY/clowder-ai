@@ -220,7 +220,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
-  it('starts with polling and can fall back across transports for tunnel compatibility', () => {
+  it('starts with WebSocket and falls back to polling for restrictive networks', () => {
     const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
 
     act(() => {
@@ -230,7 +230,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     expect(mockIo).toHaveBeenCalledWith(
       'http://localhost:3100',
       expect.objectContaining({
-        transports: ['polling', 'websocket'],
+        transports: ['websocket', 'polling'],
         tryAllTransports: true,
       }),
     );

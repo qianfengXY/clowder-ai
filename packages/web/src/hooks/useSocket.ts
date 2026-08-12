@@ -482,12 +482,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     };
 
     const socket = io(API_URL, {
-      // Corporate networks and HTTP tunnels may reject WebSocket upgrades while
-      // ordinary HTTP remains healthy. Start from polling (the most compatible
-      // transport), then let Engine.IO upgrade to WebSocket when available.
-      // tryAllTransports also covers the inverse failure mode instead of leaving
-      // the page permanently disconnected after the first transport fails.
-      transports: ['polling', 'websocket'],
+      // Prefer one persistent WebSocket so remote streaming does not stay on
+      // recurring long-poll requests for the lifetime of the page. Corporate
+      // networks and HTTP tunnels may still reject WebSocket upgrades, so keep
+      // polling as the ordered fallback and try every configured transport.
+      transports: ['websocket', 'polling'],
       tryAllTransports: true,
       auth: { userId: userIdRef.current },
     });

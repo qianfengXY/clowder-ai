@@ -17,11 +17,11 @@
  * change), the total set() count within one flush exceeds React's 50 nested
  * update limit → crash recurs.
  *
- * Fix (chunked flush): process at most CHUNK_SIZE events per microtask.
- * Remaining events are scheduled into the next microtask via
- * queueMicrotask chaining. Between microtasks React resets its nested
- * update counter, so each chunk stays safely under the limit. Microtask
- * chaining adds no paint boundaries (no user-visible delay).
+ * Fix (chunked flush): process at most CHUNK_SIZE events per turn. The first
+ * chunk runs in a microtask for normal streaming latency; a backlog continues
+ * in timer tasks so the browser gets input/render opportunities between
+ * chunks. Each chunk stays below React's nested-update limit without letting
+ * a tunnel-delivered burst monopolize the main thread.
  *
  * Design contract:
  *  - Every event is processed; nothing is dropped or merged.
@@ -29,8 +29,8 @@
  *  - processThreadSeq runs per-event inside the flush loop, unchanged.
  *    Zustand set() is synchronous — each event's store write is visible to
  *    the next event's getState() call inside the same flush chunk.
- *  - Events arriving across macrotask boundaries each get their own flush.
- *    At normal streaming pace (one event per ~50ms) this is zero overhead.
+ *  - Events arriving after a fully drained queue each get their own prompt
+ *    microtask flush. At normal streaming pace this adds no timer delay.
  */
 
 type AgentMessageHandler = (msg: unknown) => void;
@@ -40,7 +40,7 @@ export interface AgentMessageCoalescer {
 }
 
 /**
- * Max events processed per microtask flush. Each event triggers ~4-8
+ * Max events processed per flush turn. Each event triggers ~4-8
  * Zustand set() calls; 6 events × 8 set() = 48, safely under React's
  * 50-nested-update limit. Conservative ceiling avoids flirting with the edge.
  */
@@ -52,14 +52,14 @@ export function createAgentMessageCoalescer(handler: AgentMessageHandler): Agent
 
   function flush(): void {
     // Take at most CHUNK_SIZE events from the front of the queue.
-    // Remaining events stay in the queue for the next microtask.
+    // Remaining events stay in the queue for the next scheduled turn.
     const chunk = queue.splice(0, CHUNK_SIZE);
 
     if (queue.length > 0) {
-      // More events waiting — schedule continuation in next microtask.
-      // React resets its nested update counter between microtasks,
-      // so each chunk stays safely under the 50-update limit.
-      queueMicrotask(flush);
+      // More events waiting — continue in a new task. Unlike chained
+      // microtasks, this gives the browser a chance to process input and paint
+      // before draining the rest of a tunnel-delivered polling burst.
+      setTimeout(flush, 0);
     } else {
       // Queue fully drained — allow new pushes to schedule a fresh flush.
       flushScheduled = false;
