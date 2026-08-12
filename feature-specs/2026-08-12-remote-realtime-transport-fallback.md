@@ -56,7 +56,7 @@ Out of scope:
 | connecting-polling | polling accepted | connected-polling | Preserve chat delivery and do not run disconnected recovery. |
 | either connected state | disconnect | reconnecting | Socket.IO reconnects; durable-history recovery only runs while `socket.connected === false`. |
 | reconnecting | foreground/online | connecting | Re-attempt connection and reconcile tracked threads. |
-| any live state | effect cleanup | closed | Clear timers/listeners and disconnect the owned socket. |
+| any live state | effect cleanup | closed | Disconnect the owned socket, synchronously drain queued sequence-bearing messages, and cancel the backlog timer. |
 | coalescer idle | first event | prompt-flush-scheduled | Schedule the first bounded chunk in a microtask. |
 | prompt/backlog flush | queue remains | backlog-task-scheduled | Preserve FIFO and continue one bounded chunk in a timer task. |
 | prompt/backlog flush | queue empty | coalescer idle | Reset the scheduling guard so the next normal event stays prompt. |
@@ -70,6 +70,7 @@ Out of scope:
 - **INV-5:** Server-side `allowRequest` Origin validation remains unchanged; transport preference must not weaken F156/LL-047.
 - **INV-6:** Every queued `agent_message` is handled once in FIFO order; scheduling changes do not merge, drop, or reorder sequence-bearing events.
 - **INV-7:** A fully drained queue handles the next normal event in a prompt microtask; only an actual backlog pays the task-boundary delay.
+- **INV-8:** Socket lifecycle cleanup leaves no timer-backed handler work behind; queued events drain once before the reusable coalescer returns to idle.
 
 ### Adversarial cases
 
@@ -78,6 +79,7 @@ Out of scope:
 - Both transports fail: existing reconnect and disconnected-history reconciliation continue to operate.
 - A tunnel delivers a 200-event burst: all 200 events are processed in order, each chunk stays below the React notification limit, and backlog chunks yield between browser tasks.
 - A single normal event arrives after a full drain: it is processed in the next microtask without artificial polling delay.
+- Cleanup occurs with a throttled backlog timer pending: queued events drain synchronously, the timer is canceled, and a Strict Mode replacement socket can reuse the coalescer.
 - Reconnect/foreground event: tracked rooms and durable history are reconciled exactly as before.
 - Malicious Origin attempts WebSocket: existing server `allowRequest` gate still rejects it; this client-only change does not bypass that boundary.
 
@@ -114,6 +116,7 @@ Out of scope:
 1. Add a failing test proving that chained Promise turns cannot drain more than the prompt chunk.
 2. Keep the first chunk on a microtask, but schedule backlog continuations with a timer task.
 3. Preserve the existing FIFO, no-drop, chunk-size, normal-stream latency, and Zustand-notification invariants.
+4. Track the backlog timer and expose a synchronous drain used by socket cleanup, preventing stale lifecycle writes without dropping queued sequence events.
 
 ### Task 4: Preserve diagnosis evidence
 

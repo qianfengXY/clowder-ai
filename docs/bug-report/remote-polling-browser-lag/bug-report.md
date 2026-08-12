@@ -65,6 +65,7 @@ LOG_EVIDENCE=25692
 
 1. 主聊天连接改回 `['websocket', 'polling']`，同时保留 `tryAllTransports: true`。WebSocket 可用时避免长期 HTTP churn；公司网络拒绝时仍自动尝试 polling。
 2. 保留 coalescer 的 FIFO、每事件处理和 `CHUNK_SIZE=6` 约束。第一块仍用 microtask 低延迟处理，只有 backlog continuation 改为 `setTimeout(..., 0)`，让浏览器在每块之间获得输入/绘制机会。
+3. coalescer 跟踪 timer；socket cleanup 先断开旧 socket，再同步 drain 剩余 sequence-bearing messages 并取消 timer。这样不会在后台 tab 节流后留下跨 socket 生命周期的 stale handler，也不靠丢事件解决 cleanup。
 
 明确放弃的备选：
 
@@ -77,7 +78,7 @@ LOG_EVIDENCE=25692
 
 - RED：`useSocket-reconnect-catchup.test.ts` 在生产修改前明确收到 polling-first，WebSocket-first 断言失败。
 - RED：`useSocket-message-coalescer.test.ts` 在调度修改前证明 Promise turns 会连续把 handler 从 6 次推进到 12 次。
-- GREEN：transport、coalescer unit、真实 Zustand burst integration 共 21 个测试通过。
+- GREEN：transport/reconnect、coalescer unit、真实 Zustand burst integration 共 23 个测试通过；其中 cleanup 覆盖同步 drain、timer cancel、无 stale write 和 Strict Mode 后复用。
 - GREEN：web TypeScript `--noEmit` 通过；Biome touched-file check 无新增 error（只报告既有 complexity/non-null warnings）。
 - FULL SUITE：5854 tests passed，4 个失败；同一 4 个测试在未包含本次实现的 main 上精确复跑也失败，确认是既有基线问题（F232 PR URL 两项、artifact path 一项、F252 `@co-creator` 一项）。
 - 公网验证：WebSocket handshake 能返回 101；公司网络若拒绝，浏览器控制台应显示最终 transport 为 polling，但大 backlog 会跨 task 排空而不是连续 microtask 独占主线程。

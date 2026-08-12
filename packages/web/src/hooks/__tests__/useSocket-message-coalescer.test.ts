@@ -156,6 +156,30 @@ describe('createAgentMessageCoalescer', () => {
     expect(handler).toHaveBeenCalledTimes(12);
   });
 
+  it('drains and cancels backlog at lifecycle cleanup without leaving stale timer writes', async () => {
+    const handler = vi.fn();
+    const coalescer = createAgentMessageCoalescer(handler);
+
+    for (let i = 0; i < 20; i++) {
+      coalescer.push({ seq: i + 1 });
+    }
+
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalledTimes(6);
+
+    coalescer.drainPending();
+    expect(handler).toHaveBeenCalledTimes(20);
+
+    await vi.runAllTimersAsync();
+    expect(handler).toHaveBeenCalledTimes(20);
+
+    // React Strict Mode may run effect cleanup/setup without recreating refs.
+    // A drained coalescer must remain reusable for the replacement socket.
+    coalescer.push({ seq: 21 });
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalledTimes(21);
+  });
+
   it('processes full 200-event burst without dropping events (coalescer correctness)', async () => {
     const handler = vi.fn();
     const coalescer = createAgentMessageCoalescer(handler);

@@ -236,6 +236,42 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     );
   });
 
+  it('drains queued agent messages at socket cleanup without stale timer writes', async () => {
+    const onMessage = vi.fn();
+    const callbacks: SocketCallbacks = { onMessage, onIntentMode: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+    });
+
+    const emitAgentMessage = mockSocket.listeners('agent_message').at(0) as
+      | ((message: Record<string, unknown>) => void)
+      | undefined;
+    if (!emitAgentMessage) throw new Error('agent_message listener was not registered');
+
+    act(() => {
+      for (let seq = 1; seq <= 20; seq++) {
+        emitAgentMessage({ type: 'text', threadId: 'thread-1', catId: 'opus', content: `${seq}`, seq });
+      }
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onMessage).toHaveBeenCalledTimes(6);
+
+    act(() => {
+      root.unmount();
+    });
+    root = createRoot(container);
+    expect(onMessage).toHaveBeenCalledTimes(20);
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(onMessage).toHaveBeenCalledTimes(20);
+  });
+
   it('polls durable history while realtime transport remains disconnected', async () => {
     mockSocket.connected = false;
     mockStoreState.hasActiveInvocation = true;

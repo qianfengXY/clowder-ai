@@ -37,6 +37,8 @@ type AgentMessageHandler = (msg: unknown) => void;
 
 export interface AgentMessageCoalescer {
   push: (msg: unknown) => void;
+  /** Finish queued messages now and cancel any timer-backed continuation. */
+  drainPending: () => void;
 }
 
 /**
@@ -49,6 +51,7 @@ const CHUNK_SIZE = 6;
 export function createAgentMessageCoalescer(handler: AgentMessageHandler): AgentMessageCoalescer {
   const queue: unknown[] = [];
   let flushScheduled = false;
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
   function flush(): void {
     // Take at most CHUNK_SIZE events from the front of the queue.
@@ -59,7 +62,10 @@ export function createAgentMessageCoalescer(handler: AgentMessageHandler): Agent
       // More events waiting — continue in a new task. Unlike chained
       // microtasks, this gives the browser a chance to process input and paint
       // before draining the rest of a tunnel-delivered polling burst.
-      setTimeout(flush, 0);
+      pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        flush();
+      }, 0);
     } else {
       // Queue fully drained — allow new pushes to schedule a fresh flush.
       flushScheduled = false;
@@ -77,6 +83,23 @@ export function createAgentMessageCoalescer(handler: AgentMessageHandler): Agent
         flushScheduled = true;
         queueMicrotask(flush);
       }
+    },
+    drainPending(): void {
+      if (pendingTimer !== null) {
+        clearTimeout(pendingTimer);
+        pendingTimer = null;
+      }
+
+      // Cleanup is rare and must establish a hard lifecycle boundary. Finish
+      // the queue synchronously instead of leaving stale timer work behind or
+      // dropping sequence-bearing messages before durable catch-up can run.
+      while (queue.length > 0) {
+        const chunk = queue.splice(0, CHUNK_SIZE);
+        for (const msg of chunk) {
+          handler(msg);
+        }
+      }
+      flushScheduled = false;
     },
   };
 }

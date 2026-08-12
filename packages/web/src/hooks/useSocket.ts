@@ -1223,6 +1223,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         window.removeEventListener('online', onlineHandler);
       }
       socket.disconnect();
+      // Backlog continuations use timer tasks so the browser can paint between
+      // chunks. Establish a hard socket-lifecycle boundary on cleanup: finish
+      // queued sequence-bearing messages now and cancel the stale timer.
+      agentMessageCoalescerRef.current?.drainPending();
       joinedRoomsRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks accessed via callbacksRef
