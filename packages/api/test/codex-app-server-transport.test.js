@@ -404,6 +404,7 @@ test('pre-turn transport failure retries once without changing a requested threa
 
 test('failed carrier acquisition does not emit a success-classified duration sample', async () => {
   const records = [];
+  const preparationSpans = [];
   let nowMs = 4_000;
   const run = collect(
     runCodexAppServerWithRecovery({
@@ -420,11 +421,13 @@ test('failed carrier acquisition does not emit a success-classified duration sam
       stageDurationRecorder: {
         record: (value, attributes) => records.push({ value, attributes }),
       },
+      onPreparationSpan: (span) => preparationSpans.push(span),
     }),
   );
 
   await assert.rejects(run, /carrier unavailable/);
   assert.deepEqual(records, []);
+  assert.deepEqual(preparationSpans, []);
 });
 
 test('model-capacity failure retries the accepted turn on the same thread without leaking the failed attempt', async () => {

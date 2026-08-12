@@ -1296,6 +1296,14 @@ export type {
   TurnExecutionTerminalInput,
   TurnExecutionTerminalStatus,
 } from './turn-execution.js';
+export {
+  TURN_EXECUTION_TIMELINE_VERSION,
+  type TurnExecutionStepKey,
+  type TurnExecutionStepSpanV1,
+  type TurnExecutionStepV1,
+  type TurnExecutionTimelineStatus,
+  type TurnExecutionTimelineV1,
+} from './turn-execution-timeline.js';
 // User preferences types (F166 猫猫排序自定义)
 export type {
   MessageDispositionPreferenceSnapshot,

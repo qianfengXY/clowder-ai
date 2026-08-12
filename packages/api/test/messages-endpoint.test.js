@@ -863,6 +863,33 @@ describe('GET /api/messages', () => {
     assert.deepEqual(body.messages[0].extra?.stream, { invocationId: 'inv-stream-1' });
   });
 
+  it('returns the persisted execution timeline without reconstructing legacy timing', async () => {
+    const executionTimeline = {
+      v: 1,
+      startedAt: 4600,
+      completedAt: 5100,
+      status: 'completed',
+      steps: [
+        { key: 'request_accepted', startedAt: 4600, completedAt: 4700, status: 'completed' },
+        { key: 'first_text', startedAt: 4900, completedAt: 5100, status: 'completed' },
+        { key: 'completed', startedAt: 5100, completedAt: 5100, status: 'completed' },
+      ],
+    };
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'codex',
+      content: 'timed reply',
+      mentions: [],
+      timestamp: 4600,
+      origin: 'stream',
+      extra: { executionTimeline },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.messages[0].extra?.executionTimeline, executionTimeline);
+  });
+
   it('filters by userId', async () => {
     messageStore.append({
       userId: 'alice',

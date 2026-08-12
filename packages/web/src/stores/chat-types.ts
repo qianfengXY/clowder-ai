@@ -6,6 +6,7 @@ import type {
   ReplyPreview,
   SchedulerMessageExtra,
   TurnExecutionMessageProjection,
+  TurnExecutionTimelineV1,
 } from '@cat-cafe/shared';
 import type { EvidenceSourceType } from '@/types/evidence';
 
@@ -83,8 +84,12 @@ export interface ToolEvent {
   resultMeta?: string;
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
+  /** Native tool name, separate from localized display label. */
+  toolName?: string;
   /** Persisted tool result status; replay adapter maps error status to failed tool UI. */
-  status?: 'completed' | 'error';
+  status?: 'completed' | 'ok' | 'error' | 'unknown';
+  startTimeMs?: number;
+  endTimeMs?: number;
   timestamp: number;
 }
 
@@ -315,6 +320,8 @@ export interface ChatMessage {
     };
     /** Immutable child execution identity; terminal lifecycle is read from the ledger API. */
     turnExecution?: TurnExecutionMessageProjection;
+    /** Versioned, argument-free execution timeline for this exact visible turn. */
+    executionTimeline?: TurnExecutionTimelineV1;
     /** Non-body child executions attached to the visible turn they assisted. */
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** F098-C1: Explicit target cats from post_message API */
@@ -544,6 +551,8 @@ export interface CatInvocationInfo {
    *  Stamped into formal/live message `extra.stream.turnInvocationId` so frontend bubble dedup
    *  uses the turn dimension (prevents same-parent multi-turn-same-cat bubble merge). */
   turnInvocationId?: string;
+  /** Live execution timeline before it is attached to the durable reply. */
+  executionTimeline?: TurnExecutionTimelineV1;
   durationMs?: number;
   startedAt?: number;
   usage?: TokenUsage;

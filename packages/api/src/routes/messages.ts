@@ -2126,6 +2126,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.supplement ||
       m.extra?.causal ||
       m.extra?.turnExecution ||
+      m.extra?.executionTimeline ||
       m.extra?.auxiliaryTurnExecutions ||
       supplementProjectionByOriginal.has(m.id) ||
       m.queueCustody ||
@@ -2147,6 +2148,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
               ...(m.extra?.causal ? { causal: m.extra.causal } : {}),
               ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
+              ...(m.extra?.executionTimeline ? { executionTimeline: m.extra.executionTimeline } : {}),
               ...(m.extra?.auxiliaryTurnExecutions ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions } : {}),
               ...(supplementProjectionByOriginal.has(m.id)
                 ? { freshnessSupplement: supplementProjectionByOriginal.get(m.id) }

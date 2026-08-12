@@ -22,7 +22,13 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
-import { type CatId, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import {
+  type CatId,
+  catRegistry,
+  createCatId,
+  resolveCliEffortOverride,
+  type TurnExecutionStepSpanV1,
+} from '@cat-cafe/shared';
 import { parse as parseToml } from 'smol-toml';
 import {
   resolveBinaryRoot,
@@ -242,6 +248,8 @@ interface CodexAgentServiceOptions {
   appServerStageDurationRecorder?: CodexAppServerStageDurationRecorder;
   /** Test seam for elapsed-time measurement. */
   monotonicNow?: () => number;
+  /** Test seam for persisted/live epoch timestamps. */
+  wallClockNow?: () => number;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -896,6 +904,7 @@ export class CodexAgentService implements AgentService {
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
   private readonly appServerStageDurationRecorder: CodexAppServerStageDurationRecorder;
   private readonly monotonicNow: () => number;
+  private readonly wallClockNow: () => number;
   /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
@@ -916,6 +925,7 @@ export class CodexAgentService implements AgentService {
     this.appServerHostPool = options?.appServerHostPool;
     this.appServerStageDurationRecorder = options?.appServerStageDurationRecorder ?? codexAppServerStageDuration;
     this.monotonicNow = options?.monotonicNow ?? (() => performance.now());
+    this.wallClockNow = options?.wallClockNow ?? Date.now;
   }
 
   /** F203 Phase C — this service injects L0 via `-c developer_instructions=` (Task 4). */
@@ -965,6 +975,7 @@ export class CodexAgentService implements AgentService {
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const providerSetupStartedAt = this.monotonicNow();
+    const providerSetupStartedAtMs = this.wallClockNow();
     const firstVisibleTextRecorder = createCodexFirstVisibleTextRecorder();
     let latestFirstVisibleTextStatus: CodexFirstVisibleTextStatus | null = null;
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
@@ -1355,6 +1366,7 @@ export class CodexAgentService implements AgentService {
       const appServerEnv = usePooledAppServer ? withoutSessionScopedHostEnv(codexEnv) : codexEnv;
       let pooledSessionInUse = false;
       let forceDirectAppServer = false;
+      const pendingPreparationSpans: TurnExecutionStepSpanV1[] = [];
       const createPooledSession = async (sessionOptions: AgentCarrierSessionOptions): Promise<AgentCarrierSession> => {
         if (forceDirectAppServer) {
           return createDirectAgentCarrierSession({ ...sessionOptions, env: codexEnv });
@@ -1424,6 +1436,8 @@ export class CodexAgentService implements AgentService {
             retryBudget: 1,
             stageDurationRecorder: this.appServerStageDurationRecorder,
             monotonicNow: this.monotonicNow,
+            wallClockNow: this.wallClockNow,
+            onPreparationSpan: (span) => pendingPreparationSpans.push(span),
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
               ...(options?.activeInvocationFreshness ? { freshnessController: options.activeInvocationFreshness } : {}),
@@ -1463,6 +1477,23 @@ export class CodexAgentService implements AgentService {
         this.appServerStageDurationRecorder.record(Math.max(0, this.monotonicNow() - providerSetupStartedAt) / 1_000, {
           status: 'provider_setup',
         });
+        const providerSetupCompletedAtMs = this.wallClockNow();
+        yield {
+          type: 'status' as const,
+          catId: this.catId,
+          content: 'thinking',
+          metadata: {
+            ...metadata,
+            diagnostics: {
+              executionStep: {
+                key: 'provider_setup',
+                startedAt: providerSetupStartedAtMs,
+                completedAt: providerSetupCompletedAtMs,
+              } satisfies TurnExecutionStepSpanV1,
+            },
+          },
+          timestamp: providerSetupCompletedAtMs,
+        };
       }
 
       // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).
@@ -1485,6 +1516,18 @@ export class CodexAgentService implements AgentService {
       };
 
       for await (const event of events) {
+        for (const executionStep of pendingPreparationSpans.splice(0)) {
+          yield {
+            type: 'status' as const,
+            catId: this.catId,
+            content: 'thinking',
+            metadata: {
+              ...metadata,
+              diagnostics: { executionStep },
+            },
+            timestamp: executionStep.completedAt,
+          };
+        }
         const firstVisibleTextStatus = classifyCodexFirstVisibleTextStatus(event, useAppServer);
         if (firstVisibleTextStatus) latestFirstVisibleTextStatus = firstVisibleTextStatus;
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
@@ -1738,6 +1781,18 @@ export class CodexAgentService implements AgentService {
             yield { ...result, metadata };
           }
         }
+      }
+      for (const executionStep of pendingPreparationSpans.splice(0)) {
+        yield {
+          type: 'status' as const,
+          catId: this.catId,
+          content: 'thinking',
+          metadata: {
+            ...metadata,
+            diagnostics: { executionStep },
+          },
+          timestamp: executionStep.completedAt,
+        };
       }
 
       const finalSignature = finalizeCodexStream(codexStreamState, this.catId);

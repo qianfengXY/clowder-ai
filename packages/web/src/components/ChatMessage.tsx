@@ -41,6 +41,7 @@ import { ThinkingContent } from './ThinkingContent';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 import { TtsPlayButton } from './TtsPlayButton';
+import { TurnExecutionTimeline } from './TurnExecutionTimeline';
 
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   ragdoll: { radius: 'rounded-2xl rounded-bl-sm' },
@@ -810,6 +811,9 @@ export function ChatMessage({
           disclosureKey={cliDisclosureKey}
         />
       )}
+      {message.extra?.executionTimeline ? (
+        <TurnExecutionTimeline timeline={message.extra.executionTimeline} toolEvents={message.toolEvents} />
+      ) : null}
       {message.extra?.rich?.blocks && message.extra.rich.blocks.length > 0 && (
         <RichBlocks
           blocks={message.extra.rich.blocks}

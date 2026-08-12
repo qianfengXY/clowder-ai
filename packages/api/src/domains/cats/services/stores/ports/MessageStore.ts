@@ -16,6 +16,7 @@ import type {
   ReplyPreview,
   RichMessageExtra,
   SchedulerMessageExtra,
+  TurnExecutionTimelineV1,
 } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
@@ -160,6 +161,8 @@ export interface StoredMessage {
     };
     /** Durable child execution projection used to distinguish guard/supplement turns after F5. */
     turnExecution?: TurnExecutionMessageProjection;
+    /** Durable, bounded execution timeline rendered inside the owning reply bubble. */
+    executionTimeline?: TurnExecutionTimelineV1;
     /** Child executions that affected this visible turn without owning/copying its body. */
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     crossPost?: {
