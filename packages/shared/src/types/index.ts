@@ -416,6 +416,8 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+// F289: project-scoped ChatGPT Desktop development loop contracts.
+export * from './desktop-development-loop.js';
 // Dispatch proposal types (F246 Phase B: F193 E3 cross-thread dispatch)
 export {
   type DispatchProposal,
@@ -704,14 +706,22 @@ export type {
   LimbNodeRecord,
   LimbNodeStatus,
 } from './limb.js';
-// F275 Phase B: internal managed-work identity kernel
 export type {
   ManagedWorkBinding,
+  ManagedWorkConsumerId,
+  ManagedWorkConsumerSnapshot,
+  ManagedWorkConsumerState,
+  ManagedWorkEvidence,
+  ManagedWorkEvidenceInput,
+  ManagedWorkExecutorActor,
+  ManagedWorkLifecycle,
   WorkAdmission,
   WorkAdmissionProducerKind,
   WorkAttempt,
   WorkflowSopAdmissionBundle,
 } from './managed-work.js';
+// F275: internal managed-work identity and named-consumer kernel
+export { MANAGED_WORK_CONSUMER_IDS } from './managed-work.js';
 // Marketplace types (F146 MCP Marketplace Control Plane)
 export type {
   InstallMode,
@@ -1072,6 +1082,20 @@ export type {
   ResolutionItem,
   ResolutionStatus,
 } from './resolution.js';
+// F253/F289: durable exact-SHA independent review rounds
+export type {
+  ReviewConsensus,
+  ReviewConsensusFinding,
+  ReviewConsensusVerdict,
+  ReviewDraftFinding,
+  ReviewDraftVerdict,
+  ReviewFindingStatus,
+  ReviewPrivateDraft,
+  ReviewRound,
+  ReviewRoundPhase,
+  ReviewRoundSafeView,
+  ReviewSeverity,
+} from './review-round.js';
 // Rich block types (F22 Rich Blocks 富消息系统)
 export type {
   InteractiveOption,

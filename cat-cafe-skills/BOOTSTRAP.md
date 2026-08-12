@@ -14,6 +14,9 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 ChatGPT author → chatgpt-review-rounds（独立检视→交叉检视→指定猫写 Git ledger）
     → ChatGPT fix → repeat → merge-gate → operator acceptance
 
+Cat Café bound project → catcafe-desktop-executor（repo resolve→managed work→Resume Packet）
+    → durable ReviewRound → ChatGPT fix/merge → Cat Café final acceptance
+
 co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 ```
 
@@ -34,6 +37,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `fresh-context-review` | *（可选）* Author-triggered pre-review scan（finding generator, not approval） | ②½ |
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `chatgpt-review-rounds` | ChatGPT 作者代码的多猫独立检视、交叉共识与逐轮 Git ledger | ③ |
+| `catcafe-desktop-executor` | ChatGPT Desktop 实现/恢复已绑定 Cat Café 项目并闭环权威 ReviewRound | ① |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
 | `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |

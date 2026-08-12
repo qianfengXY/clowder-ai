@@ -60,7 +60,13 @@ export type McpOperationContract =
       }>;
     };
 
-export type McpRuntimeProfile = 'full' | 'readonly' | 'agent-key' | 'desktop:fable-phase0' | 'desktop:cloud-pro-phase0';
+export type McpRuntimeProfile =
+  | 'full'
+  | 'readonly'
+  | 'agent-key'
+  | 'desktop:fable-phase0'
+  | 'desktop:cloud-pro-phase0'
+  | 'desktop:development-loop';
 
 export type McpStandaloneReason =
   | {

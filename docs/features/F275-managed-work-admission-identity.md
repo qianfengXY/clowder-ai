@@ -1,10 +1,10 @@
 ---
 feature_ids: [F275]
-related_features: [F160, F167, F192, F233, F246, F267]
+related_features: [F160, F167, F192, F233, F246, F267, F289]
 topics: [managed-work, work-admission, identity, sop, task-outcome, provenance]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-02
+updated: 2026-08-07
 community_issue: "clowder-ai#1213"
 tips_exempt: "Internal work-identity and provenance contract; workId is deliberately absent from user-facing surfaces"
 user_journey_exempt: "Internal execution identity substrate; TaskItem remains the only optional user-visible work projection"
@@ -16,7 +16,7 @@ description_updated_at: 2026-07-26T23:35:00Z
 
 # F275: Managed Work Admission Identity — 受理工作身份契约
 
-> **Status**: in-progress / Phase B landed on main; runtime dormant; Phase C deferred | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol，kickoff / architecture contract) | **Priority**: P1
+> **Status**: in-progress / Phase B landed on main; F289-named Phase C port implemented on the F289 branch and awaiting independent review | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol，kickoff / architecture contract) | **Priority**: P1
 >
 > **Source**: [clowder-ai#1213](https://github.com/zts212653/clowder-ai/issues/1213)
 >
@@ -25,7 +25,7 @@ description_updated_at: 2026-07-26T23:35:00Z
 ## Architecture Ownership
 
 Architecture cell: managed-work
-Architecture status: accepted by ADR-044；Phase B identity propagation 已落地，Phase C 仍 deferred。
+Architecture status: accepted by ADR-044；Phase B identity propagation 已落地；Phase C 仅为已授权的 F289 named consumer 增加 ordered attempts、typed evidence 与 terminal CAS，不开放通用 policy registry。
 Map delta: new cell added
 Why: 现有 `harness-eval` 只消费业务真相，`approval-index` 只拥有审批投影，`ball-custody` 只拥有谁该行动；没有现存 cell 拥有“哪件长程工作已被受理，以及后续 invocation/PR/Episode 绑定到哪个 work/attempt”的 canonical identity。Phase A 只命名 whole-work terminal 的未来 owner，不提前建设 terminal engine。
 
@@ -85,9 +85,12 @@ Slice 3 的 TaskItem anchor 与 private binding 共享一条生命周期不变�
 
 ### Phase C: Multi-Attempt + Terminal Evidence
 
-- 同一工作跨 thread / 跨猫 / 重试的 attempt 连续性。
-- 按真实 consumer 重新设计最小 work state、terminal evidence 与 reopen 契约；Phase A 不预先冻结 policy registry/digest/revision ratchet。
-- terminal transition 引用可复核 evidence；晚到、重复、冲突证据幂等且 fail closed。
+- `f289_desktop_development_loop` 是首个、当前唯一 named consumer；consumer allowlist 是 closed set，其他 caller fail closed。
+- 同一 `workId` 下按 Redis CAS 分配严格递增 attempt；attempt executor 是 `cat` 或独立的 `chatgpt-desktop-dev` external actor，不能把 Desktop 冒充为 reviewer CatId。
+- claim、next-attempt、evidence append 与 terminal transition 都要求显式 owner/work/attempt、expected version 和 idempotency key；receipt/state/evidence/attempt 默认 TTL=0。
+- `accepted` 必须在同一 current attempt + exact SHA 上同时具备 implementation、zero-open-finding + checks-green review、merge 与 final acceptance typed evidence；`rejected` 必须有显式 rejection evidence。
+- terminal work 不接受新 attempt 或迟到 evidence；replay 同一 idempotency key 返回原结果，不同 payload 冲突。
+- 按真实 consumer 实现最小 work state 与 terminal evidence；仍不建设通用 policy registry/digest/revision ratchet，也不引入 thread/task/branch fallback。
 - 只有证明直接记录不足时，才评估通用事件账本/replay；TaskItem/UI 删除或从未创建不影响身份账本。
 - F192/F267 只在 identity coverage 与 validity gate 通过后恢复 task-level outcome verdict。
 
@@ -164,7 +167,7 @@ Slice 3 的 TaskItem anchor 与 private binding 共享一条生命周期不变�
 ## Dependencies
 
 - **Evolved from**: F192 Phase G（task-outcome 暴露的 thread heuristic 失真）、clowder-ai#1213（社区问题陈述与契约清单）
-- **Blocked by**: none；Phase A Design Gate accepted，Phase B landed；Phase C design/authorization deferred
+- **Blocked by**: none；Phase A Design Gate accepted，Phase B landed；co-creator 在确认 F289 真实旅程与边界后授权其 named Phase C consumer implementation。其他 consumer 仍需独立 Design Gate。
 - **Related**: F246（未来 stable action-envelope admission 候选，v1 不接入）、F167/F233（custody/standing 与 terminal evidence，但不拥有 work identity）、F160（可选 TaskItem 投影）、F267（measurement validity 与任务分母恢复门）
 
 ## Risk
@@ -196,6 +199,7 @@ Slice 3 的 TaskItem anchor 与 private binding 共享一条生命周期不变�
 | KD-8 | attempt 1 admission 时不声明 executor；认证 invocation 才一次性绑定 | SOP 可由 user API 创建，`batonHolder/updatedBy` 不能证明 primary executor | 2026-07-26 |
 | KD-9 | live PR anchor 使用 unified `TaskItem(kind='pr_tracking')`，不改 legacy `PrTrackingEntry` | production register/CiCdRouter 均以 live TaskStore record 为坐标；legacy store 只负责 startup backfill | 2026-07-26 |
 | KD-10 | PR binding 放在 keyed by live task ID 的 TaskStore-private bind-once metadata，不进 `TaskItem/AutomationState` | 当前 shared TaskItem 会原样进入 REST/socket/web/community；命名“internal”不能形成边界 | 2026-07-26 |
+| KD-11 | Phase C 首个 port 只接受 `f289_desktop_development_loop`，Desktop executor 使用 external actor 而非 CatId | 保住作者/Reviewer 身份隔离，并让真实 consumer 决定最小 evidence/terminal contract | 2026-08-07 |
 
 ## Review Gate
 

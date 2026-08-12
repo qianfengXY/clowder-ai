@@ -294,6 +294,13 @@ maintainer 五问与真实 GitHub author / fix-custody 边界，外部作者的�
 
 **Pipeline**：`lark-*` skill 家族（lark-doc / lark-base / lark-task / lark-calendar / etc.）
 
+### 24. `catcafe-desktop-executor` — ChatGPT Desktop 开发闭环
+
+**坏直觉**：在 Desktop 里重新询问 project/work ID、按分支猜任务，或把 Review finding 手工来回复制
+**场景 trigger**：用户要求在 ChatGPT Desktop 实现、恢复或继续修复一个已经绑定 Cat Café 的 GitHub 项目
+**用法**：严格 `desktop:development-loop` profile 下按 repo resolve 项目 → 选择权威 managed-work candidate → Resume Packet 驱动实现/Review/修复/合入；多候选必须让用户选择
+**边界**：该 profile 和 credential 由用户显式启用；未激活时 fail closed，不改 runtime 配置或借用 Cat 身份
+
 ---
 
 ## MCP capability 快扫（underused cat_cafe_* 工具）

@@ -71,6 +71,23 @@ export {
   handleCommunityRouteAcceptance,
 } from './community-route-acceptance-tool.js';
 export {
+  desktopDevelopmentLoopTools,
+  developmentImplementationReportInputSchema,
+  developmentMergeConfirmationInputSchema,
+  developmentMergeReportInputSchema,
+  developmentProjectReadInputSchema,
+  developmentWorkConnectInputSchema,
+  developmentWorkHeartbeatInputSchema,
+  developmentWorkReadInputSchema,
+  handleDevelopmentImplementationReport,
+  handleDevelopmentMergeConfirmationRecord,
+  handleDevelopmentMergeReport,
+  handleDevelopmentProjectRead,
+  handleDevelopmentWorkConnect,
+  handleDevelopmentWorkHeartbeat,
+  handleDevelopmentWorkRead,
+} from './desktop-development-loop-tools.js';
+export {
   distillationTools,
   handleMarkGeneralizable,
   handleNominateForGlobal,
@@ -202,6 +219,20 @@ export {
   listRecentInputSchema,
   recentTools,
 } from './recent-tools.js';
+export {
+  handleReviewBarrierDraftsRead,
+  handleReviewConsensusPublish,
+  handleReviewCrossFinish,
+  handleReviewDraftSubmit,
+  handleReviewIndependentFinish,
+  handleReviewPrivateDraftRead,
+  handleReviewRoundRead,
+  reviewConsensusPublishInputSchema,
+  reviewDraftSubmitInputSchema,
+  reviewRoundReadInputSchema,
+  reviewRoundTools,
+  reviewStageFinishInputSchema,
+} from './review-round-tools.js';
 // F193 Phase D AC-D1: reflect-tools removed (deprecated)
 export {
   handleGetRichBlockRules,

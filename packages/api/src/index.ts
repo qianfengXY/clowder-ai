@@ -272,6 +272,7 @@ import {
   connectorMediaRoutes,
   connectorPluginRoutes,
   debugInvocationExportRoutes,
+  desktopDevelopmentLoopRoutes,
   distillationOpportunityRoutes,
   distillationRoutes,
   dossierDistillationRoutes,
@@ -321,6 +322,7 @@ import {
   registerCallbackDocsRoutes,
   registerProfileUpdateDecisionRoutes,
   resolutionRoutes,
+  reviewRoundCallbackRoutes,
   rulesRoutes,
   servicesRoutes,
   sessionChainRoutes,
@@ -363,6 +365,7 @@ import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
+import { primaryMentionHandleForCatId } from './utils/cat-mention-handle.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
@@ -4297,6 +4300,48 @@ async function main(): Promise<void> {
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
+  const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
+  const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore);
+  let desktopDevelopmentLoopService:
+    | import('./domains/desktop-development-loop/desktop-development-loop-service.js').DesktopDevelopmentLoopService
+    | undefined;
+  let reviewRoundCoordinatorService:
+    | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
+    | undefined;
+  if (redis && workflowSopStore) {
+    const [serviceMod, coordinatorMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
+      import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
+      import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
+      import('./domains/desktop-development-loop/review-round-stage-dispatcher.js'),
+      import('./domains/desktop-development-loop/desktop-session-store.js'),
+      import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
+      import('./domains/review-coordination/RedisReviewRoundStore.js'),
+    ]);
+    const managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
+    const reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
+    const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher({
+      sendMessage: async ({ headers, payload }) => {
+        const response = await app.inject({ method: 'POST', url: '/api/messages', headers, payload });
+        return { statusCode: response.statusCode, body: response.body };
+      },
+      resolveMentionHandle: primaryMentionHandleForCatId,
+    });
+    desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
+      externalProjectStore,
+      projectReviewHubService,
+      new sessionMod.DesktopSessionStore(redis),
+      managedWorkConsumerPort,
+      reviewRoundStore,
+      reviewRoundDispatcher,
+      backlogStore,
+      workflowSopStore,
+    );
+    reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
+      reviewRoundStore,
+      managedWorkConsumerPort,
+      reviewRoundDispatcher,
+    );
+  }
   const intentCardStore = new IntentCardStore();
   const needAuditFrameStore = new NeedAuditFrameStore();
   const { ResolutionStore } = await import('./domains/projects/resolution-store.js');
@@ -4306,6 +4351,16 @@ async function main(): Promise<void> {
   const sliceStore = new SliceStore();
   const refluxPatternStore = new RefluxPatternStore();
   await app.register(externalProjectRoutes, { externalProjectStore, needAuditFrameStore, backlogStore });
+  await app.register(desktopDevelopmentLoopRoutes, {
+    projectReviewHubService,
+    ...(desktopDevelopmentLoopService ? { desktopDevelopmentLoopService } : {}),
+    desktopDevelopmentToken: process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN,
+    desktopDevelopmentOwnerUserId: privateUserId,
+  });
+  await app.register(reviewRoundCallbackRoutes, {
+    registry,
+    ...(reviewRoundCoordinatorService ? { coordinator: reviewRoundCoordinatorService } : {}),
+  });
   await app.register(intentCardRoutes, { externalProjectStore, intentCardStore });
   await app.register(resolutionRoutes, { externalProjectStore, resolutionStore });
   await app.register(sliceRoutes, { externalProjectStore, sliceStore });

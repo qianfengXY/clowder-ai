@@ -305,10 +305,17 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN',
+    defaultValue: '(空)',
+    description: 'F289 ChatGPT Desktop 开发闭环专用 bearer token；服务端绑定 owner，未配置时能力失败关闭',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_DESKTOP_MODE',
     defaultValue: 'fable-phase0',
-    description:
-      'F247 B1a Cloud Cat — remote-spike.ts 工具白名单 mode 选择（fable-phase0 / cloud-pro-phase0；收窄到 10 项 collab+memory 工具）',
+    description: 'Desktop MCP 严格工具白名单 mode（fable-phase0 / cloud-pro-phase0 / development-loop）',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,

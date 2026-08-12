@@ -1,6 +1,6 @@
 ---
 feature_ids: [F253]
-related_features: [F217, F192, F167, F073]
+related_features: [F217, F192, F167, F073, F289]
 topics: [quality, qc, merge-gate, review, ci, validation, telemetry, harness]
 doc_kind: spec
 created: 2026-06-25
@@ -10,7 +10,7 @@ tips_exempt: internal QC tooling — no user-visible capability change
 
 # F253: Clowder AI QC Loop — 自动化质量门禁全链路
 
-> **Status**: done (Phase D governance amendment 2026-08-04) | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
+> **Status**: done through Phase D; Phase E durable ReviewRound carrier implemented on the F289 branch and awaiting independent review | **Owner**: Ragdoll (Opus-4.6, original QC loop) + CodeX (@cat-idwxwjba, F289 carrier) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
 
 ## Why
 
@@ -35,9 +35,9 @@ operator experience（2026-06-25 Kun Chen 调研讨论）：
 
 ## Architecture Ownership
 
-Architecture cell: merge-gate (extend) + harness-eval (register new domain)
-Map delta: none — 扩展已有 cell（merge-gate + F192 eval domain），不创建新 cell
-Why: QC Loop 是两个已有 cell 的功能延伸：hygiene/evidence/gate 扩展 merge-gate；telemetry 注册 F192 eval domain。
+Architecture cell: merge-gate (extend) + harness-eval (register new domain) + review-coordination (Phase E carrier)
+Map delta: Phase E adds `review-coordination`; Phase A-D remain extensions of merge-gate + F192 eval domain
+Why: 原 QC Loop 的 hygiene/evidence/gate 扩展 merge-gate、telemetry 注册 F192；F289 需要 typed persistent ReviewRound 后，独立草稿/barrier/共识不再只是对话或 Git markdown 状态，因此新增窄 review-coordination cell。
 
 ## Architecture Inventory + Reuse Audit（2026-06-26 grounding）
 
@@ -153,6 +153,17 @@ qc.idle
 7. 风险门禁全绿后由 ChatGPT squash merge main；merge 后不代表用户验收完成，必须等待 operator 亲自验收。
 
 执行真相源：`chatgpt-review-rounds` skill；每轮结构真相源：`cat-cafe-skills/refs/chatgpt-review-round-template.md`。
+
+### Phase E: Durable ReviewRound carrier（2026-08-08 F289 consumer）
+
+F289 将 Phase D 从 SOP/markdown-only 升级为 typed persistent carrier，但不改变 Phase D 的人类/猫猫权力边界：
+
+- project/work/full-SHA 唯一 round，author、attempt、reviewer roster 与 recorder immutable；新 SHA 创建新 round。
+- reviewer 草稿独立持久化；barrier 前 reviewer 只能读取自己的草稿，Desktop safe read 只能看到进度。
+- 所有独立 reviewer 完成后原子打开 barrier；所有 cross-review 完成后才允许 designated recorder 发布共识。
+- finding ID 稳定，resolution 只能由后续完成 cross-review 的新 SHA round 记录；approved 必须 checks green 且整项工作零 open finding。
+- `work-current` 指针使旧 SHA verdict 保留历史但立即失去 current merge provenance；所有 state/draft/finding/receipt/index TTL=0。
+- F289 只通过 `IReviewRoundStore` 消费；Review Hub thread 是投影视图，不是第二份 round ledger。
 
 ### QC 触发策略
 
@@ -325,6 +336,13 @@ F253 **消费** F167 的 hold_ball / review-feedback / merge-gate 事件，**产
 - [x] AC-D3: merge-gate 只接受绑定 reviewed code HEAD 的 `approved_for_merge` / `openFindings: 0` ledger；recorder ledger-only commit 之外的 HEAD 改动使 verdict stale（验证：review routing guard + peer review）
 - [x] AC-D4: ChatGPT 负责合入 main，合入后状态进入 operator acceptance 而非自动宣告验收完成（验证：skill、SOP 与 merge-gate 文本一致）
 
+### Phase E（Durable ReviewRound carrier）✅
+
+- [x] AC-E1: full SHA + project/work 唯一 immutable round，至少两名 distinct non-author reviewers，designated recorder 固定（验证：isolated Redis test）
+- [x] AC-E2: private draft 在全员 independent finish 前不可跨 reviewer 读取；并发 finish 只有一个 CAS winner，barrier 不提前开放（验证：isolated Redis concurrency test）
+- [x] AC-E3: 全员 cross-review 后 recorder 才能发布；approved 要求 checks green + work 级 zero open finding，失败不留下部分 resolution（验证：atomic failure regression）
+- [x] AC-E4: 新 SHA 更新 work-current provenance、旧 round 只保留历史；round/draft/finding/receipt/index TTL=0（验证：restart-safe Redis records + current-round test）
+
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -396,6 +414,7 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 | KD-12 | operator 指定唯一 recorder 把共识 ledger 写入 Git；其他 reviewer 全程 Git 只读 | 单一真相源 + 清晰 provenance，避免各猫意见分支互相覆盖 | 2026-08-04（operator directive） |
 | KD-13 | 每次 ChatGPT 修复产生新 code HEAD 后完整开启下一轮；所有 accepted findings 清零才可合入 | review 只对精确 HEAD 有效，不能用上一轮 verdict 覆盖新代码 | 2026-08-04（operator directive） |
 | KD-14 | ChatGPT 合入 main 后仍等待 operator 亲自验收 | 技术门禁通过不等于 operator 的最终体验验收 | 2026-08-04（operator directive） |
+| KD-15 | Phase E 用 Redis typed carrier 替代 conversational/markdown-only round truth；Review Hub 与 Git ledger 仅作投影/可选下游 | 窗口删除、并发 finish、Desktop 恢复与跨 SHA finding closure 都需要可验证、TTL=0、原子且不依赖可见聊天的真相 | 2026-08-08（F289 consumer） |
 
 ## Future Phase Candidates
 

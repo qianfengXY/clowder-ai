@@ -11,8 +11,8 @@ export class VersionConflictError extends Error {
 
 export class ManagedWorkExecutorConflictError extends Error {
   readonly code = 'MANAGED_WORK_EXECUTOR_CONFLICT';
-  constructor(readonly executorCatId: CatId) {
-    super(`Managed-work attempt is already bound to ${executorCatId}`);
+  constructor(readonly executorId: string) {
+    super(`Managed-work attempt is already bound to ${executorId}`);
     this.name = 'ManagedWorkExecutorConflictError';
   }
 }
