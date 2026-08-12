@@ -15,12 +15,12 @@
  *   800 synchronous nested re-renders exceed React's 50-update limit → crash.
  *
  *   WITH coalescer (chunked flush): 0 store notifications during push phase.
- *   Each microtask flush processes at most CHUNK_SIZE events (~6 × 4 = 24
- *   notifications per microtask). React resets its nested update counter
- *   between microtasks → each chunk stays safely under the 50-update limit.
+ *   Each flush turn processes at most CHUNK_SIZE events (~6 × 4 = 24
+ *   notifications per turn). Backlog chunks use timer tasks, keeping each
+ *   chunk below the React limit while yielding input/render opportunities.
  *
  * This test proves invariant A (0 synchronous notifications during push) and
- * invariant B (notifications are spread across multiple microtasks, each
+ * invariant B (notifications are spread across multiple turns, each
  * staying under the 50-update limit) directly using the real zustand store
  * subscription mechanism — the same one useSyncExternalStore builds on.
  */
@@ -61,10 +61,11 @@ function simulateHandleAgentMessage(store: ReturnType<typeof createTestStore>, s
   store.setState((s) => ({ invocationCount: s.invocationCount + 1 }));
 }
 
-/** Drain all pending microtasks (chunked flush needs multiple ticks). */
-async function drainMicrotasks(ticks = 50): Promise<void> {
+/** Drain the prompt microtask and timer-backed backlog turns. */
+async function drainQueuedWork(ticks = 50): Promise<void> {
+  await Promise.resolve();
   for (let i = 0; i < ticks; i++) {
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -136,8 +137,9 @@ describe('WITH coalescer (proves the fix)', () => {
     // React's subscriber is never called synchronously → no nested update cascade.
     expect(synchronousNotifications).toHaveLength(0);
 
-    // Drain all microtask chunks — all 200 events flush across multiple microtasks
-    await drainMicrotasks();
+    // Drain all turns — all 200 events flush across the prompt microtask and
+    // timer-backed backlog tasks.
+    await drainQueuedWork();
 
     // After drain: store is fully up-to-date
     expect(store.getState().lastSeq).toBe(200);
@@ -147,10 +149,10 @@ describe('WITH coalescer (proves the fix)', () => {
     unsub();
   });
 
-  it('invariant B: each microtask chunk stays under 50 store notifications (React safety)', async () => {
+  it('invariant B: each flush turn stays under 50 store notifications (React safety)', async () => {
     const store = createTestStore();
 
-    // Track notifications per microtask tick
+    // Track notifications per event-loop turn.
     const notificationsPerTick: number[] = [];
     let currentTickCount = 0;
 
@@ -168,10 +170,14 @@ describe('WITH coalescer (proves the fix)', () => {
       coalescer.push({ seq });
     }
 
-    // Drain microtasks one at a time, recording notifications per tick
+    // Drain one queued turn at a time, recording notifications per turn.
     for (let tick = 0; tick < 50; tick++) {
       currentTickCount = 0;
-      await Promise.resolve();
+      if (tick === 0) {
+        await Promise.resolve();
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (currentTickCount > 0) {
         notificationsPerTick.push(currentTickCount);
       }
