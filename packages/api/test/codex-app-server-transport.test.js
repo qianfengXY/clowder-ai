@@ -402,6 +402,31 @@ test('pre-turn transport failure retries once without changing a requested threa
   assert.equal(output.filter((event) => event.type === 'app_server.recovery').length, 1);
 });
 
+test('failed carrier acquisition does not emit a success-classified duration sample', async () => {
+  const records = [];
+  let nowMs = 4_000;
+  const run = collect(
+    runCodexAppServerWithRecovery({
+      sessionFactory: async () => {
+        throw new Error('carrier unavailable');
+      },
+      sessionOptions: { command: 'codex', args: ['app-server', '--stdio'], invocationId: 'inv-acquire-fail' },
+      runInput: { prompt: 'work', thread: { kind: 'start' } },
+      retryBudget: 0,
+      monotonicNow: () => {
+        nowMs += 75;
+        return nowMs;
+      },
+      stageDurationRecorder: {
+        record: (value, attributes) => records.push({ value, attributes }),
+      },
+    }),
+  );
+
+  await assert.rejects(run, /carrier unavailable/);
+  assert.deepEqual(records, []);
+});
+
 test('model-capacity failure retries the accepted turn on the same thread without leaking the failed attempt', async () => {
   const first = new ProtocolWire();
   const second = new ProtocolWire();

@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { type CatId, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import { parse as parseToml } from 'smol-toml';
@@ -45,6 +46,7 @@ import {
 } from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { codexAppServerStageDuration } from '../../../../../infrastructure/telemetry/instruments.js';
 import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -87,6 +89,7 @@ import { recordCodexAppServerLifecycle } from './CodexAppServerLifecycleRegistry
 import {
   type CodexAppServerRecoveryBlockedEvent,
   type CodexAppServerRecoveryEvent,
+  type CodexAppServerStageDurationRecorder,
   runCodexAppServerWithRecovery,
 } from './CodexAppServerRunner.js';
 import {
@@ -235,6 +238,10 @@ interface CodexAgentServiceOptions {
   approvalSurface?: CodexApprovalSurface;
   /** Warm app-server host pool. Omitted keeps the per-invocation carrier. */
   appServerHostPool?: CodexAppServerHostPool;
+  /** Test seam for bounded app-server preparation telemetry. */
+  appServerStageDurationRecorder?: CodexAppServerStageDurationRecorder;
+  /** Test seam for elapsed-time measurement. */
+  monotonicNow?: () => number;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -887,6 +894,8 @@ export class CodexAgentService implements AgentService {
   private readonly carrierMode: CodexCarrierMode;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
+  private readonly appServerStageDurationRecorder: CodexAppServerStageDurationRecorder;
+  private readonly monotonicNow: () => number;
   /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
@@ -905,6 +914,8 @@ export class CodexAgentService implements AgentService {
     // than relying on transport names or timing heuristics.
     this.approvalSurface = options?.approvalSurface ?? 'unavailable';
     this.appServerHostPool = options?.appServerHostPool;
+    this.appServerStageDurationRecorder = options?.appServerStageDurationRecorder ?? codexAppServerStageDuration;
+    this.monotonicNow = options?.monotonicNow ?? (() => performance.now());
   }
 
   /** F203 Phase C — this service injects L0 via `-c developer_instructions=` (Task 4). */
@@ -953,6 +964,7 @@ export class CodexAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const providerSetupStartedAt = this.monotonicNow();
     const firstVisibleTextRecorder = createCodexFirstVisibleTextRecorder();
     let latestFirstVisibleTextStatus: CodexFirstVisibleTextStatus | null = null;
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
@@ -1410,6 +1422,8 @@ export class CodexAgentService implements AgentService {
               interruptGraceMs: KILL_GRACE_MS,
             },
             retryBudget: 1,
+            stageDurationRecorder: this.appServerStageDurationRecorder,
+            monotonicNow: this.monotonicNow,
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
               ...(options?.activeInvocationFreshness ? { freshnessController: options.activeInvocationFreshness } : {}),
@@ -1444,6 +1458,12 @@ export class CodexAgentService implements AgentService {
         : options?.spawnCliOverride
           ? options.spawnCliOverride(cliOpts)
           : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+
+      if (useAppServer) {
+        this.appServerStageDurationRecorder.record(Math.max(0, this.monotonicNow() - providerSetupStartedAt) / 1_000, {
+          status: 'provider_setup',
+        });
+      }
 
       // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).
       // cli-spawn / tmux-agent-spawner decide via `finalSemanticDone` (see delete-block
