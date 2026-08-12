@@ -71,17 +71,48 @@ describe('backlog-doc-import parser', () => {
     assert.equal(rows[0].status, 'in-progress');
   });
 
-  test('throws when required columns are missing from header', async () => {
+  test('parses English roadmap aliases including Feature and Spec', async () => {
     const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
     const markdown = [
-      '| ID | Name | Status | Owner | Link |',
-      '|----|------|--------|-------|------|',
-      '| F010 | A | in-progress | 三猫 | [F010](a) |',
+      '| ID | Priority | Feature | Status | Owner | Source | Spec |',
+      '|----|----------|---------|--------|-------|--------|------|',
+      '| F006 | P0 | Workspace capability settings | spec | TBD | operator plan | [F006](features/F006.md) |',
     ].join('\n');
 
-    assert.throws(() => parseActiveFeaturesFromBacklog(markdown), {
-      message: /missing required columns/i,
-    });
+    assert.deepEqual(parseActiveFeaturesFromBacklog(markdown), [
+      {
+        id: 'F006',
+        name: 'Workspace capability settings',
+        status: 'spec',
+        owner: 'TBD',
+        link: 'features/F006.md',
+      },
+    ]);
+  });
+
+  test('parses localized roadmap aliases including 状态 and Spec', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    const markdown = [
+      '| ID | 优先级 | Feature | 状态 | Owner | 来源 | Spec |',
+      '|----|--------|---------|------|-------|------|------|',
+      '| F006 | P0 | Workspace 能力设置 | spec | TBD | 产品规划 | [F006](features/F006.zh-CN.md) |',
+    ].join('\n');
+
+    const rows = parseActiveFeaturesFromBacklog(markdown);
+    assert.equal(rows[0].name, 'Workspace 能力设置');
+    assert.equal(rows[0].status, 'spec');
+    assert.equal(rows[0].link, 'features/F006.zh-CN.md');
+  });
+
+  test('throws when a semantic required column is missing from header', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    const markdown = [
+      '| ID | Name | Owner | Link |',
+      '|----|------|-------|------|',
+      '| F010 | A | 三猫 | [F010](a) |',
+    ].join('\n');
+
+    assert.throws(() => parseActiveFeaturesFromBacklog(markdown), { message: /missing required columns/i });
   });
 
   test('throws when no table header found at all', async () => {

@@ -19,6 +19,31 @@ export interface BacklogFeatureRow {
   link?: string;
 }
 
+const BACKLOG_COLUMN_ALIASES = {
+  id: ['id'],
+  name: ['名称', 'name', 'feature'],
+  status: ['status', '状态'],
+  owner: ['owner'],
+  link: ['link', 'spec'],
+} as const;
+type BacklogColumn = keyof typeof BACKLOG_COLUMN_ALIASES;
+const REQUIRED_BACKLOG_COLUMNS = ['id', 'name', 'status', 'owner'] as const satisfies readonly BacklogColumn[];
+
+function normalizeHeaderCells(line: string): string[] {
+  return parseTableCells(line).map((cell) => cell.trim().toLowerCase());
+}
+
+function resolveBacklogColumn(cells: readonly string[], column: BacklogColumn): number {
+  const aliases = BACKLOG_COLUMN_ALIASES[column] as readonly string[];
+  return cells.findIndex((cell) => aliases.includes(cell));
+}
+
+function hasRequiredBacklogColumns(line: string): boolean {
+  if (!line.trim().startsWith('|')) return false;
+  const cells = normalizeHeaderCells(line);
+  return REQUIRED_BACKLOG_COLUMNS.every((column) => resolveBacklogColumn(cells, column) >= 0);
+}
+
 function parseTableCells(line: string): string[] {
   const normalized = line.trim();
   if (!normalized.startsWith('|')) return [];
@@ -37,30 +62,21 @@ function extractLink(linkCell: string): string | undefined {
 
 export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeatureRow[] {
   const lines = markdown.split(/\r?\n/);
-  const requiredColumns = ['id', '名称', 'status', 'owner'];
-  const headerIndex = lines.findIndex((line) => {
-    if (!line.trim().startsWith('|')) return false;
-    const cells = parseTableCells(line);
-    const lowerCells = cells.map((c) => c.trim().toLowerCase());
-    return requiredColumns.every((col) => lowerCells.includes(col));
-  });
+  const headerIndex = lines.findIndex(hasRequiredBacklogColumns);
   if (headerIndex < 0) {
     throw new Error(
-      `BACKLOG.md missing required columns: ${requiredColumns.join(', ')}. ` +
+      'BACKLOG.md missing required columns: ID, Name/名称/Feature, Status/状态, Owner. ' +
         'Refusing to proceed — an empty parse result would cause sync to mark all features as done.',
     );
   }
 
-  const headerCells = parseTableCells(lines[headerIndex]!);
-  const colIndex = new Map<string, number>();
-  for (const [i, cell] of headerCells.entries()) {
-    colIndex.set(cell.trim().toLowerCase(), i);
-  }
-  const idCol = colIndex.get('id')!;
-  const nameCol = colIndex.get('名称')!;
-  const statusCol = colIndex.get('status')!;
-  const ownerCol = colIndex.get('owner')!;
-  const linkCol = colIndex.get('link');
+  const headerCells = normalizeHeaderCells(lines[headerIndex] ?? '');
+  const idCol = resolveBacklogColumn(headerCells, 'id');
+  const nameCol = resolveBacklogColumn(headerCells, 'name');
+  const statusCol = resolveBacklogColumn(headerCells, 'status');
+  const ownerCol = resolveBacklogColumn(headerCells, 'owner');
+  const resolvedLinkCol = resolveBacklogColumn(headerCells, 'link');
+  const linkCol = resolvedLinkCol >= 0 ? resolvedLinkCol : undefined;
 
   const rows: BacklogFeatureRow[] = [];
   const seen = new Set<string>();
@@ -70,7 +86,7 @@ export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeature
     if (!line.startsWith('|')) break;
 
     const cells = parseTableCells(line);
-    if (cells.length < requiredColumns.length || isSeparatorRow(cells)) continue;
+    if (cells.length < REQUIRED_BACKLOG_COLUMNS.length || isSeparatorRow(cells)) continue;
 
     const id = cells[idCol]?.trim().toUpperCase() ?? '';
     if (!/^F\d{3}$/.test(id)) continue;
