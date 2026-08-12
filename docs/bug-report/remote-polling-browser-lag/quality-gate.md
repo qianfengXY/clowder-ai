@@ -2,7 +2,7 @@
 
 Spec: `feature-specs/2026-08-12-remote-realtime-transport-fallback.md`
 Original requirement: operator messages in `thread_mspuhjh2woc2qy2d` on 2026-08-12
-Implementation head: `03bcab3383a3193c4083cce435d9dbfd0d3a1f33`
+Implementation head: `da661835a5beec384cc536f6cc70285b2f4a3060`
 Check date: 2026-08-12
 
 ## Vision coverage
@@ -21,7 +21,7 @@ Delivery completeness: this is a complete regression correction, not a partial f
 |---|---|---|---|---|
 | AC-1 | Primary chat socket attempts WebSocket first. | Met | `packages/web/src/hooks/useSocket.ts:484` | `useSocket-reconnect-catchup.test.ts` transport option contract. |
 | AC-2 | Corporate/proxy rejection can fall back to polling. | Met | `packages/web/src/hooks/useSocket.ts:489` | Ordered `['websocket', 'polling']` plus `tryAllTransports: true` assertion. |
-| AC-3 | Polling-delivered backlog yields without merge/drop/reorder. | Met | `packages/web/src/hooks/useSocket-message-coalescer.ts:49` | Coalescer unit and real-Zustand integration tests: prompt first chunk, task boundary, FIFO, 200/200 delivery, per-turn notification ceiling. |
+| AC-3 | Polling-delivered backlog yields without merge/drop/reorder or stale lifecycle writes. | Met | `packages/web/src/hooks/useSocket-message-coalescer.ts:49` | Coalescer unit and real-Zustand integration tests: prompt first chunk, task boundary, FIFO, 200/200 delivery, per-turn notification ceiling, cleanup drain/timer cancel, and Strict Mode reuse. |
 | AC-4 | Reconnect and durable catch-up semantics remain intact. | Met | Existing `useSocket` recovery path unchanged. | Focused reconnect/catch-up suite passes 9/9. |
 | AC-5 | Runtime config, persistence, and security boundary remain unchanged. | Met | No config, API, persistence, auth, room, or `allowRequest` diff. | Final name/diff audit; F156/LL-047 reviewed. |
 
@@ -31,14 +31,14 @@ Delivery completeness: this is a complete regression correction, not a partial f
 close_gate_report:
   feature_id: BUG-remote-polling-browser-lag
   spec_path: feature-specs/2026-08-12-remote-realtime-transport-fallback.md
-  head_sha: 03bcab3383a3193c4083cce435d9dbfd0d3a1f33
+  head_sha: da661835a5beec384cc536f6cc70285b2f4a3060
   report_date: 2026-08-12
   ac_matrix:
     - ac_id: AC-1
       status: met
       evidence:
         - kind: commit
-          ref: 03bcab338
+          ref: da661835a
           description: WebSocket-first transport preference
         - kind: test
           ref: packages/web/src/hooks/__tests__/useSocket-reconnect-catchup.test.ts
@@ -98,6 +98,16 @@ Structural boundary: the company proxy cannot be reproduced from this worktree. 
 
 Dogfood bugs found: none in the changed slice.
 
+## Review feedback closure
+
+Independent review of `be036a504` returned `REQUEST_CHANGES` with one P2: a timer-backed backlog could outlive `useSocket` cleanup and invoke the stale handler after background-tab throttling.
+
+| Finding | Verification | Resolution | Red → Green |
+|---|---|---|---|
+| P2: backlog timer lacked a cleanup boundary | Confirmed: the plan requires cleanup to clear timers, and the timer ID was not tracked. | `drainPending()` cancels the timer, drains every queued sequence-bearing event synchronously, returns the reusable coalescer to idle, and is called after old-socket disconnect. | New cleanup test failed with `drainPending is not a function`, then passed together with hook-unmount/no-stale-write and Strict Mode reuse coverage. |
+
+Failure-mode sweep: this was the only review finding. The changed diff has one timer-backed coalescer continuation; the existing `useSocket` interval timers already clear in effect cleanup. No sibling stale-timer path was found.
+
 ## Design and artifact hygiene
 
 - `designs/**/*.pen` keyword scan (`poll|socket|transport|remote|realtime`): no match.
@@ -110,10 +120,10 @@ Risk: behavior=medium; data=none; security=low (security gate unchanged); contra
 
 | Command/evidence | Result | Claim covered |
 |---|---|---|
-| Focused Vitest: reconnect + coalescer unit + Zustand burst integration | 21/21 passed | Transport option, fallback retained, FIFO/no-drop, yielding, reconnect/catch-up. |
+| Focused Vitest after review fix: reconnect + coalescer unit + Zustand burst integration | 23/23 passed | Transport option, fallback retained, FIFO/no-drop, yielding, cleanup drain/cancel, Strict Mode reuse, reconnect/catch-up. |
 | `pnpm --filter @cat-cafe/web exec tsc --noEmit` | Exit 0 | Web TypeScript contract. |
 | Touched-file `pnpm biome check --write ...` | Exit 0; no errors, only pre-existing complexity/non-null warnings | Formatting/lint delta. |
-| `pnpm --filter @cat-cafe/web test` | 5854 passed, 4 failed | Full-package regression scan; all 4 failures were reproduced unchanged on main. |
+| Pre-review `pnpm --filter @cat-cafe/web test` | 5854 passed, 4 failed | Full-package regression scan; all 4 failures were reproduced unchanged on main. |
 | Exact four-test main baseline reproduction | Same 4 failures | Proves the full-suite red is pre-existing and unrelated. |
 | `pnpm check:capability-tips` | PASS (11 checker tests; existing repository warnings only) | `tips_exempt`/discovery policy. |
 | `HOTFIX_BASE=main node scripts/check-hotfix-pattern.mjs` | `hotfix: false` | Normal planned performance correction, not hotfix lane. |
