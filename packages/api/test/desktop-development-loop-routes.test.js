@@ -119,6 +119,26 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         calls.push(['listProjectWorks', input]);
         return [packet];
       },
+      listProjectLaunchStates: async (input) => {
+        calls.push(['listProjectLaunchStates', input]);
+        return [
+          {
+            backlogItemId: 'backlog-1',
+            featureId: 'F006',
+            title: 'Workspace capability settings',
+            status: 'available',
+          },
+        ];
+      },
+      startProjectWork: async (input) => {
+        calls.push(['startProjectWork', input]);
+        return {
+          backlogItemId: input.backlogItemId,
+          featureId: 'F006',
+          title: 'Workspace capability settings',
+          status: 'ready_for_desktop',
+        };
+      },
       readWork: async (input) => {
         calls.push(['readWork', input]);
         return packet;
@@ -298,6 +318,46 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     assert.equal(response.json().works[0].workId, 'work-1');
     assert.deepEqual(calls, [
       ['listProjectWorks', { protocolVersion: 1, ownerUserId: 'operator-1', projectId: 'project-1' }],
+    ]);
+  });
+
+  test('lists and starts project-scoped Desktop launch states with strict mutation identity', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'GET',
+      url: '/api/external-projects/project-1/development-loop/launch-states?protocolVersion=1',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().states[0].status, 'available');
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/features/backlog-1/start',
+      headers: { 'content-type': 'application/json' },
+      payload: { protocolVersion: 1 },
+    });
+    assert.equal(response.statusCode, 401);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/features/backlog-1/start',
+      headers: { 'x-cat-cafe-user': 'operator-1', 'content-type': 'application/json' },
+      payload: { protocolVersion: 1 },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().state.status, 'ready_for_desktop');
+    assert.deepEqual(calls, [
+      ['listProjectLaunchStates', { protocolVersion: 1, ownerUserId: 'operator-1', projectId: 'project-1' }],
+      [
+        'startProjectWork',
+        {
+          protocolVersion: 1,
+          ownerUserId: 'operator-1',
+          projectId: 'project-1',
+          backlogItemId: 'backlog-1',
+        },
+      ],
     ]);
   });
 

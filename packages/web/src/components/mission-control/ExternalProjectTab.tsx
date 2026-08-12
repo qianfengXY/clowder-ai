@@ -16,6 +16,7 @@ import { apiFetch } from '@/utils/api-client';
 import { CreateIntentCardForm } from './CreateIntentCardForm';
 import { DesktopDevelopmentPanel } from './DesktopDevelopmentPanel';
 import { DispatchProgress } from './DispatchProgress';
+import { ExternalProjectFeatureList } from './ExternalProjectFeatureList';
 import { GovernanceHealth } from './GovernanceHealth';
 import { IntentCardDetail } from './IntentCardDetail';
 import { NeedAuditFrame } from './NeedAuditFrame';
@@ -347,39 +348,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
               <RefluxCapture projectId={project.id} patterns={refluxPatterns} onUpdate={() => void loadData()} />
             )}
 
-            {subTab === 'features' &&
-              (projectItems.length === 0 ? (
-                <div className="rounded-lg bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
-                  暂无功能 — 使用上方「导入 Backlog」按钮从项目导入
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {projectItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="rounded bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-bold text-cafe-secondary">
-                          {item.tags[0] ?? '—'}
-                        </span>
-                        <span className="text-sm font-medium text-cafe">{item.title}</span>
-                      </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-micro font-medium ${
-                          item.status === 'done'
-                            ? 'bg-conn-green-bg text-conn-emerald-text'
-                            : item.status === 'dispatched'
-                              ? 'bg-[var(--semantic-info-surface)] text-conn-blue-text'
-                              : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
+            {subTab === 'features' && (
+              <ExternalProjectFeatureList key={project.id} project={project} items={projectItems} />
+            )}
           </div>
 
           {/* Right panel */}

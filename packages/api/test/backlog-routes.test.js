@@ -112,6 +112,54 @@ describe('Backlog Routes', () => {
     assert.match(kickoffMessages[0].content, /F049 dispatch flow/);
   });
 
+  test('does not create a cat dispatch for work reserved by ChatGPT Desktop', async () => {
+    const app = await createApp({
+      workflowSopStore: {
+        getManagedWorkAdmission: async (_userId, itemId) => ({
+          admission: { workId: `work-${itemId}` },
+          attempt: {
+            executorActor: { kind: 'external_actor', actorId: 'chatgpt-desktop-dev' },
+          },
+        }),
+      },
+    });
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: USER_HEADER,
+      payload: {
+        title: 'Desktop-reserved feature',
+        summary: 'must not dispatch to a cat',
+        priority: 'p1',
+        tags: ['feature:f006'],
+      },
+    });
+    const itemId = createRes.json().id;
+    await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/suggest-claim`,
+      headers: USER_HEADER,
+      payload: {
+        catId: 'codex',
+        why: 'attempted cat claim',
+        plan: 'should be rejected before thread creation',
+        requestedPhase: 'coding',
+      },
+    });
+
+    const approveRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/decide-claim`,
+      headers: USER_HEADER,
+      payload: { decision: 'approve', threadPhase: 'coding' },
+    });
+
+    assert.equal(approveRes.statusCode, 409);
+    assert.match(approveRes.json().error, /reserved for ChatGPT Desktop/);
+    assert.equal((await backlogStore.get(itemId, 'default-user')).status, 'approved');
+    assert.equal((await threadStore.list('default-user')).length, 0);
+  });
+
   test('suggest-claim retries from same cat are idempotent no-op', async () => {
     const app = await createApp();
     const createRes = await app.inject({

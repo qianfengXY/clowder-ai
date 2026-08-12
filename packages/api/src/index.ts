@@ -4175,7 +4175,12 @@ async function main(): Promise<void> {
   });
   // F168 Phase F: per-repo routing config CRUD endpoints
   await app.register(communityRepoConfigRoutes, { repoConfigStore: communityRepoConfigStore });
-  await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
+  await app.register(backlogRoutes, {
+    backlogStore,
+    threadStore,
+    messageStore,
+    ...(workflowSopStore ? { workflowSopStore } : {}),
+  });
 
   // F233 Phase C C2b: feat trajectory query routes (Hub UI + 轨迹下钻)
   // Store: Redis-backed in production; InMemory fallback if Redis unavailable (preserves

@@ -7,6 +7,7 @@ import type { IBacklogStore } from '../domains/cats/services/stores/ports/Backlo
 import { BacklogTransitionError } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   type BacklogFeatureRow,
@@ -24,6 +25,7 @@ export interface BacklogRoutesOptions {
   backlogStore: IBacklogStore;
   threadStore: IThreadStore;
   messageStore: IMessageStore;
+  workflowSopStore?: Pick<IWorkflowSopStore, 'getManagedWorkAdmission'>;
   backlogDocPath?: string;
   /** F058 Phase G: override path to docs/features/ directory for done-feature import */
   featuresDir?: string;
@@ -192,6 +194,13 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     }
 
     try {
+      const managed = await opts.workflowSopStore?.getManagedWorkAdmission(userId, item.id);
+      if (managed?.attempt.executorActor?.kind === 'external_actor') {
+        return {
+          statusCode: 409 as const,
+          payload: { error: 'Backlog item is reserved for ChatGPT Desktop development' },
+        };
+      }
       return await dispatchApprovedItemInner(item, userId, phase);
     } finally {
       if (backlogStore.releaseDispatchLock && typeof lockToken === 'string') {

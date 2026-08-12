@@ -1,4 +1,5 @@
 import {
+  type BacklogItem,
   type BacklogStatus,
   buildProjectReviewHubId,
   type CatId,
@@ -19,6 +20,7 @@ import {
 import type { IBacklogStore } from '../cats/services/stores/ports/BacklogStore.js';
 import type { IManagedWorkConsumerPort } from '../cats/services/stores/ports/ManagedWorkConsumerPort.js';
 import type { IWorkflowSopStore } from '../cats/services/stores/ports/WorkflowSopStore.js';
+import { VersionConflictError } from '../cats/services/stores/ports/WorkflowSopStore.js';
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
@@ -135,6 +137,42 @@ export interface DesktopManagedWorkCandidate {
   readonly sessionStatus: DesktopSessionBinding['status'] | 'stale_attempt' | null;
 }
 
+export type DesktopDevelopmentLaunchStatus =
+  | 'available'
+  | 'ready_for_desktop'
+  | 'connected_to_desktop'
+  | 'managed_by_catcafe'
+  | 'rejected'
+  | 'completed';
+
+export interface DesktopDevelopmentLaunchState {
+  readonly backlogItemId: string;
+  readonly featureId: string;
+  readonly title: string;
+  readonly status: DesktopDevelopmentLaunchStatus;
+}
+
+function terminalLaunchStatus(lifecycle: ManagedWorkLifecycle): 'completed' | 'rejected' | null {
+  if (lifecycle === 'accepted') return 'completed';
+  if (lifecycle === 'rejected') return 'rejected';
+  return null;
+}
+
+function featureIdForItem(item: BacklogItem): string | null {
+  const featureId = item.tags
+    .find((tag) => tag.toLowerCase().startsWith('feature:'))
+    ?.slice('feature:'.length)
+    .trim()
+    .toUpperCase();
+  return featureId || null;
+}
+
+function launchStatusWithoutSop(status: BacklogStatus): DesktopDevelopmentLaunchStatus {
+  if (status === 'done') return 'completed';
+  if (status === 'open') return 'available';
+  return 'managed_by_catcafe';
+}
+
 export class DesktopDevelopmentLoopService {
   constructor(
     private readonly externalProjects: ExternalProjectStore,
@@ -143,9 +181,172 @@ export class DesktopDevelopmentLoopService {
     private readonly managedWork: IManagedWorkConsumerPort,
     private readonly reviewRounds: IReviewRoundStore,
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
-    private readonly backlogStore: Pick<IBacklogStore, 'listByUser'>,
-    private readonly workflowSopStore: Pick<IWorkflowSopStore, 'getManagedWorkAdmission'>,
+    private readonly backlogStore: Pick<IBacklogStore, 'listByUser' | 'tryAcquireDispatchLock' | 'releaseDispatchLock'>,
+    private readonly workflowSopStore: Pick<IWorkflowSopStore, 'get' | 'getManagedWorkAdmission' | 'upsert'>,
   ) {}
+
+  async listProjectLaunchStates(input: {
+    protocolVersion: number;
+    ownerUserId: string;
+    projectId: string;
+  }): Promise<readonly DesktopDevelopmentLaunchState[]> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const items = (await this.backlogStore.listByUser(input.ownerUserId)).filter(
+      (item) => item.projectId === input.projectId && featureIdForItem(item) !== null,
+    );
+    return Promise.all(items.map((item) => this.classifyProjectLaunchState(input.ownerUserId, input.projectId, item)));
+  }
+
+  async startProjectWork(input: {
+    protocolVersion: number;
+    ownerUserId: string;
+    projectId: string;
+    backlogItemId: string;
+  }): Promise<DesktopDevelopmentLaunchState> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const item = (await this.backlogStore.listByUser(input.ownerUserId)).find(
+      (candidate) => candidate.id === input.backlogItemId && candidate.projectId === input.projectId,
+    );
+    if (!item) throw new Error('Project backlog item not found');
+
+    const lockToken = await this.backlogStore.tryAcquireDispatchLock?.(item.id);
+    if (lockToken === false) throw new Error('Project backlog item launch is already in progress');
+    try {
+      return await this.startProjectWorkLocked(input.ownerUserId, input.projectId, item);
+    } finally {
+      if (typeof lockToken === 'string') await this.backlogStore.releaseDispatchLock?.(item.id, lockToken);
+    }
+  }
+
+  private async startProjectWorkLocked(
+    ownerUserId: string,
+    projectId: string,
+    item: BacklogItem,
+  ): Promise<DesktopDevelopmentLaunchState> {
+    const current = await this.classifyProjectLaunchState(ownerUserId, projectId, item);
+    if (current.status === 'ready_for_desktop') {
+      return this.reserveProjectWorkForDesktop(ownerUserId, projectId, item);
+    }
+    if (current.status !== 'available') return current;
+
+    try {
+      await this.workflowSopStore.upsert(
+        item.id,
+        current.featureId,
+        {
+          sopDefinitionId: 'development',
+          stage: 'kickoff',
+          batonHolder: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
+          resumeCapsule: {
+            goal: item.title,
+            currentFocus: '等待 ChatGPT Desktop 连接并开始实现',
+          },
+          expectedVersion: 0,
+        },
+        ownerUserId,
+        ownerUserId,
+      );
+    } catch (error) {
+      if (!(error instanceof VersionConflictError)) throw error;
+    }
+
+    return this.reserveProjectWorkForDesktop(ownerUserId, projectId, item);
+  }
+
+  private async reserveProjectWorkForDesktop(
+    ownerUserId: string,
+    projectId: string,
+    item: BacklogItem,
+  ): Promise<DesktopDevelopmentLaunchState> {
+    const bundle = await this.workflowSopStore.getManagedWorkAdmission(ownerUserId, item.id);
+    if (!bundle) return this.classifyProjectLaunchState(ownerUserId, projectId, item);
+    const identity = {
+      consumerId: CONSUMER_ID,
+      ownerUserId,
+      workId: bundle.admission.workId,
+      attemptId: bundle.attempt.attemptId,
+    } as const;
+    const snapshot = await this.managedWork.read(identity);
+    if (
+      snapshot.state.lifecycle === 'active' &&
+      snapshot.state.currentAttemptId === snapshot.attempt.attemptId &&
+      !snapshot.attempt.executorActor &&
+      !snapshot.attempt.executorCatId
+    ) {
+      try {
+        await this.managedWork.claimAttempt({
+          ...identity,
+          executor: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
+          expectedVersion: snapshot.state.version,
+          idempotencyKey: `desktop-launch:${item.id}:claim`,
+        });
+      } catch (error) {
+        const canonical = await this.classifyProjectLaunchState(ownerUserId, projectId, item);
+        if (canonical.status === 'ready_for_desktop' || canonical.status === 'connected_to_desktop') return canonical;
+        if (canonical.status === 'managed_by_catcafe') return canonical;
+        throw error;
+      }
+    }
+    return this.classifyProjectLaunchState(ownerUserId, projectId, item);
+  }
+
+  private async classifyProjectLaunchState(
+    ownerUserId: string,
+    projectId: string,
+    item: BacklogItem,
+  ): Promise<DesktopDevelopmentLaunchState> {
+    const featureId = featureIdForItem(item);
+    if (!featureId) throw new Error('Project backlog item is missing a feature tag');
+
+    const base = { backlogItemId: item.id, featureId, title: item.title } as const;
+    const sop = await this.workflowSopStore.get(item.id);
+    if (!sop) return { ...base, status: launchStatusWithoutSop(item.status) };
+
+    const bundle = await this.workflowSopStore.getManagedWorkAdmission(ownerUserId, item.id);
+    if (!bundle) {
+      return {
+        ...base,
+        status: item.status === 'done' || sop.stage === 'completion' ? 'completed' : 'managed_by_catcafe',
+      };
+    }
+    let snapshot = await this.managedWork.read({
+      consumerId: CONSUMER_ID,
+      ownerUserId,
+      workId: bundle.admission.workId,
+      attemptId: bundle.attempt.attemptId,
+    });
+    if (snapshot.state.currentAttemptId !== snapshot.attempt.attemptId) {
+      snapshot = await this.managedWork.read({
+        consumerId: CONSUMER_ID,
+        ownerUserId,
+        workId: bundle.admission.workId,
+        attemptId: snapshot.state.currentAttemptId,
+      });
+    }
+    const terminalStatus = terminalLaunchStatus(snapshot.state.lifecycle);
+    if (terminalStatus) return { ...base, status: terminalStatus };
+
+    const executor = snapshot.attempt.executorActor;
+    if (executor?.kind === 'external_actor' && executor.actorId === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR) {
+      const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
+      return {
+        ...base,
+        status:
+          session?.attemptId === snapshot.attempt.attemptId && session.status === 'active'
+            ? 'connected_to_desktop'
+            : 'ready_for_desktop',
+      };
+    }
+    if (executor?.kind === 'cat' || snapshot.attempt.executorCatId) {
+      return { ...base, status: 'managed_by_catcafe' };
+    }
+    return {
+      ...base,
+      status: sop.batonHolder === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR ? 'ready_for_desktop' : 'managed_by_catcafe',
+    };
+  }
 
   async readProject(input: {
     protocolVersion: number;

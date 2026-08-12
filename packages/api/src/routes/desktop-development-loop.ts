@@ -4,7 +4,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { DesktopDevelopmentLoopService } from '../domains/desktop-development-loop/desktop-development-loop-service.js';
 import type { ProjectReviewHubService } from '../domains/projects/project-review-hub-service.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 
 export interface DesktopDevelopmentLoopRoutesOptions {
   projectReviewHubService: ProjectReviewHubService;
@@ -247,6 +247,57 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
       return sendError(reply, error);
     }
   });
+
+  app.get('/api/external-projects/:projectId/development-loop/launch-states', async (request, reply) => {
+    const ownerUserId = requireUserId(request, reply);
+    if (!ownerUserId) return;
+    if (!desktopDevelopmentLoopService) {
+      return reply.status(503).send({
+        error: 'Desktop managed-work capability is unavailable',
+        code: 'managed_work_capability_unavailable',
+      });
+    }
+    const params = z.object({ projectId: idSchema }).strict().safeParse(request.params);
+    const query = z.object({ protocolVersion: protocolSchema }).strict().safeParse(request.query);
+    if (!params.success || !query.success) return reply.status(400).send({ error: 'Invalid request' });
+    try {
+      const states = await desktopDevelopmentLoopService.listProjectLaunchStates({
+        ...params.data,
+        ...query.data,
+        ownerUserId,
+      });
+      return reply.send({ states });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/features/:backlogItemId/start',
+    async (request, reply) => {
+      const ownerUserId = resolveStrictUserId(request);
+      if (!ownerUserId) return reply.status(401).send({ error: 'Identity required' });
+      if (!desktopDevelopmentLoopService) {
+        return reply.status(503).send({
+          error: 'Desktop managed-work capability is unavailable',
+          code: 'managed_work_capability_unavailable',
+        });
+      }
+      const params = z.object({ projectId: idSchema, backlogItemId: idSchema }).strict().safeParse(request.params);
+      const body = z.object({ protocolVersion: protocolSchema }).strict().safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        const state = await desktopDevelopmentLoopService.startProjectWork({
+          ...params.data,
+          ...body.data,
+          ownerUserId,
+        });
+        return reply.send({ state });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
 
   app.post('/api/desktop-development-loop/v1/connect', async (request, reply) => {
     const ownerUserId = requireDesktopPrincipal(request, reply);
