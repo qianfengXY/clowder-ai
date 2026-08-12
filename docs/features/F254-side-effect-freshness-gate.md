@@ -5,7 +5,7 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-08-04
+updated: 2026-08-12
 tips_exempt: true
 ---
 
@@ -360,6 +360,32 @@ operator在 thread 里发了一条消息。
 现有 `/config` surface 继续暴露 `cli.timeoutMs`：`0` 表示 manual-only；正数是运营者明确 opt-in。
 app-server mode 下正数 timeout 也必须走 protocol interrupt，而不是直接把 inactivity 当 dead。系统不提供拍脑袋
 默认分钟数。
+
+### 旅程 5: 每轮回复的执行过程与耗时
+
+**Scope unit**: 单只猫的一次 turn / 最终 assistant reply。
+
+```
+场景 A：猫猫正在执行
+
+① 回复占位气泡内自动展开“执行过程”，总时长持续递增
+② 通用 provider 展示请求受理、上下文准备、session ready、等待首段文字等可验证阶段
+③ Codex app-server 额外展示 provider setup、冷/热 carrier 获取与 canonical lifecycle 阶段
+④ 工具调用按已持久化的 tool event 展示名称、状态与精确耗时；不展示参数、prompt、凭据或原始结果
+
+场景 B：回复完成
+
+① 时间线持久化在本轮回复 metadata 内，页面刷新后仍可查看
+② 默认折叠为“执行过程 33.7s · 首段文字 28.8s · app-server 热复用”摘要
+③ 用户展开后可逐步查看耗时与成功/失败/中断位置
+④ ThreadExecutionBar 继续只负责全局 active turn、Cancel 与继续，不被回复内时间线替代
+
+场景 C：历史数据不完整
+
+① 旧消息没有阶段时间戳时，只展示能够由真实 timestamp 证明的步骤
+② 没有 tool start/end pair 时不计算、不猜测 duration
+③ 失败或中断只标记已观察到的终态与最后可靠阶段，不补造中间过程
+```
 
 ---
 
@@ -827,6 +853,13 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
 - [x] AC-D18: **MCP cap anti-silence**：现有 `INTERVAL=5 / MAX_NOTICES=3` 只属于 B1 pull 噪音预算；
   provider-native adapter 不得无审计继承。任何 rate-limit/cap 抑制都记录 missed，eval 必须暴露长 invocation
   静默尾区，不能让 Claude 高频 MCP 行为把 Codex/Claude native-tool coverage 平均成健康。
+- [ ] AC-D19: **Per-turn execution timeline**：每个新 assistant reply 必须投影一份 versioned、provider-neutral
+  execution timeline。运行中气泡自动展开并用 live timestamp 更新；完成后默认折叠，刷新后从 message metadata
+  恢复。通用阶段只使用 invocation/session/text/terminal 的真实事件边界；Codex app-server 可以额外消费
+  `provider_setup`、`carrier_acquire_new|warm` 与 AC-D14a canonical lifecycle，但不得从 stdout 或静默时长猜阶段。
+  工具耗时只能由同一 `toolUseId` 的 persisted start/end pair 计算，并且 UI 只显示有界名称、状态与时长，禁止
+  暴露参数、prompt、credential 或原始 tool result。失败/中断保留最后可靠阶段；legacy timestamp 缺失时省略
+  duration，不得伪造。ThreadExecutionBar 的全局 active turn / Cancel / continue ownership 保持不变。
 
 #### 2026-08-04 protocol census / carrier truth live blocker
 
