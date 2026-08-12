@@ -401,6 +401,7 @@ export class RedisBacklogStore implements IBacklogStore {
       tags: [...input.tags],
       status: input.initialStatus ?? 'open',
       createdBy: input.createdBy,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       createdAt: now,
       updatedAt: now,
       audit: [

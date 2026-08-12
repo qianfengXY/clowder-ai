@@ -107,6 +107,23 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.deepEqual(first.tags, ['source:task', 'feature:f287']);
   });
 
+  it('create preserves an external project binding', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: '[F006] Workspace capability settings',
+      summary: 'Imported from an external project roadmap',
+      priority: 'p0',
+      tags: ['source:docs-backlog', 'feature:f006'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+
+    assert.equal(created.projectId, 'project-traqen');
+    assert.equal((await store.get(created.id))?.projectId, 'project-traqen');
+    assert.equal((await store.listByUser('default-user'))[0]?.projectId, 'project-traqen');
+  });
+
   it('concurrent acquire by different cats: only one succeeds', async () => {
     const itemId = await createDispatchedItem('acquire-race');
 
