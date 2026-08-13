@@ -16,7 +16,7 @@ describe('managed-work invocation binding provenance', () => {
         threadId: 'feature-review-thread',
         executorCatId: 'cat-codex',
         messageStore: { getById: messageForId },
-        threadStore: { get: async () => ({ backlogItemId: 'backlog-1' }) },
+        threadStore: { get: async () => ({ id: 'ordinary-feature-thread', backlogItemId: 'backlog-1' }) },
         workflowSopStore: {
           bindManagedWorkAttempt: async (ownerUserId, backlogItemId, executorCatId) => {
             bindCalls.push({ ownerUserId, backlogItemId, executorCatId });
@@ -60,6 +60,39 @@ describe('managed-work invocation binding provenance', () => {
     const result = await resolveManagedWorkInvocationBinding({ ...input, triggerMessageId: 'ordinary-trigger' });
     assert.deepEqual(result, { workId: 'work-1', attemptId: 'attempt-1' });
     assert.equal(bindCalls.length, 1);
+  });
+
+  test('persisted feature Review workspace never claims implementation ownership', async () => {
+    const { resolveManagedWorkInvocationBinding } = await loadResolver();
+    const { input, bindCalls } = fixture(async () => ({ content: 'operator retry' }));
+    const result = await resolveManagedWorkInvocationBinding({
+      ...input,
+      threadId: 'project-feature-review:project-1:backlog-1',
+      threadStore: {
+        get: async () => ({
+          id: 'project-feature-review:project-1:backlog-1',
+          backlogItemId: 'backlog-1',
+        }),
+      },
+      triggerMessageId: 'ordinary-trigger',
+    });
+    assert.equal(result, undefined);
+    assert.deepEqual(bindCalls, []);
+  });
+
+  test('persisted project Review Hub never claims implementation ownership', async () => {
+    const { resolveManagedWorkInvocationBinding } = await loadResolver();
+    const { input, bindCalls } = fixture(async () => ({ content: 'operator retry' }));
+    const result = await resolveManagedWorkInvocationBinding({
+      ...input,
+      threadId: 'project-review-hub:project-1',
+      threadStore: {
+        get: async () => ({ id: 'project-review-hub:project-1', backlogItemId: 'backlog-1' }),
+      },
+      triggerMessageId: 'ordinary-trigger',
+    });
+    assert.equal(result, undefined);
+    assert.deepEqual(bindCalls, []);
   });
 
   test('provenance read failure does not manufacture an exemption', async () => {

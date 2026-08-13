@@ -29,6 +29,13 @@ export async function resolveManagedWorkInvocationBinding(input: {
     // Proceed without attribution; no inferred or caller-supplied binding is allowed.
     return undefined;
   }
+  // A persisted Review workspace is never an implementation executor. Users
+  // must be able to resume a reviewer after an infrastructure failure without
+  // that reviewer competing with the Desktop actor already bound to the
+  // managed-work attempt. Check the stored thread identity (rather than prompt
+  // text or the caller-provided id alone) so ordinary managed-work threads keep
+  // the existing fail-closed binding behavior.
+  if (thread && isReviewWorkspaceThreadId(thread.id)) return undefined;
   if (!thread?.backlogItemId) return undefined;
 
   const bundle = await input.workflowSopStore.bindManagedWorkAttempt(
@@ -51,6 +58,10 @@ export async function resolveManagedWorkInvocationBinding(input: {
     workId: bundle.admission.workId,
     attemptId: bundle.attempt.attemptId,
   });
+}
+
+function isReviewWorkspaceThreadId(threadId: string): boolean {
+  return threadId.startsWith('project-feature-review:') || threadId.startsWith('project-review-hub:');
 }
 
 async function hasReviewOrchestrationProvenance(
