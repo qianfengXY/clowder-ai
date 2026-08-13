@@ -72,6 +72,17 @@ export interface ProjectReviewHubView {
   readonly status: 'active' | 'restored';
 }
 
+export type FeatureWorkspaceThreadKind = 'plan' | 'review';
+
+export interface FeatureWorkspaceThreadView {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly backlogItemId: string;
+  readonly featureId: string;
+  readonly kind: FeatureWorkspaceThreadKind;
+  readonly status: 'active' | 'restored';
+}
+
 export interface WorkspaceBinding {
   readonly repository: GitHubRepositoryIdentity;
   readonly branch: string;
@@ -311,6 +322,20 @@ export function buildProjectReviewHubId(projectId: string): string {
     throw new Error('Invalid project id for Review Hub');
   }
   return `project-review-hub:${projectId}`;
+}
+
+export function buildFeatureWorkspaceThreadId(
+  projectId: string,
+  backlogItemId: string,
+  kind: FeatureWorkspaceThreadKind,
+): string {
+  if (!PROJECT_ID_PATTERN.test(projectId)) {
+    throw new Error('Invalid project id for feature workspace');
+  }
+  if (!PROJECT_ID_PATTERN.test(backlogItemId)) {
+    throw new Error('Invalid backlog item id for feature workspace');
+  }
+  return `project-feature-${kind}:${projectId}:${backlogItemId}`;
 }
 
 export function toPublicDesktopDevelopmentProject(input: {

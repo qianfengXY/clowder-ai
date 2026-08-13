@@ -178,6 +178,30 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     }
   });
 
+  app.post(
+    '/api/external-projects/:projectId/development-loop/features/:backlogItemId/threads/:kind',
+    async (request, reply) => {
+      const userId = requireUserId(request, reply);
+      if (!userId) return;
+      const params = z
+        .object({ projectId: idSchema, backlogItemId: idSchema, kind: z.enum(['plan', 'review']) })
+        .strict()
+        .safeParse(request.params);
+      if (!params.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        const thread = await projectReviewHubService.ensureForFeature(
+          params.data.projectId,
+          params.data.backlogItemId,
+          params.data.kind,
+          userId,
+        );
+        return reply.send({ thread });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
   app.get('/api/desktop-development-loop/v1/projects/resolve', async (request, reply) => {
     const ownerUserId = requireDesktopPrincipal(request, reply);
     if (!ownerUserId || !desktopDevelopmentLoopService) return;

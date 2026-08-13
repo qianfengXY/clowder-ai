@@ -16,6 +16,8 @@ export interface ReviewRound {
   readonly author: ManagedWorkExecutorActor;
   readonly reviewerCatIds: readonly CatId[];
   readonly recorderCatId: CatId;
+  /** Visible thread selected when the round was created. Absent only on legacy project-Hub rounds. */
+  readonly reviewThreadId?: string;
   readonly phase: ReviewRoundPhase;
   readonly independentFinishedCatIds: readonly CatId[];
   readonly crossReviewFinishedCatIds: readonly CatId[];

@@ -98,7 +98,7 @@ export class ReviewRoundCoordinatorService {
         stage: 'cross_review',
         ownerUserId: round.ownerUserId,
         projectId: round.projectId,
-        reviewHubThreadId: buildProjectReviewHubId(round.projectId),
+        reviewHubThreadId: input.threadId,
         roundId: round.roundId,
         exactSha: round.exactSha,
         reviewerCatIds: round.reviewerCatIds,
@@ -123,7 +123,7 @@ export class ReviewRoundCoordinatorService {
         stage: 'consensus',
         ownerUserId: round.ownerUserId,
         projectId: round.projectId,
-        reviewHubThreadId: buildProjectReviewHubId(round.projectId),
+        reviewHubThreadId: input.threadId,
         roundId: round.roundId,
         exactSha: round.exactSha,
         reviewerCatIds: round.reviewerCatIds,
@@ -168,12 +168,15 @@ export class ReviewRoundCoordinatorService {
 
   private async requireReviewerInHub(input: ReviewPrincipalInput): Promise<ReviewRoundSafeView> {
     const safe = await this.reviewRounds.readSafe({ ownerUserId: input.ownerUserId, roundId: input.roundId });
-    if (input.threadId !== buildProjectReviewHubId(safe.round.projectId)) {
-      throw new Error('ReviewRound actions are restricted to the project Review Hub');
+    const legacyReviewHubId = buildProjectReviewHubId(safe.round.projectId);
+    const authorizedThreadId = safe.round.reviewThreadId ?? legacyReviewHubId;
+    if (input.threadId !== authorizedThreadId) {
+      throw new Error('ReviewRound actions are restricted to the feature Review thread');
     }
     if (!safe.round.reviewerCatIds.includes(input.reviewerCatId)) {
       throw new Error('Authenticated cat is not a reviewer for this round');
     }
     return safe;
   }
+
 }

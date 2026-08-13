@@ -1,7 +1,7 @@
 ---
 cell_id: desktop-development-loop
 title: Desktop Development Loop
-summary: F289-owned project binding, one reusable Review Hub view, Desktop session/workspace projection, and guarded merge rollout over existing managed-work and review truth.
+summary: F289-owned project binding, per-feature plan/review views, Desktop task/session projection, and guarded merge rollout over existing managed-work and review truth.
 description: Project-scoped bridge between Cat Café design/review and ChatGPT Desktop implementation, without becoming a second workflow engine.
 description_source: model
 description_author: cat-idwxwjba
@@ -34,14 +34,14 @@ Architecture cell: desktop-development-loop
 
 ## Canonical Owner
 
-F289 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, one deterministic Review Hub view per project, Desktop session/workspace bindings, Resume Packet projection, and the two-successful-pilot merge rollout gate.
+F289 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, deterministic plan/review views per imported backlog feature, Desktop task/session/workspace bindings, Resume Packet projection, and the two-successful-pilot merge rollout gate.
 
 The cell is not a workflow identity root. F275 remains canonical for whole work, ordered attempts, evidence and terminal state. F253 remains canonical for exact-SHA independent review, barrier, consensus and finding closure. F289 owns only the external Desktop session binding over those IDs. F211 remains canonical for Cat runtime sessions with CatId/agent-key/Antigravity provenance and is intentionally not extended for the Desktop developer external actor. F286 owns MCP inventory and authority.
 
 ## Durable Invariants
 
-1. A project has at most one Desktop development binding and one deterministic Review Hub identity.
-2. Review Hub soft deletion restores the same thread identity; a code SHA or delivery cycle never creates a new visible Hub.
+1. A project has at most one Desktop development binding; each imported backlog feature has one deterministic plan thread and one deterministic Review thread.
+2. Feature-thread soft deletion restores the same identity; a code SHA or delivery cycle never creates another visible Review thread for that feature. The legacy project Review Hub remains callback-compatible for historical in-flight rounds only.
 3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works.
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
 5. Desktop author identity is distinct from reviewer CatIds and cannot appear in the reviewer roster.
@@ -65,4 +65,4 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 ## Static Scan Hints
 
-Watch for `DesktopDevelopmentProjectBinding`, `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.
+Watch for `DesktopDevelopmentProjectBinding`, `project-feature-plan:`, `project-feature-review:`, legacy `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.

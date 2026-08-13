@@ -112,7 +112,16 @@ describe('F289 project-scoped Desktop launch', () => {
     };
     service = new serviceModule.DesktopDevelopmentLoopService(
       { getById: async (id) => (id === project.id ? project : null) },
-      {},
+      {
+        ensureForFeature: async (projectId, backlogItemId, kind) => ({
+          threadId: `project-feature-${kind}:${projectId}:${backlogItemId}`,
+          projectId,
+          backlogItemId,
+          featureId: 'F006',
+          kind,
+          status: 'active',
+        }),
+      },
       { getCurrent: async (_projectId, workId) => sessions.get(workId) ?? null },
       {
         read: async ({ workId }) => snapshots.get(workId),
@@ -158,6 +167,33 @@ describe('F289 project-scoped Desktop launch', () => {
     assert.deepEqual(snapshots.get('work-backlog-1').attempt.executorActor, {
       kind: 'external_actor',
       actorId: 'chatgpt-desktop-dev',
+    });
+  });
+
+  test('returns the native Desktop task created for the exact feature', async () => {
+    let launchInput;
+    service.desktopTaskLauncher = {
+      get: async () => null,
+      launch: async (input) => {
+        launchInput = input;
+        return { status: 'created', threadId: 'codex-thread-f006' };
+      },
+    };
+    const started = await service.startProjectWork({
+      protocolVersion: 1,
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      backlogItemId: 'backlog-1',
+    });
+    assert.deepEqual(started.desktopTask, { status: 'created', threadId: 'codex-thread-f006' });
+    assert.deepEqual(launchInput, {
+      projectId: 'project-1',
+      projectName: 'Example',
+      repository: 'owner/repo',
+      sourcePath: '/work/example',
+      backlogItemId: 'backlog-1',
+      featureId: 'F006',
+      title: '[F006] Workspace capability settings',
     });
   });
 

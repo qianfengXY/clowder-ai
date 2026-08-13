@@ -4309,7 +4309,7 @@ async function main(): Promise<void> {
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
   const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
-  const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore);
+  const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore, backlogStore);
   let desktopDevelopmentLoopService:
     | import('./domains/desktop-development-loop/desktop-development-loop-service.js').DesktopDevelopmentLoopService
     | undefined;
@@ -4339,6 +4339,9 @@ async function main(): Promise<void> {
       },
       resolveMentionHandle: primaryMentionHandleForCatId,
     });
+    const { CodexDesktopTaskLauncher } = await import(
+      './domains/desktop-development-loop/codex-desktop-task-launcher.js'
+    );
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,
       projectReviewHubService,
@@ -4348,6 +4351,7 @@ async function main(): Promise<void> {
       reviewRoundDispatcher,
       backlogStore,
       workflowSopStore,
+      new CodexDesktopTaskLauncher(redis),
     );
     reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
       reviewRoundStore,

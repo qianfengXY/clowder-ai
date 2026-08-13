@@ -30,7 +30,11 @@ const CREATE_ROUND_LUA = `
 local existingJson = redis.call('GET', KEYS[1])
 if existingJson then
   local existing = cjson.decode(existingJson)
-  if existing._creationFingerprint ~= ARGV[1] then return 'IMMUTABLE_ROUND_CONFLICT' end
+  if existing._creationFingerprint ~= ARGV[1] then
+    if existing.reviewThreadId ~= nil or existing._creationFingerprint ~= ARGV[5] then
+      return 'IMMUTABLE_ROUND_CONFLICT'
+    end
+  end
   return 'OK:' .. existingJson
 end
 redis.call('SET', KEYS[1], ARGV[2])
@@ -190,6 +194,7 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
     const normalized = normalizeCreate(input);
     const roundId = deriveId('rr', [normalized.projectId, normalized.workId, normalized.exactSha]);
     const creationFingerprint = createFingerprint(normalized);
+    const legacyCreationFingerprint = createFingerprint({ ...normalized, reviewThreadId: undefined });
     const round: StoredRound = {
       roundId,
       ownerUserId: normalized.ownerUserId,
@@ -200,6 +205,7 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
       author: normalized.author,
       reviewerCatIds: normalized.reviewerCatIds,
       recorderCatId: normalized.recorderCatId,
+      ...(normalized.reviewThreadId ? { reviewThreadId: normalized.reviewThreadId } : {}),
       phase: 'independent',
       independentFinishedCatIds: [],
       crossReviewFinishedCatIds: [],
@@ -217,6 +223,7 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
       JSON.stringify(round),
       String(normalized.now),
       roundId,
+      legacyCreationFingerprint,
     );
     return parseRoundResult(raw);
   }
@@ -380,7 +387,9 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
   }
 }
 
-function normalizeCreate(input: CreateReviewRoundInput): Required<CreateReviewRoundInput> {
+function normalizeCreate(
+  input: CreateReviewRoundInput,
+): Omit<Required<CreateReviewRoundInput>, 'reviewThreadId'> & { readonly reviewThreadId?: string } {
   assertId(input.ownerUserId, 'ownerUserId');
   assertId(input.projectId, 'projectId');
   assertId(input.workId, 'workId');
@@ -400,6 +409,7 @@ function normalizeCreate(input: CreateReviewRoundInput): Required<CreateReviewRo
   }
   assertId(input.recorderCatId, 'recorderCatId');
   if (!input.reviewerCatIds.includes(input.recorderCatId)) throw new Error('Recorder must be a reviewer');
+  if (input.reviewThreadId !== undefined) assertId(input.reviewThreadId, 'reviewThreadId');
   assertId(input.idempotencyKey, 'idempotencyKey');
   const now = input.now ?? Date.now();
   assertTimestamp(now);
@@ -589,7 +599,7 @@ function fingerprint<T extends { readonly now: number }>(value: T): string {
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
 }
 
-function createFingerprint(value: Required<CreateReviewRoundInput>): string {
+function createFingerprint(value: CreateReviewRoundInput & { readonly now: number }): string {
   const { now: _serverTime, idempotencyKey: _operationKey, ...immutable } = value;
   return createHash('sha256').update(JSON.stringify(immutable)).digest('hex');
 }

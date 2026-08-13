@@ -309,6 +309,7 @@ export function ChatMessage({
   }
 
   if (isSystem) {
+    const isReviewOrchestration = message.extra?.systemKind === 'review_orchestration';
     // F148 ContextBriefing and F233 duty briefing are user-visible, collapsed cards.
     // F148 remains distinguishable via extra.systemKind='context_briefing'.
     if (message.origin === 'briefing' && message.extra?.rich?.blocks?.length) {
@@ -412,6 +413,11 @@ export function ChatMessage({
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
+          {isReviewOrchestration && (
+            <span className="mb-1 block text-xs font-semibold tracking-wide" data-testid="review-system-message-label">
+              Review 系统消息
+            </span>
+          )}
           {isFollowup && <span className="mr-1">🔗</span>}
           {projectedSystemContent}
           {freshnessClosureRecordedAt !== undefined && (

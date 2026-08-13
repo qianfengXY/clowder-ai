@@ -1,7 +1,14 @@
 'use client';
 
-import type { BacklogItem, ExternalProject } from '@cat-cafe/shared';
+import type {
+  BacklogItem,
+  ExternalProject,
+  FeatureWorkspaceThreadKind,
+  FeatureWorkspaceThreadView,
+} from '@cat-cafe/shared';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { type Thread, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 type ServerLaunchStatus =
@@ -18,6 +25,7 @@ interface LaunchState {
   featureId: string;
   title: string;
   status: ServerLaunchStatus;
+  desktopTask?: { status: 'created'; threadId: string } | { status: 'failed'; error: string };
 }
 
 interface ExternalProjectFeatureListProps {
@@ -51,16 +59,18 @@ function ExternalProjectFeatureRow({
   error,
   desktopBound,
   onStart,
+  onOpenThread,
 }: {
   item: BacklogItem;
   status: LaunchStatus;
   error?: string;
   desktopBound: boolean;
   onStart: (item: BacklogItem) => void;
+  onOpenThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
 }) {
   const featureId = featureIdFromItem(item);
   const unavailable = !desktopBound || !featureId;
-  const disabled = unavailable || !['available', 'error'].includes(status);
+  const disabled = unavailable || !['available', 'ready_for_desktop', 'error'].includes(status);
 
   return (
     <div className="rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
@@ -74,15 +84,35 @@ function ExternalProjectFeatureRow({
             {item.status}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => onStart(item)}
-          disabled={disabled}
-          className="shrink-0 rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] disabled:bg-[var(--console-hover-bg)] disabled:text-cafe-secondary disabled:opacity-70"
-          data-testid={`external-project-start-${item.id}`}
-        >
-          {launchButtonLabel(status, desktopBound, featureId)}
-        </button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenThread(item, 'plan')}
+            disabled={unavailable}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+            data-testid={`external-project-plan-${item.id}`}
+          >
+            方案
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenThread(item, 'review')}
+            disabled={unavailable}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+            data-testid={`external-project-review-${item.id}`}
+          >
+            Review
+          </button>
+          <button
+            type="button"
+            onClick={() => onStart(item)}
+            disabled={disabled}
+            className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] disabled:bg-[var(--console-hover-bg)] disabled:text-cafe-secondary disabled:opacity-70"
+            data-testid={`external-project-start-${item.id}`}
+          >
+            {launchButtonLabel(status, desktopBound, featureId)}
+          </button>
+        </div>
       </div>
       {error && (
         <p className="mt-2 text-xs text-conn-red-text" role="alert">
@@ -94,6 +124,10 @@ function ExternalProjectFeatureRow({
 }
 
 export function ExternalProjectFeatureList({ project, items }: ExternalProjectFeatureListProps) {
+  const router = useRouter();
+  const setCurrentThread = useChatStore((state) => state.setCurrentThread);
+  const setCurrentProject = useChatStore((state) => state.setCurrentProject);
+  const setThreads = useChatStore((state) => state.setThreads);
   const [launchStatuses, setLaunchStatuses] = useState<Record<string, LaunchStatus>>({});
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
@@ -190,14 +224,22 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
       }
       const body = (await response.json()) as { state: LaunchState };
       startingItemsRef.current.delete(item.id);
-      setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
-      setLaunchRefreshKey((current) => current + 1);
-      if (body.state.status === 'ready_for_desktop' || body.state.status === 'connected_to_desktop') {
-        setNotice(
-          `${featureId} 已进入 Desktop 开发闭环。请在 ChatGPT Desktop 新建或继续一个任务，并输入“连接 ${project.name} ${featureId}”。`,
-        );
+      if (body.state.desktopTask?.status === 'created') {
+        setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
+        setLaunchRefreshKey((current) => current + 1);
+        setNotice(`${featureId} 已进入开发闭环，并已在 ChatGPT Desktop 创建对应开发任务。`);
+      } else if (body.state.desktopTask?.status === 'failed') {
+        setLaunchStatuses((current) => ({ ...current, [item.id]: 'error' }));
+        setNotice(`${featureId} 已进入开发闭环；Desktop 任务自动创建失败，可稍后重试：${body.state.desktopTask.error}`);
+      } else if (body.state.status === 'ready_for_desktop' || body.state.status === 'connected_to_desktop') {
+        setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
+        setLaunchRefreshKey((current) => current + 1);
+        setNotice(`${featureId} 已进入 Desktop 开发闭环。`);
       } else if (body.state.status === 'managed_by_catcafe') {
+        setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
         setLaunchErrors((current) => ({ ...current, [item.id]: '该功能已有 CatCafe 执行流程，未改写现有 SOP' }));
+      } else {
+        setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
       }
     } catch (error) {
       startingItemsRef.current.delete(item.id);
@@ -205,6 +247,30 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
       setLaunchErrors((current) => ({
         ...current,
         [item.id]: error instanceof Error ? error.message : '启动失败',
+      }));
+    }
+  };
+
+  const openFeatureThread = async (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => {
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(item.id)}/threads/${kind}`,
+        { method: 'POST' },
+      );
+      const body = (await response.json()) as { thread?: FeatureWorkspaceThreadView; error?: string };
+      if (!response.ok || !body.thread) throw new Error(body.error ?? '无法打开功能会话');
+      const threadResponse = await apiFetch('/api/threads');
+      if (threadResponse.ok) {
+        const threadBody = (await threadResponse.json()) as { threads?: Thread[] };
+        if (threadBody.threads) setThreads(threadBody.threads);
+      }
+      setCurrentProject(project.sourcePath);
+      setCurrentThread(body.thread.threadId);
+      router.push(`/thread/${encodeURIComponent(body.thread.threadId)}`);
+    } catch (error) {
+      setLaunchErrors((current) => ({
+        ...current,
+        [item.id]: error instanceof Error ? error.message : '无法打开功能会话',
       }));
     }
   };
@@ -220,8 +286,8 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   return (
     <div className="space-y-3" data-testid="external-project-feature-list">
       <div className="rounded-xl bg-[var(--console-shell-bg)] px-4 py-3 text-xs leading-relaxed text-cafe-secondary">
-        从这里启动的功能只属于「{project.name}」。启动后，在 ChatGPT Desktop 新建或继续一个任务并连接该功能； CatCafe
-        会保留工作状态和 Review Hub，但不会自动创建 Desktop 窗口。
+        从这里启动的功能只属于「{project.name}」。每个功能都有独立的方案与 Review 会话；启动开发后，CatCafe
+        会创建并连接对应的 ChatGPT Desktop 开发任务。
       </div>
       {notice && (
         <output
@@ -240,6 +306,7 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
             error={launchErrors[item.id]}
             desktopBound={Boolean(project.desktopDevelopment)}
             onStart={(selected) => void startDevelopment(selected)}
+            onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
           />
         ))}
       </div>

@@ -125,11 +125,20 @@ describe('F289 desktop development loop contract', () => {
   });
 
   it('builds deterministic Review Hub ids without leaking local paths', async () => {
-    const { buildProjectReviewHubId, toPublicDesktopDevelopmentProject } = await import(
+    const { buildFeatureWorkspaceThreadId, buildProjectReviewHubId, toPublicDesktopDevelopmentProject } = await import(
       '../dist/types/desktop-development-loop.js'
     );
     assert.equal(buildProjectReviewHubId('ep-123'), 'project-review-hub:ep-123');
     assert.throws(() => buildProjectReviewHubId('../ep-123'), /project id/i);
+    assert.equal(
+      buildFeatureWorkspaceThreadId('ep-123', 'backlog-456', 'review'),
+      'project-feature-review:ep-123:backlog-456',
+    );
+    assert.equal(
+      buildFeatureWorkspaceThreadId('ep-123', 'backlog-456', 'plan'),
+      'project-feature-plan:ep-123:backlog-456',
+    );
+    assert.throws(() => buildFeatureWorkspaceThreadId('ep-123', '../backlog', 'review'), /backlog item id/i);
 
     const projection = toPublicDesktopDevelopmentProject({
       projectId: 'ep-123',

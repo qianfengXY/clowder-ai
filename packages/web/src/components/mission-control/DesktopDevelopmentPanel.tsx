@@ -1,19 +1,13 @@
 'use client';
 
-import type { DesktopDevelopmentResumePacket, ExternalProject, ProjectReviewHubView } from '@cat-cafe/shared';
-import { useRouter } from 'next/navigation';
+import type { DesktopDevelopmentResumePacket, ExternalProject } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
-import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { buildDesktopAcceptanceRequest } from './desktop-development-form';
 
 export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
-  const router = useRouter();
-  const setCurrentThread = useChatStore((state) => state.setCurrentThread);
-  const setCurrentProject = useChatStore((state) => state.setCurrentProject);
-  const setThreads = useChatStore((state) => state.setThreads);
   const { projects, setProjects } = useExternalProjectStore();
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
@@ -66,24 +60,6 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     setStatus(null);
     void loadWorks();
   }, [loadWorks]);
-
-  const openReviewHub = async () => {
-    setBusy(true);
-    setStatus(null);
-    try {
-      const reviewHub = await ensureReviewHub(project.id);
-      const refreshedThreads = await readCurrentThreads();
-      if (refreshedThreads) setThreads(refreshedThreads);
-      setCurrentProject(project.sourcePath);
-      setCurrentThread(reviewHub.threadId);
-      setStatus(reviewHub.status === 'restored' ? '已恢复原 Review Hub' : '已打开项目 Review Hub');
-      router.push(`/thread/${encodeURIComponent(reviewHub.threadId)}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法打开 Review Hub');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const enableAutomaticMerge = async () => {
     if (!binding) return;
@@ -184,7 +160,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       <section className="rounded-xl bg-[var(--console-card-bg)] p-5">
         <h3 className="text-sm font-semibold text-cafe">ChatGPT Desktop 开发闭环</h3>
         <p className="mt-2 text-xs leading-relaxed text-cafe-secondary">
-          此项目尚未绑定开发闭环。重新导入或通过项目配置绑定 GitHub 仓库后，才会创建唯一 Review Hub。
+          此项目尚未绑定开发闭环。重新导入或通过项目配置绑定 GitHub 仓库后，才能为每个功能创建方案与 Review 会话。
         </p>
       </section>
     );
@@ -195,7 +171,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     <section className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-5">
       <div>
         <h3 className="text-sm font-semibold text-cafe">ChatGPT Desktop 开发闭环</h3>
-        <p className="mt-1 text-xs text-cafe-secondary">一个项目只保留一个 Review Hub，所有实现轮次都在其中闭环。</p>
+        <p className="mt-1 text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
       </div>
 
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -365,14 +341,6 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void openReviewHub()}
-          disabled={busy}
-          className="rounded-lg bg-[var(--mc-accent)] px-4 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
-        >
-          {busy ? '处理中...' : '打开 Review Hub'}
-        </button>
         {pilotCount >= 2 && binding.mergeMode === 'manual_confirm_in_chatgpt' && (
           <button
             type="button"
@@ -393,22 +361,6 @@ function validateReviewCatSelection(reviewers: readonly string[], recorderId: st
   if (reviewers.length < 2) return '请至少选择两只不同的 Review 猫猫';
   if (!reviewers.includes(recorderId)) return '提交检视意见猫猫必须是参与本轮 Review 的猫猫';
   return null;
-}
-
-async function ensureReviewHub(projectId: string): Promise<ProjectReviewHubView> {
-  const response = await apiFetch(`/api/external-projects/${projectId}/development-loop/review-hub`, {
-    method: 'POST',
-  });
-  const body = (await response.json()) as { reviewHub?: ProjectReviewHubView; error?: string };
-  if (!response.ok || !body.reviewHub) throw new Error(body.error ?? '无法打开 Review Hub');
-  return body.reviewHub;
-}
-
-async function readCurrentThreads(): Promise<Thread[] | null> {
-  const response = await apiFetch('/api/threads');
-  if (!response.ok) return null;
-  const body = (await response.json()) as { threads?: Thread[] };
-  return body.threads ?? null;
 }
 
 function describeWorkState(work: DesktopDevelopmentResumePacket): string {

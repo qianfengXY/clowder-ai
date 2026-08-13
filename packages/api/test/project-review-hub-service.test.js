@@ -15,7 +15,20 @@ describe('F289 ProjectReviewHubService', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     projectStore = new ExternalProjectStore();
     threadStore = new ThreadStore({ maxThreads: 100 });
-    service = new ProjectReviewHubService(projectStore, threadStore);
+    service = new ProjectReviewHubService(projectStore, threadStore, {
+      listByUser: async (userId) =>
+        userId === 'user1'
+          ? [
+              {
+                id: 'backlog-f006',
+                userId,
+                projectId: project.id,
+                title: 'Workspace settings',
+                tags: ['feature:f006'],
+              },
+            ]
+          : [],
+    });
     project = await projectStore.create('user1', {
       name: 'Loop Project',
       description: '',
@@ -76,5 +89,16 @@ describe('F289 ProjectReviewHubService', () => {
       sourcePath: '/tmp/unbound',
     });
     await assert.rejects(() => service.ensureForProject(unbound.id, 'user1'), /not configured/i);
+  });
+
+  test('creates deterministic plan and review threads for one feature', async () => {
+    const plan = await service.ensureForFeature(project.id, 'backlog-f006', 'plan', 'user1');
+    const review = await service.ensureForFeature(project.id, 'backlog-f006', 'review', 'user1');
+    assert.equal(plan.threadId, `project-feature-plan:${project.id}:backlog-f006`);
+    assert.equal(review.threadId, `project-feature-review:${project.id}:backlog-f006`);
+    assert.equal((await threadStore.get(plan.threadId)).title, 'F006 · 方案 · Loop Project');
+    assert.equal((await threadStore.get(review.threadId)).title, 'F006 · Review · Loop Project');
+    assert.equal((await threadStore.get(plan.threadId)).backlogItemId, 'backlog-f006');
+    assert.equal((await threadStore.get(review.threadId)).projectPath, project.sourcePath);
   });
 });

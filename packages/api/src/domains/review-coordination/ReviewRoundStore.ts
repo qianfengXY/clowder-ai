@@ -19,6 +19,7 @@ export interface CreateReviewRoundInput {
   readonly author: ManagedWorkExecutorActor;
   readonly reviewerCatIds: readonly CatId[];
   readonly recorderCatId: CatId;
+  readonly reviewThreadId?: string;
   readonly idempotencyKey: string;
   readonly now?: number;
 }

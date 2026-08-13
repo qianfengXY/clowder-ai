@@ -24,6 +24,7 @@ import { VersionConflictError } from '../cats/services/stores/ports/WorkflowSopS
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
+import type { DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
@@ -150,6 +151,9 @@ export interface DesktopDevelopmentLaunchState {
   readonly featureId: string;
   readonly title: string;
   readonly status: DesktopDevelopmentLaunchStatus;
+  readonly desktopTask?:
+    | { readonly status: 'created'; readonly threadId: string }
+    | { readonly status: 'failed'; readonly error: string };
 }
 
 function terminalLaunchStatus(lifecycle: ManagedWorkLifecycle): 'completed' | 'rejected' | null {
@@ -183,6 +187,7 @@ export class DesktopDevelopmentLoopService {
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
     private readonly backlogStore: Pick<IBacklogStore, 'listByUser' | 'tryAcquireDispatchLock' | 'releaseDispatchLock'>,
     private readonly workflowSopStore: Pick<IWorkflowSopStore, 'get' | 'getManagedWorkAdmission' | 'upsert'>,
+    private readonly desktopTaskLauncher?: DesktopTaskLauncher,
   ) {}
 
   async listProjectLaunchStates(input: {
@@ -211,10 +216,37 @@ export class DesktopDevelopmentLoopService {
     );
     if (!item) throw new Error('Project backlog item not found');
 
+    await Promise.all([
+      this.reviewHubs.ensureForFeature(input.projectId, item.id, 'plan', input.ownerUserId),
+      this.reviewHubs.ensureForFeature(input.projectId, item.id, 'review', input.ownerUserId),
+    ]);
+
     const lockToken = await this.backlogStore.tryAcquireDispatchLock?.(item.id);
     if (lockToken === false) throw new Error('Project backlog item launch is already in progress');
     try {
-      return await this.startProjectWorkLocked(input.ownerUserId, input.projectId, item);
+      const state = await this.startProjectWorkLocked(input.ownerUserId, input.projectId, item);
+      if (state.status !== 'ready_for_desktop' || !this.desktopTaskLauncher) return state;
+      const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+      try {
+        const desktopTask = await this.desktopTaskLauncher.launch({
+          projectId: project.id,
+          projectName: project.name,
+          repository: project.desktopDevelopment.repository.fullName,
+          sourcePath: project.sourcePath,
+          backlogItemId: item.id,
+          featureId: state.featureId,
+          title: item.title,
+        });
+        return { ...state, desktopTask };
+      } catch (error) {
+        return {
+          ...state,
+          desktopTask: {
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'Desktop task launch failed',
+          },
+        };
+      }
     } finally {
       if (typeof lockToken === 'string') await this.backlogStore.releaseDispatchLock?.(item.id, lockToken);
     }
@@ -331,12 +363,14 @@ export class DesktopDevelopmentLoopService {
     const executor = snapshot.attempt.executorActor;
     if (executor?.kind === 'external_actor' && executor.actorId === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR) {
       const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
+      const desktopTask = await this.desktopTaskLauncher?.get(projectId, item.id);
       return {
         ...base,
         status:
           session?.attemptId === snapshot.attempt.attemptId && session.status === 'active'
             ? 'connected_to_desktop'
             : 'ready_for_desktop',
+        ...(desktopTask ? { desktopTask } : {}),
       };
     }
     if (executor?.kind === 'cat' || snapshot.attempt.executorCatId) {
@@ -345,6 +379,9 @@ export class DesktopDevelopmentLoopService {
     return {
       ...base,
       status: sop.batonHolder === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR ? 'ready_for_desktop' : 'managed_by_catcafe',
+      ...(sop.batonHolder === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR && this.desktopTaskLauncher
+        ? { desktopTask: (await this.desktopTaskLauncher.get(projectId, item.id)) ?? undefined }
+        : {}),
     };
   }
 
@@ -576,6 +613,13 @@ export class DesktopDevelopmentLoopService {
       project.desktopDevelopment.defaultReviewRecorder ??
       project.desktopDevelopment.defaultReviewers[0];
     if (!recorderCatId) throw new Error('Review recorder is unavailable');
+    const managed = await this.managedWork.read(this.managedIdentity(input));
+    const reviewHub = await this.reviewHubs.ensureForFeature(
+      input.projectId,
+      managed.admission.producerRef,
+      'review',
+      input.ownerUserId,
+    );
     const round = await this.reviewRounds.createRound({
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
@@ -585,10 +629,10 @@ export class DesktopDevelopmentLoopService {
       author: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
       reviewerCatIds: project.desktopDevelopment.defaultReviewers,
       recorderCatId,
+      reviewThreadId: reviewHub.threadId,
       idempotencyKey: `${input.idempotencyKey}:round`,
       now,
     });
-    const reviewHub = await this.reviewHubs.ensureForProject(input.projectId, input.ownerUserId);
     await this.reviewDispatcher.dispatch({
       stage: 'independent',
       ownerUserId: input.ownerUserId,

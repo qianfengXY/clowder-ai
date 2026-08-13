@@ -66,6 +66,17 @@ describe(
             status: 'active',
           };
         },
+        ensureForFeature: async (projectId, backlogItemId, kind) => {
+          reviewHubEnsureCount += 1;
+          return {
+            threadId: `project-feature-${kind}:${projectId}:${backlogItemId}`,
+            projectId,
+            backlogItemId,
+            featureId: 'F006',
+            kind,
+            status: 'active',
+          };
+        },
       };
       const reviewDispatcher = {
         dispatch: async (input) => {
@@ -299,7 +310,7 @@ describe(
           stage: 'independent',
           ownerUserId: 'owner-1',
           projectId: project.id,
-          reviewHubThreadId: `project-review-hub:${project.id}`,
+          reviewHubThreadId: `project-feature-review:${project.id}:backlog-1`,
           roundId: reported.reviewRoundId,
           exactSha: SHA_A,
           reviewerCatIds: ['cat-codex', 'cat-kimi'],
@@ -609,7 +620,7 @@ describe(
         now: 3_000,
       });
       const roundId = packet.reviewRoundId;
-      const hubThreadId = `project-review-hub:${project.id}`;
+      const hubThreadId = `project-feature-review:${project.id}:backlog-1`;
 
       await assert.rejects(
         () =>
@@ -619,7 +630,17 @@ describe(
             reviewerCatId: 'cat-codex',
             roundId,
           }),
-        /project Review Hub/i,
+        /feature Review thread/i,
+      );
+      await assert.rejects(
+        () =>
+          reviewCoordinator.readSafe({
+            ownerUserId: 'owner-1',
+            threadId: `project-review-hub:${project.id}`,
+            reviewerCatId: 'cat-codex',
+            roundId,
+          }),
+        /feature Review thread/i,
       );
 
       await reviewCoordinator.submitDraft({
@@ -780,7 +801,7 @@ describe(
       );
 
       const roundId = packet.reviewRoundId;
-      const hubThreadId = `project-review-hub:${project.id}`;
+      const hubThreadId = `project-feature-review:${project.id}:backlog-1`;
       for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
         await reviewCoordinator.submitDraft({
           ownerUserId: 'owner-1',

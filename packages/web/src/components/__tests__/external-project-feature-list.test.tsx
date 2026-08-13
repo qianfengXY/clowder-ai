@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
+const routerPushMock = vi.hoisted(() => vi.fn());
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPushMock }) }));
 
 vi.mock('../../utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
@@ -72,6 +75,7 @@ describe('ExternalProjectFeatureList', () => {
 
   beforeEach(() => {
     apiFetchMock.mockReset();
+    routerPushMock.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -86,7 +90,7 @@ describe('ExternalProjectFeatureList', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('starts a project-scoped feature and tells the operator how to connect Desktop', async () => {
+  it('starts a project-scoped feature and reports the automatically created Desktop task', async () => {
     let launched = false;
     apiFetchMock.mockImplementation(async (_path: string, init?: RequestInit) => {
       if (!init) {
@@ -115,6 +119,7 @@ describe('ExternalProjectFeatureList', () => {
             featureId: 'F006',
             title: '[F006] Workspace capability settings',
             status: 'ready_for_desktop',
+            desktopTask: { status: 'created', threadId: 'codex-thread-f006' },
           },
         }),
       };
@@ -138,10 +143,90 @@ describe('ExternalProjectFeatureList', () => {
     expect(postCall?.[0]).toBe('/api/external-projects/project-Traqen/development-loop/features/item-F006/start');
     expect(JSON.parse((postCall?.[1] as RequestInit).body as string)).toEqual({ protocolVersion: 1 });
     expect(button.textContent).toContain('已启动');
-    expect(container.textContent).toContain('连接 Traqen F006');
+    expect(container.textContent).toContain('已在 ChatGPT Desktop 创建对应开发任务');
   });
 
-  it('works for any bound external project and recognizes an existing launch', async () => {
+  it('opens feature-scoped plan and Review conversations', async () => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/threads') return { ok: true, json: async () => ({ threads: [] }) };
+      if (init?.method === 'POST' && path.endsWith('/threads/review')) {
+        return {
+          ok: true,
+          json: async () => ({
+            thread: {
+              threadId: 'project-feature-review:project-Traqen:item-F006',
+              projectId: 'project-Traqen',
+              backlogItemId: 'item-F006',
+              featureId: 'F006',
+              kind: 'review',
+              status: 'active',
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
+        }),
+      };
+    });
+    await act(async () => {
+      root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
+    });
+    await flush();
+    const review = container.querySelector('[data-testid="external-project-review-item-F006"]') as HTMLButtonElement;
+    await act(async () => {
+      review.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/external-projects/project-Traqen/development-loop/features/item-F006/threads/review',
+      { method: 'POST' },
+    );
+    expect(routerPushMock).toHaveBeenCalledWith('/thread/project-feature-review%3Aproject-Traqen%3Aitem-F006');
+  });
+
+  it('keeps automatic Desktop launch failures retryable', async () => {
+    apiFetchMock.mockImplementation(async (_path: string, init?: RequestInit) => {
+      if (!init) {
+        return {
+          ok: true,
+          json: async () => ({
+            states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          state: {
+            backlogItemId: 'item-F006',
+            featureId: 'F006',
+            title: 'Feature',
+            status: 'ready_for_desktop',
+            desktopTask: { status: 'failed', error: 'Desktop unavailable' },
+          },
+        }),
+      };
+    });
+    await act(async () => {
+      root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
+    });
+    await flush();
+    const button = container.querySelector('[data-testid="external-project-start-item-F006"]') as HTMLButtonElement;
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('重试启动');
+    expect(container.textContent).toContain('Desktop unavailable');
+  });
+
+  it('works for any bound external project and allows a detached launch to reconnect', async () => {
     apiFetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -170,7 +255,7 @@ describe('ExternalProjectFeatureList', () => {
     const button = container.querySelector('[data-testid="external-project-start-item-F120"]') as HTMLButtonElement;
     expect(container.textContent).toContain('只属于「Another Repo」');
     expect(button.textContent).toContain('已启动');
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
     expect(apiFetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== 'POST')).toBe(
       true,
     );

@@ -99,6 +99,13 @@ describe(
       assert.equal(round.phase, 'independent');
       assert.deepEqual(await createRound(), round);
       assert.deepEqual(await createRound({ idempotencyKey: 'same-round-new-operation-key' }), round);
+      assert.deepEqual(
+        await createRound({
+          reviewThreadId: 'project-feature-review:project-1:backlog-1',
+          idempotencyKey: 'post-migration-retry',
+        }),
+        round,
+      );
       assert.equal(await redis.ttl(`review-round:round:${round.roundId}`), -1);
       const current = await store.readCurrentSafe({
         ownerUserId: 'owner-1',

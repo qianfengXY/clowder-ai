@@ -8,7 +8,7 @@ Feature truth: `docs/features/F289-chatgpt-desktop-development-loop.md`
 
 F289 is a project-scoped bridge, not a second workflow engine. Cat Café owns the durable project, design context and Review Hub view; F275 owns work/attempt/terminal truth; F253 owns ReviewRound semantics; F289 owns the external Desktop session binding; F286 governs the strict MCP profile. ChatGPT Desktop owns repository mutation through its native local tools. F211 remains unchanged because its runtime-session records require a CatId, agent-key principal and Antigravity provenance, none of which is valid for the `chatgpt-desktop-dev` external actor.
 
-The central UX decision is **one project, one Review Hub**. Delivery cycles and code SHAs create durable objects inside that Hub, never a new visible Cat Café window. Both Cat Café and ChatGPT chats are replaceable bindings over persisted state.
+The central UX decision is **one imported feature, one plan conversation, one Review conversation, one native Desktop task**. Delivery cycles and code SHAs reuse the feature Review conversation. Historical project-wide Review Hub rounds remain callback-compatible during migration. Cat Café and ChatGPT chats are replaceable bindings over persisted state.
 
 ## System flow
 
@@ -19,8 +19,10 @@ Cat Café Project
   │    ├─ repo/default branch/local checkout
   │    ├─ reviewer + merge policy
   │    └─ successfulManualPilotCount
-  └─ one deterministic Review Hub thread
-       └─ DeliveryCycle -> F275 Work -> Attempts -> F253 ReviewRounds
+  └─ imported feature
+       ├─ deterministic plan thread
+       ├─ deterministic Review thread -> F253 ReviewRounds
+       └─ DeliveryCycle -> F275 Work -> Attempts
                                       ^                 |
                                       | Resume Packet   | consensus findings
                                       |                 v
@@ -33,7 +35,7 @@ Cat Café Project
 | Concern | Owner | F289 action |
 |---|---|---|
 | Project/repo/reviewer/rollout policy | F289 on ExternalProject | persist versioned binding; no secret storage |
-| Visible Review Hub | F289 resolver + ThreadStore | deterministic hub identity; ensure/restore same thread |
+| Visible feature plan/Review conversations | F289 resolver + ThreadStore | deterministic project + backlog identities; ensure/restore the same two threads |
 | Work/attempt/evidence/terminal | F275 managed-work | consume named port; no fallback identity/state |
 | Independent review/barrier/consensus | F253 review coordination | add durable project/work/SHA records behind shared interface |
 | Desktop session provenance | F289 | persist the external actor session, chat ref, lease and binding epoch without impersonating a Cat session |
@@ -65,13 +67,15 @@ type DesktopDevelopmentProjectBinding = {
 
 `sourcePath` remains the project-private local checkout reference. Public DTOs use a boolean such as `localCheckoutBound`, not the absolute path.
 
-### ProjectReviewHub
+### FeatureWorkspaceThreads
 
-- `hubId = project-review-hub:<projectId>`.
-- The ThreadStore thread ID is deterministic and idempotently ensured.
+- `planThreadId = project-feature-plan:<projectId>:<backlogItemId>`.
+- `reviewThreadId = project-feature-review:<projectId>:<backlogItemId>`.
+- Both ThreadStore IDs are deterministic and idempotently ensured.
 - `deletedAt != null` means hidden view; resolver calls existing restore semantics and returns the same ID.
 - Hard-loss recovery re-creates the same deterministic thread ID. The project/work/round records do not move or get copied.
 - Concurrent ensure is safe because the identity is deterministic and the store operation is idempotent.
+- `project-review-hub:<projectId>` is a legacy callback surface for historical in-flight rounds, not the destination for new rounds.
 
 ### DesktopSessionBinding
 

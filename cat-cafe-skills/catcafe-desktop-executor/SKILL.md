@@ -2,7 +2,7 @@
 name: catcafe-desktop-executor
 tips_exempt: activation-bound Desktop capability; the user must explicitly enable the scoped development-loop profile and credential
 description: >
-  ChatGPT Desktop 侧执行 Cat Café 项目中的权威 managed work，并把精确提交交回同一 Review Hub 闭环。
+  ChatGPT Desktop 侧执行 Cat Café 项目中的权威 managed work，并把精确提交交回该功能的 Review 会话闭环。
   Use when: 用户在 ChatGPT Desktop 中要求实现、恢复或修复一个已经绑定 Cat Café 的 GitHub 项目。
   Not for: Cat Café 猫猫自己写代码、没有项目绑定的任意仓库任务、替用户开启权限或自动合入。
   Output: 可恢复的 Desktop binding + 精确 commit SHA + 最新 Resume Packet，或明确的安全阻断原因。
@@ -81,7 +81,7 @@ MCP 不负责 shell、文件写、Git commit、push、merge 或 deploy。不要�
 
 ## 4. 等待 Review 与修复
 
-implementation report 会在项目唯一 Review Hub 中启动精确 SHA 的多猫 ReviewRound。Desktop 通过
+implementation report 会在当前 backlog 功能的独立 Review 会话中启动精确 SHA 的多猫 ReviewRound。Desktop 通过
 `cat_cafe_development_work_read` 读取 barrier-safe Resume Packet：
 
 - `review_in_progress`：保持幂等读取；没有调度能力时明确说将在下一次 app 唤醒或用户消息时继续，禁止声称已在后台轮询。
@@ -103,13 +103,13 @@ Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/a
   全部通过；不要仅凭计数自行开启自动合入。
 - 合入后进入 `acceptance_pending`。最终体验验收只在 Cat Café 项目界面由用户记录；Desktop 不代签验收。
 
-验收不通过时继续同一个项目、Review Hub 和 canonical work lineage，按 Resume Packet 进入新 attempt/cycle。
+验收不通过时继续同一个项目、功能 Review 会话和 canonical work lineage，按 Resume Packet 进入新 attempt/cycle。
 
 ## 6. 删除与故障恢复
 
 - **ChatGPT chat 被删**：新 chat 从当前 Git repository 重新 resolve 项目，选择同一 active work，读取 Resume
   Packet，再以更高 epoch rebind。
-- **Cat Café Review Hub 软删除**：项目读取会恢复同一个 Hub identity；Desktop 不创建新窗口。
+- **Cat Café 功能 Review 会话软删除**：按 projectId + backlogItemId 恢复同一个会话 identity；Desktop 不创建新窗口。
 - **永久 worktree 丢失**：只从 Resume Packet 的 `lastCommittedSha` 重建；明确声明未提交内容无法保证恢复。
 - **临时 MCP/网络失败**：保留同一 idempotency key 重试读/写；空 poll 不是终态。
 - **项目绑定消失或变得歧义**：停止写入，请用户在 Cat Café 修复绑定；不得用目录名猜项目。

@@ -28,7 +28,20 @@ describe('F289 desktop development loop routes', () => {
     });
     app = Fastify();
     await app.register(desktopDevelopmentLoopRoutes, {
-      projectReviewHubService: new ProjectReviewHubService(externalProjectStore, threadStore),
+      projectReviewHubService: new ProjectReviewHubService(externalProjectStore, threadStore, {
+        listByUser: async (userId) =>
+          userId === 'user1'
+            ? [
+                {
+                  id: 'backlog-f006',
+                  userId,
+                  projectId: project.id,
+                  title: 'Workspace settings',
+                  tags: ['feature:f006'],
+                },
+              ]
+            : [],
+      }),
     });
   });
 
@@ -66,6 +79,18 @@ describe('F289 desktop development loop routes', () => {
       headers: { 'x-cat-cafe-user': 'user2' },
     });
     assert.equal(otherUser.statusCode, 404);
+  });
+
+  test('POST feature thread creates separate plan and Review conversations', async () => {
+    for (const kind of ['plan', 'review']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/external-projects/${project.id}/development-loop/features/backlog-f006/threads/${kind}`,
+        headers: { 'x-cat-cafe-user': 'user1' },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().thread.threadId, `project-feature-${kind}:${project.id}:backlog-f006`);
+    }
   });
 });
 

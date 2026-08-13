@@ -44,7 +44,7 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 ## Extend By
 
 - Add authenticated routes/tools through server-derived reviewer identity; never accept a caller-supplied cat as authority.
-- Project a round into the project's one reusable Review Hub, while retaining the Redis carrier as truth.
+- Project a new round into the backlog feature's reusable Review thread, while retaining the Redis carrier as truth; accept the legacy project Hub only for historical in-flight callbacks.
 - Add telemetry as a read-only consumer of completed rounds and finding transitions.
 
 ## Do NOT Unify With
