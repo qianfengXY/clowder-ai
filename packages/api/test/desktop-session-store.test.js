@@ -84,6 +84,41 @@ describe('F289 DesktopSessionStore', () => {
     );
   });
 
+  test('same Desktop runtime keeps its visible chat reference across attempt rebinds', async () => {
+    const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
+    const store = new DesktopSessionStore();
+    const first = await store.bind(bindInput());
+    const rebound = await store.bind(
+      bindInput({
+        attemptId: 'attempt-2',
+        chatRef: undefined,
+        expectedEpoch: first.bindingEpoch,
+        idempotencyKey: 'bind-same-runtime-next-attempt',
+      }),
+    );
+
+    assert.equal(rebound.runtimeSessionId, first.runtimeSessionId);
+    assert.equal(rebound.chatRef, 'opaque-chat-1');
+    assert.equal(rebound.attemptId, 'attempt-2');
+  });
+
+  test('a different Desktop runtime never inherits the previous chat reference', async () => {
+    const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
+    const store = new DesktopSessionStore();
+    const first = await store.bind(bindInput());
+    const rebound = await store.bind(
+      bindInput({
+        attemptId: 'attempt-2',
+        runtimeSessionId: 'chatgpt-session-2',
+        chatRef: undefined,
+        expectedEpoch: first.bindingEpoch,
+        idempotencyKey: 'bind-different-runtime-next-attempt',
+      }),
+    );
+
+    assert.equal(rebound.chatRef, undefined);
+  });
+
   test('binding is permanent and heartbeat only refreshes versioned workspace metadata', async () => {
     const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
     const store = new DesktopSessionStore();

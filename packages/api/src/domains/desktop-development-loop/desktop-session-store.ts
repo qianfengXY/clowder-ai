@@ -71,13 +71,20 @@ if currentEpoch ~= expectedEpoch then
 end
 
 local currentJson = redis.call('HGET', KEYS[1], 'current')
+local previous = nil
 if currentJson then
-  local previous = cjson.decode(currentJson)
+  previous = cjson.decode(currentJson)
   previous.status = 'superseded'
   redis.call('HSET', KEYS[1], 'history:' .. tostring(currentEpoch), cjson.encode(previous))
 end
 
 local binding = cjson.decode(ARGV[4])
+-- Starting the next managed-work attempt from the same Desktop runtime must
+-- keep its visible ChatGPT task reference even when the reconnect caller omits
+-- the optional chatRef. A different runtime never inherits another chat.
+if not binding.chatRef and previous and previous.runtimeSessionId == binding.runtimeSessionId and previous.chatRef then
+  binding.chatRef = previous.chatRef
+end
 binding.bindingEpoch = currentEpoch + 1
 binding.version = 1
 binding.status = 'active'
@@ -178,6 +185,9 @@ export class DesktopSessionStore {
       }
       const binding: DesktopSessionBinding = {
         ...template,
+        ...(!template.chatRef && state.current?.runtimeSessionId === template.runtimeSessionId && state.current.chatRef
+          ? { chatRef: state.current.chatRef }
+          : {}),
         bindingEpoch: currentEpoch + 1,
         version: 1,
       };
