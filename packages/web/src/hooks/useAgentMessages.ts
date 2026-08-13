@@ -38,9 +38,11 @@ import {
 } from './shared-replaced-invocations';
 import {
   formatAgyProgressDetail,
+  formatProviderActivityDetail,
   formatSessionSealRequested,
   formatVisibleSystemInfo,
   isInternalSystemInfoTelemetry,
+  parseProviderActivity,
 } from './system-info-visible';
 import {
   type ActiveSeedSource,
@@ -1326,6 +1328,8 @@ export function consumeBackgroundSystemInfo(
           // Explicit absence invalidates any cached child under the same parent.
           turnInvocationId,
           freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
+          appServerLifecycle: undefined,
+          providerActivity: undefined,
           ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
           startedAt: Date.now(),
           taskProgress: {
@@ -1594,6 +1598,18 @@ export function consumeBackgroundSystemInfo(
       consumed = true;
     } else if (parsed?.type === 'app_server_recovery') {
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'spawning');
+      consumed = true;
+    } else if (parsed?.type === 'provider_activity') {
+      const activity = parseProviderActivity(parsed);
+      if (activity) {
+        options.store.setThreadCatInvocation(msg.threadId, msg.catId, { providerActivity: activity });
+        options.store.updateThreadCatStatus(
+          msg.threadId,
+          msg.catId,
+          'streaming',
+          formatProviderActivityDetail(activity),
+        );
+      }
       consumed = true;
     } else if (parsed?.type === 'liveness_warning') {
       // F118 Phase C: Liveness warning — update cat status + invocation snapshot (mirror foreground)
@@ -2967,6 +2983,12 @@ export function handleBackgroundAgentMessage(
   if (msg.type === 'tool_use') {
     markThreadInvocationActive(msg, options);
     const toolName = msg.toolName ?? 'unknown';
+    const providerActivity = {
+      phase: 'tool' as const,
+      toolName,
+      lastActivityAt: msg.timestamp ?? Date.now(),
+    };
+    options.store.setThreadCatInvocation(msg.threadId, msg.catId, { providerActivity });
     const detail = msg.toolInput ? safeJsonDetail(msg.toolInput) : undefined;
     const messageId = ensureBackgroundAssistantMessage(msg, streamKey, existing, options);
     const bgTurnInvocationId =
@@ -3020,7 +3042,12 @@ export function handleBackgroundAgentMessage(
       options.store.appendToolEventToThread(msg.threadId, messageId, toolUseEventData);
     }
     options.store.setThreadMessageStreaming(msg.threadId, messageId, true);
-    options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'streaming');
+    options.store.updateThreadCatStatus(
+      msg.threadId,
+      msg.catId,
+      'streaming',
+      formatProviderActivityDetail(providerActivity),
+    );
     return;
   }
 
@@ -4997,6 +5024,23 @@ export function useAgentMessages() {
         setCatStatus(msg.catId, 'streaming');
         markSawStream(msg.catId, msg.invocationId);
         const toolName = msg.toolName ?? 'unknown';
+        const providerActivity = {
+          phase: 'tool' as const,
+          toolName,
+          lastActivityAt: msg.timestamp ?? Date.now(),
+        };
+        setCatInvocation(msg.catId, { providerActivity });
+        const activityThreadId = msg.threadId ?? useChatStore.getState().currentThreadId;
+        if (activityThreadId) {
+          useChatStore
+            .getState()
+            .updateThreadCatStatus(
+              activityThreadId,
+              msg.catId,
+              'streaming',
+              formatProviderActivityDetail(providerActivity),
+            );
+        }
         const detail = msg.toolInput ? safeJsonDetail(msg.toolInput) : undefined;
         const isFileChange = toolName === 'file_change';
         if (isFileChange) {
@@ -5638,6 +5682,8 @@ export function useAgentMessages() {
                 // Explicit absence invalidates any cached child under the same parent.
                 turnInvocationId,
                 freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
+                appServerLifecycle: undefined,
+                providerActivity: undefined,
                 ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
                 startedAt: Date.now(),
                 taskProgress: {
@@ -5940,6 +5986,18 @@ export function useAgentMessages() {
             consumed = true;
           } else if (parsed?.type === 'app_server_recovery') {
             setCatStatus(msg.catId, 'spawning');
+            consumed = true;
+          } else if (parsed?.type === 'provider_activity') {
+            const activity = parseProviderActivity(parsed);
+            if (activity) {
+              setCatInvocation(msg.catId, { providerActivity: activity });
+              const tid = msg.threadId ?? useChatStore.getState().currentThreadId;
+              if (tid) {
+                useChatStore
+                  .getState()
+                  .updateThreadCatStatus(tid, msg.catId, 'streaming', formatProviderActivityDetail(activity));
+              }
+            }
             consumed = true;
           } else if (parsed?.type === 'liveness_warning') {
             // F118 Phase C: Liveness warning — update cat status + invocation snapshot

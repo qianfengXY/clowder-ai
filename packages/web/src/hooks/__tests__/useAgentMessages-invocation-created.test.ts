@@ -27,6 +27,7 @@ const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
+const mockUpdateThreadCatStatus = vi.fn();
 const mockGetThreadState = vi.fn(() => ({ messages: [] }));
 
 const storeState = {
@@ -75,6 +76,7 @@ const storeState = {
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
+  updateThreadCatStatus: mockUpdateThreadCatStatus,
   getThreadState: mockGetThreadState,
   currentThreadId: 'thread-1',
   targetCats: ['codex'],
@@ -136,6 +138,7 @@ describe('useAgentMessages system_info invocation_created', () => {
     mockSetCatStatus.mockClear();
     mockSetCatInvocation.mockClear();
     mockSetMessageStreamInvocation.mockClear();
+    mockUpdateThreadCatStatus.mockClear();
     mockRemoveActiveInvocation.mockClear();
     mockAddActiveInvocation.mockClear();
     mockReplaceThreadTargetCats.mockClear();
@@ -165,6 +168,8 @@ describe('useAgentMessages system_info invocation_created', () => {
       'codex',
       expect.objectContaining({
         invocationId: 'inv-new-1',
+        appServerLifecycle: undefined,
+        providerActivity: undefined,
         taskProgress: expect.objectContaining({
           tasks: [],
           snapshotStatus: 'running',

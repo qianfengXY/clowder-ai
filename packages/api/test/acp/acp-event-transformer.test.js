@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { transformAcpEvent, createAcpSessionState } = await import(
+const { transformAcpEvent, createAcpSessionState, drainAcpProviderActivity } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/acp-event-transformer.js'
 );
 
@@ -617,5 +617,114 @@ describe('transformAcpEvent', () => {
     assert.equal(r.type, 'text');
     assert.equal(r.content, 'Normal text');
     assert.equal(state2.scratchpadDetected, false);
+  });
+
+  it('projects throttled provider activity without exposing thought content', () => {
+    const state = createAcpSessionState();
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'agent_thought_chunk',
+        content: { type: 'text', text: 'private chain of thought must stay private' },
+      },
+    };
+
+    const kimiMetadata = { provider: 'kimi', model: 'kimi-k2.5' };
+    const transformed = transformAcpEvent(update, 'kimi', kimiMetadata, state);
+    assert.equal(transformed, null);
+    const first = drainAcpProviderActivity(state, 'kimi', kimiMetadata);
+    assert.equal(first.type, 'system_info');
+    const firstPayload = JSON.parse(first.content);
+    assert.deepEqual(firstPayload, {
+      type: 'provider_activity',
+      phase: 'thinking',
+      lastActivityAt: firstPayload.lastActivityAt,
+    });
+    assert.equal(typeof firstPayload.lastActivityAt, 'number');
+    assert.equal(first.content.includes('private chain of thought'), false);
+
+    transformAcpEvent(update, 'kimi', kimiMetadata, state);
+    assert.equal(drainAcpProviderActivity(state, 'kimi', kimiMetadata), null);
+
+    state.lastActivityEmittedAt = Date.now() - 15_001;
+    transformAcpEvent(update, 'kimi', kimiMetadata, state);
+    const refreshed = drainAcpProviderActivity(state, 'kimi', kimiMetadata);
+    assert.equal(refreshed.type, 'system_info');
+    assert.equal(JSON.parse(refreshed.content).phase, 'thinking');
+  });
+
+  it('switches provider activity to writing when public response text starts', () => {
+    const state = createAcpSessionState();
+    const kimiMetadata = { provider: 'kimi', model: 'kimi-k2.5' };
+
+    const result = transformAcpEvent(
+      {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'public answer' },
+        },
+      },
+      'kimi',
+      kimiMetadata,
+      state,
+    );
+
+    assert.equal(result.type, 'text');
+    const activity = drainAcpProviderActivity(state, 'kimi', kimiMetadata);
+    assert.deepEqual(JSON.parse(activity.content), {
+      type: 'provider_activity',
+      phase: 'writing',
+      lastActivityAt: JSON.parse(activity.content).lastActivityAt,
+    });
+    assert.equal(activity.content.includes('public answer'), false);
+  });
+
+  it('projects tool-update activity after the existing tool_use without exposing arguments', () => {
+    const state = createAcpSessionState();
+    const first = transformAcpEvent(
+      {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-visible',
+          toolName: 'cat_cafe_get_thread_context',
+          toolInput: { threadId: 'secret-thread-id' },
+        },
+      },
+      'kimi',
+      { provider: 'kimi', model: 'kimi-k2.5' },
+      state,
+    );
+    assert.equal(first.type, 'tool_use');
+
+    const kimiMetadata = { provider: 'kimi', model: 'kimi-k2.5' };
+    const result = transformAcpEvent(
+      {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-visible',
+          toolName: 'cat_cafe_get_thread_context',
+          status: 'in_progress',
+          content: { type: 'text', text: 'private tool progress' },
+        },
+      },
+      'kimi',
+      kimiMetadata,
+      state,
+    );
+
+    assert.equal(result, null);
+    const activity = drainAcpProviderActivity(state, 'kimi', kimiMetadata);
+    assert.equal(activity.type, 'system_info');
+    assert.deepEqual(JSON.parse(activity.content), {
+      type: 'provider_activity',
+      phase: 'tool',
+      toolName: 'cat_cafe_get_thread_context',
+      lastActivityAt: JSON.parse(activity.content).lastActivityAt,
+    });
+    assert.equal(activity.content.includes('secret-thread-id'), false);
+    assert.equal(activity.content.includes('private tool progress'), false);
   });
 });

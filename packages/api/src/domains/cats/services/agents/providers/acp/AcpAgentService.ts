@@ -37,7 +37,12 @@ import {
   resolveSessionCredentialFile,
   writeSessionCredentialFile,
 } from './acp-credential-file.js';
-import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
+import {
+  createAcpSessionState,
+  drainAcpProviderActivity,
+  flushAcpThinking,
+  transformAcpEvent,
+} from './acp-event-transformer.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer, AcpNewSessionResult, AcpSessionUpdate } from './types.js';
@@ -612,6 +617,8 @@ export class AcpAgentService implements AgentService {
         // F197: transformAcpEvent may return AgentMessage | AgentMessage[] | null
         // (Gemini v0.36 single-event with status=completed splits into [tool_use, tool_result])
         const result = transformAcpEvent(event, this.catId, metadata, acpState);
+        const activity = drainAcpProviderActivity(acpState, this.catId, metadata);
+        if (activity) yield activity;
 
         // Circuit breaker: OpenCode compaction auto-continue loop detection.
         // When the transformer detects compaction scratchpad output, it suppresses
@@ -732,6 +739,8 @@ export class AcpAgentService implements AgentService {
 
             retryEventCount++;
             const result = transformAcpEvent(event, this.catId, metadata, retryState);
+            const activity = drainAcpProviderActivity(retryState, this.catId, metadata);
+            if (activity) yield activity;
             if (!result) continue;
             if (Array.isArray(result)) {
               for (const msg of result) yield msg;
