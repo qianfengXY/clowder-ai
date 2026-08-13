@@ -27,6 +27,7 @@ import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.
 import type { DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
+import { verifyWorkspacePath, type WorkspacePathVerifier } from './workspace-path-verifier.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -188,6 +189,7 @@ export class DesktopDevelopmentLoopService {
     private readonly backlogStore: Pick<IBacklogStore, 'listByUser' | 'tryAcquireDispatchLock' | 'releaseDispatchLock'>,
     private readonly workflowSopStore: Pick<IWorkflowSopStore, 'get' | 'getManagedWorkAdmission' | 'upsert'>,
     private readonly desktopTaskLauncher?: DesktopTaskLauncher,
+    private readonly workspacePathVerifier: WorkspacePathVerifier = verifyWorkspacePath,
   ) {}
 
   async listProjectLaunchStates(input: {
@@ -479,7 +481,7 @@ export class DesktopDevelopmentLoopService {
   async connect(input: ConnectDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
-    this.assertWorkspaceRepository(project.desktopDevelopment.repository.fullName, input.workspace);
+    await this.assertWorkspaceBinding(project, input.workspace);
 
     const identity = this.managedIdentity(input);
     let snapshot = await this.managedWork.read(identity);
@@ -571,9 +573,9 @@ export class DesktopDevelopmentLoopService {
   async heartbeat(input: HeartbeatDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
-    if (input.workspace)
-      this.assertWorkspaceRepository(project.desktopDevelopment.repository.fullName, input.workspace);
-    await this.assertCurrentSession(input, input.now ?? Date.now(), false);
+    if (input.workspace) await this.assertWorkspaceBinding(project, input.workspace);
+    const session = await this.assertCurrentSession(input, input.now ?? Date.now(), false);
+    await this.assertWorkspaceBinding(project, session.workspace);
     await this.sessions.heartbeat({
       projectId: input.projectId,
       workId: input.workId,
@@ -593,6 +595,7 @@ export class DesktopDevelopmentLoopService {
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const session = await this.assertCurrentSession(input, now, true);
+    await this.assertWorkspaceBinding(project, session.workspace);
     if (!session.workspace.worktreePresent) {
       throw new Error('Permanent worktree is missing; rebuild it from the last committed SHA before reporting');
     }
@@ -660,8 +663,9 @@ export class DesktopDevelopmentLoopService {
   async confirmMerge(input: ConfirmDesktopMergeInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
-    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const session = await this.assertCurrentSession(input, now, true);
+    await this.assertWorkspaceBinding(project, session.workspace);
     const exactSha = input.exactSha.toLowerCase();
     this.assertSessionImplementationSha(session, exactSha);
     const identity = this.managedIdentity(input);
@@ -702,6 +706,7 @@ export class DesktopDevelopmentLoopService {
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const session = await this.assertCurrentSession(input, now, true);
+    await this.assertWorkspaceBinding(project, session.workspace);
     const exactSha = input.exactSha.toLowerCase();
     const mergeCommitSha = input.mergeCommitSha.toLowerCase();
     this.assertSessionImplementationSha(session, exactSha);
@@ -916,6 +921,14 @@ export class DesktopDevelopmentLoopService {
     if (workspace.repository.fullName.toLowerCase() !== expectedFullName.toLowerCase()) {
       throw new Error('Workspace repository does not match the project binding');
     }
+  }
+
+  private async assertWorkspaceBinding(
+    project: Awaited<ReturnType<DesktopDevelopmentLoopService['requireConfiguredProject']>>,
+    workspace: WorkspaceBinding,
+  ): Promise<void> {
+    this.assertWorkspaceRepository(project.desktopDevelopment.repository.fullName, workspace);
+    await this.workspacePathVerifier(project.sourcePath, workspace.worktreePath);
   }
 
   private assertSessionImplementationSha(session: DesktopSessionBinding, exactSha: string): void {

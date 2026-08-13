@@ -95,6 +95,8 @@ describe(
         reviewDispatcher,
         backlogStore,
         workflowStore,
+        undefined,
+        async () => {},
       );
       reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork, reviewDispatcher);
     });
