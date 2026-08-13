@@ -577,6 +577,10 @@ describe(
 
     test('derives reviewer identity from the Review Hub and writes one canonical review-completed evidence row', async () => {
       const { project, bundle } = await arrange();
+      await externalProjects.updateDesktopDevelopment(project.id, {
+        expectedVersion: project.desktopDevelopment.version,
+        defaultReviewRecorder: 'cat-kimi',
+      });
       let packet = await service.connect({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -699,11 +703,11 @@ describe(
       });
       assert.equal(reviewDispatches.at(-1).stage, 'consensus');
       assert.deepEqual(reviewDispatches.at(-1).reviewerCatIds, ['cat-codex', 'cat-kimi']);
-      assert.equal(reviewDispatches.at(-1).recorderCatId, 'cat-codex');
+      assert.equal(reviewDispatches.at(-1).recorderCatId, 'cat-kimi');
       const completed = await reviewCoordinator.publishConsensus({
         ownerUserId: 'owner-1',
         threadId: hubThreadId,
-        reviewerCatId: 'cat-codex',
+        reviewerCatId: 'cat-kimi',
         roundId,
         expectedRoundVersion: round.version,
         expectedManagedWorkVersion: packet.managedWorkVersion,

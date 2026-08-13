@@ -34,6 +34,8 @@ export interface DesktopDevelopmentProjectBinding {
   readonly defaultBranch: string;
   readonly developmentActor: DesktopDevelopmentActor;
   readonly defaultReviewers: readonly CatId[];
+  /** Reviewer responsible for publishing the final consensus to the Review Hub. */
+  readonly defaultReviewRecorder?: CatId;
   readonly mergeMode: DesktopDevelopmentMergeMode;
   readonly successfulManualPilotCount: 0 | 1 | 2;
   /** Work ids that already contributed to the capped pilot count. */
@@ -48,6 +50,7 @@ export interface CreateDesktopDevelopmentProjectBindingInput {
   readonly repository: string;
   readonly defaultBranch: string;
   readonly defaultReviewers: readonly string[];
+  readonly defaultReviewRecorder?: string;
   readonly allowPush?: boolean;
   readonly allowPullRequest?: boolean;
 }
@@ -56,6 +59,7 @@ export interface DesktopDevelopmentPolicyUpdate {
   readonly expectedVersion: number;
   readonly defaultBranch?: string;
   readonly defaultReviewers?: readonly string[];
+  readonly defaultReviewRecorder?: string;
   readonly mergeMode?: DesktopDevelopmentMergeMode;
   readonly allowPush?: boolean;
   readonly allowPullRequest?: boolean;
@@ -205,6 +209,14 @@ function normalizeReviewers(values: readonly string[]): readonly CatId[] {
   return unique as CatId[];
 }
 
+function normalizeReviewRecorder(value: string | undefined, reviewers: readonly CatId[]): CatId {
+  const recorder = value?.trim() || reviewers[0];
+  if (!recorder || !reviewers.includes(recorder as CatId)) {
+    throw new Error('Review recorder must be one of the default reviewers');
+  }
+  return recorder as CatId;
+}
+
 function assertPullRequestPolicy(allowPush: boolean, allowPullRequest: boolean): void {
   if (allowPullRequest && !allowPush) {
     throw new Error('Pull request automation requires push permission');
@@ -219,12 +231,14 @@ export function createDesktopDevelopmentProjectBinding(
   const allowPullRequest = input.allowPullRequest ?? false;
   assertPullRequestPolicy(allowPush, allowPullRequest);
 
+  const defaultReviewers = normalizeReviewers(input.defaultReviewers);
   return {
     protocolVersion: DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
     repository: normalizeGitHubRepository(input.repository),
     defaultBranch: input.defaultBranch.trim(),
     developmentActor: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
-    defaultReviewers: normalizeReviewers(input.defaultReviewers),
+    defaultReviewers,
+    defaultReviewRecorder: normalizeReviewRecorder(input.defaultReviewRecorder, defaultReviewers),
     mergeMode: 'manual_confirm_in_chatgpt',
     successfulManualPilotCount: 0,
     successfulManualPilotWorkIds: [],
@@ -251,12 +265,22 @@ export function applyDesktopDevelopmentPolicyUpdate(
   const allowPush = update.allowPush ?? binding.allowPush;
   const allowPullRequest = update.allowPullRequest ?? binding.allowPullRequest;
   assertPullRequestPolicy(allowPush, allowPullRequest);
+  const defaultReviewers =
+    update.defaultReviewers === undefined ? binding.defaultReviewers : normalizeReviewers(update.defaultReviewers);
+  const retainedReviewRecorder = binding.defaultReviewRecorder;
+  const defaultReviewRecorder = normalizeReviewRecorder(
+    update.defaultReviewRecorder ??
+      (retainedReviewRecorder && defaultReviewers.includes(retainedReviewRecorder)
+        ? retainedReviewRecorder
+        : defaultReviewers[0]),
+    defaultReviewers,
+  );
 
   return {
     ...binding,
     defaultBranch,
-    defaultReviewers:
-      update.defaultReviewers === undefined ? binding.defaultReviewers : normalizeReviewers(update.defaultReviewers),
+    defaultReviewers,
+    defaultReviewRecorder,
     mergeMode,
     allowPush,
     allowPullRequest,

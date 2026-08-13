@@ -571,7 +571,10 @@ export class DesktopDevelopmentLoopService {
       evidence: { kind: 'implementation_committed', exactSha },
       now,
     });
-    const recorderCatId = input.recorderCatId ?? project.desktopDevelopment.defaultReviewers[0];
+    const recorderCatId =
+      input.recorderCatId ??
+      project.desktopDevelopment.defaultReviewRecorder ??
+      project.desktopDevelopment.defaultReviewers[0];
     if (!recorderCatId) throw new Error('Review recorder is unavailable');
     const round = await this.reviewRounds.createRound({
       ownerUserId: input.ownerUserId,

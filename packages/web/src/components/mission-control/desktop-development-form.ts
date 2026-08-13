@@ -5,6 +5,7 @@ export interface DesktopDevelopmentFormValues {
   repository: string;
   defaultBranch: string;
   reviewerIds: readonly string[];
+  reviewRecorderId: string;
   allowPush: boolean;
   allowPullRequest: boolean;
 }
@@ -19,10 +20,15 @@ export function buildDesktopDevelopmentCreateInput(
   if (!repository) throw new Error('GitHub repository is required');
   if (!defaultBranch) throw new Error('Default branch is required');
   if (defaultReviewers.length < 2) throw new Error('Select at least two reviewers');
+  const defaultReviewRecorder = values.reviewRecorderId.trim() || defaultReviewers[0];
+  if (!defaultReviewRecorder || !defaultReviewers.includes(defaultReviewRecorder)) {
+    throw new Error('Review recorder must be one of the selected reviewers');
+  }
   return {
     repository,
     defaultBranch,
     defaultReviewers,
+    defaultReviewRecorder,
     allowPush: values.allowPush,
     allowPullRequest: values.allowPullRequest,
   };

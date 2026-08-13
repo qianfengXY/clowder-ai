@@ -52,6 +52,7 @@ describe('ExternalProjectStore', () => {
     assert.equal(project.desktopDevelopment.repository.fullName, 'qianfengXY/clowder-ai');
     assert.equal(project.desktopDevelopment.mergeMode, 'manual_confirm_in_chatgpt');
     assert.equal(project.desktopDevelopment.successfulManualPilotCount, 0);
+    assert.equal(project.desktopDevelopment.defaultReviewRecorder, 'cat-idwxwjba');
     assert.deepEqual((await store.getById(project.id)).desktopDevelopment, project.desktopDevelopment);
   });
 
@@ -135,12 +136,27 @@ describe('ExternalProjectStore', () => {
     const updated = await store.updateDesktopDevelopment(created.id, {
       expectedVersion: 1,
       allowPush: true,
+      defaultReviewRecorder: 'cat-b',
     });
     assert.equal(updated.desktopDevelopment.allowPush, true);
+    assert.equal(updated.desktopDevelopment.defaultReviewRecorder, 'cat-b');
     assert.equal(updated.desktopDevelopment.version, 2);
     await assert.rejects(
       () => store.updateDesktopDevelopment(created.id, { expectedVersion: 1, allowPush: false }),
       /version conflict/i,
+    );
+    const reviewersReplaced = await store.updateDesktopDevelopment(created.id, {
+      expectedVersion: 2,
+      defaultReviewers: ['cat-c', 'cat-d'],
+    });
+    assert.equal(reviewersReplaced.desktopDevelopment.defaultReviewRecorder, 'cat-c');
+    await assert.rejects(
+      () =>
+        store.updateDesktopDevelopment(created.id, {
+          expectedVersion: 3,
+          defaultReviewRecorder: 'cat-a',
+        }),
+      /recorder must be one of the default reviewers/i,
     );
   });
 

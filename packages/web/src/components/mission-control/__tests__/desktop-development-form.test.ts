@@ -9,6 +9,7 @@ describe('F289 desktop development project form', () => {
         repository: '',
         defaultBranch: '',
         reviewerIds: [],
+        reviewRecorderId: '',
         allowPush: false,
         allowPullRequest: false,
       }),
@@ -22,6 +23,7 @@ describe('F289 desktop development project form', () => {
         repository: 'owner/repo',
         defaultBranch: 'main',
         reviewerIds: ['cat-a', 'cat-b'],
+        reviewRecorderId: 'cat-b',
         allowPush: true,
         allowPullRequest: true,
       }),
@@ -29,6 +31,7 @@ describe('F289 desktop development project form', () => {
       repository: 'owner/repo',
       defaultBranch: 'main',
       defaultReviewers: ['cat-a', 'cat-b'],
+      defaultReviewRecorder: 'cat-b',
       allowPush: true,
       allowPullRequest: true,
     });
@@ -41,6 +44,7 @@ describe('F289 desktop development project form', () => {
         repository: '',
         defaultBranch: 'main',
         reviewerIds: ['cat-a', 'cat-b'],
+        reviewRecorderId: 'cat-a',
         allowPush: false,
         allowPullRequest: false,
       }),
@@ -51,6 +55,7 @@ describe('F289 desktop development project form', () => {
         repository: 'owner/repo',
         defaultBranch: '',
         reviewerIds: ['cat-a', 'cat-b'],
+        reviewRecorderId: 'cat-a',
         allowPush: false,
         allowPullRequest: false,
       }),
@@ -61,10 +66,22 @@ describe('F289 desktop development project form', () => {
         repository: 'owner/repo',
         defaultBranch: 'main',
         reviewerIds: ['cat-a', 'cat-a'],
+        reviewRecorderId: 'cat-a',
         allowPush: false,
         allowPullRequest: false,
       }),
     ).toThrow(/two reviewers/i);
+    expect(() =>
+      buildDesktopDevelopmentCreateInput({
+        enabled: true,
+        repository: 'owner/repo',
+        defaultBranch: 'main',
+        reviewerIds: ['cat-a', 'cat-b'],
+        reviewRecorderId: 'cat-c',
+        allowPush: false,
+        allowPullRequest: false,
+      }),
+    ).toThrow(/recorder.*selected reviewers/i);
   });
 
   it('builds an idempotent final-acceptance request from the current Resume Packet', () => {

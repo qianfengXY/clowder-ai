@@ -2,7 +2,8 @@
 
 import type { DesktopDevelopmentResumePacket, ExternalProject, ProjectReviewHubView } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
@@ -19,7 +20,26 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [editingReviewCats, setEditingReviewCats] = useState(false);
+  const [reviewerIds, setReviewerIds] = useState<string[]>([]);
+  const [reviewRecorderId, setReviewRecorderId] = useState('');
   const binding = project.desktopDevelopment;
+  const { cats } = useCatData();
+  const catNames = useMemo(() => new Map(cats.map((cat) => [cat.id, cat.displayName])), [cats]);
+  const configurableReviewCats = useMemo(
+    () => cats.filter((cat) => cat.roster?.available !== false || reviewerIds.includes(cat.id)),
+    [cats, reviewerIds],
+  );
+  const missingReviewerIds = useMemo(
+    () => reviewerIds.filter((reviewerId) => !catNames.has(reviewerId)),
+    [catNames, reviewerIds],
+  );
+
+  useEffect(() => {
+    if (!binding) return;
+    setReviewerIds([...binding.defaultReviewers]);
+    setReviewRecorderId(binding.defaultReviewRecorder ?? binding.defaultReviewers[0] ?? '');
+  }, [binding]);
 
   const loadWorks = useCallback(async () => {
     if (!project.desktopDevelopment) {
@@ -86,6 +106,54 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     }
   };
 
+  const toggleReviewer = (catId: string) => {
+    setReviewerIds((current) => {
+      const next = current.includes(catId) ? current.filter((id) => id !== catId) : [...current, catId];
+      if (!next.includes(reviewRecorderId)) setReviewRecorderId(next[0] ?? '');
+      return next;
+    });
+  };
+
+  const toggleReviewCatEditor = () => {
+    if (editingReviewCats && binding) {
+      setReviewerIds([...binding.defaultReviewers]);
+      setReviewRecorderId(binding.defaultReviewRecorder ?? binding.defaultReviewers[0] ?? '');
+    }
+    setEditingReviewCats((current) => !current);
+  };
+
+  const saveReviewCats = async () => {
+    if (!binding) return;
+    const uniqueReviewers = [...new Set(reviewerIds)];
+    const validationError = validateReviewCatSelection(uniqueReviewers, reviewRecorderId);
+    if (validationError) {
+      setStatus(validationError);
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const response = await apiFetch(`/api/external-projects/${project.id}/development-loop`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedVersion: binding.version,
+          defaultReviewers: uniqueReviewers,
+          defaultReviewRecorder: reviewRecorderId,
+        }),
+      });
+      const body = (await response.json()) as { project?: ExternalProject; error?: string };
+      if (!response.ok || !body.project) throw new Error(body.error ?? '无法保存 Review 猫猫配置');
+      setProjects(projects.map((item) => (item.id === body.project?.id ? body.project : item)));
+      setEditingReviewCats(false);
+      setStatus('Review 猫猫配置已保存，将从下一轮检视开始生效');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法保存 Review 猫猫配置');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const recordAcceptance = async (work: DesktopDevelopmentResumePacket, accepted: boolean) => {
     setAcceptingWorkId(work.workId);
     setStatus(null);
@@ -144,14 +212,97 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       </dl>
 
       <div>
-        <div className="text-xs font-medium text-cafe-secondary">默认 Review 猫猫</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-medium text-cafe-secondary">默认 Review 猫猫</div>
+          <button
+            type="button"
+            onClick={toggleReviewCatEditor}
+            disabled={busy}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-micro font-medium text-cafe-secondary disabled:opacity-40"
+          >
+            {editingReviewCats ? '取消配置' : '配置'}
+          </button>
+        </div>
         <div className="mt-2 flex flex-wrap gap-2">
           {binding.defaultReviewers.map((reviewer) => (
             <span key={reviewer} className="rounded-full bg-[var(--console-hover-bg)] px-3 py-1 text-xs text-cafe">
-              {reviewer}
+              {catNames.get(reviewer) ?? reviewer}
             </span>
           ))}
         </div>
+        <p className="mt-2 text-xs text-cafe-secondary">
+          达成共识后，由{' '}
+          <span className="font-medium text-cafe">
+            {catNames.get(binding.defaultReviewRecorder ?? binding.defaultReviewers[0] ?? '') ??
+              binding.defaultReviewRecorder ??
+              binding.defaultReviewers[0]}
+          </span>{' '}
+          提交最终检视意见。
+        </p>
+        {editingReviewCats && (
+          <div className="mt-3 space-y-3 rounded-[10px] bg-[var(--console-shell-bg)] p-3">
+            <fieldset>
+              <legend className="text-xs font-medium text-cafe-secondary">参与 Review（至少两只）</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {configurableReviewCats.map((cat) => {
+                  const selected = reviewerIds.includes(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggleReviewer(cat.id)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${
+                        selected
+                          ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                          : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
+                      }`}
+                    >
+                      {cat.displayName}
+                      {cat.roster?.available === false ? '（当前不可用）' : ''}
+                    </button>
+                  );
+                })}
+                {missingReviewerIds.map((reviewerId) => (
+                  <button
+                    key={reviewerId}
+                    type="button"
+                    aria-pressed="true"
+                    onClick={() => toggleReviewer(reviewerId)}
+                    className="rounded-full bg-[var(--mc-accent)] px-3 py-1 text-xs font-medium text-[var(--cafe-surface)]"
+                  >
+                    {reviewerId}（当前不可用）
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <label className="block">
+              <span className="text-xs font-medium text-cafe-secondary">默认提交检视意见猫猫</span>
+              <select
+                value={reviewRecorderId}
+                onChange={(event) => setReviewRecorderId(event.target.value)}
+                className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+              >
+                {reviewerIds.map((reviewerId) => (
+                  <option key={reviewerId} value={reviewerId}>
+                    {catNames.get(reviewerId) ?? reviewerId}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-micro text-cafe-secondary">
+                这只猫猫也必须参与 Review，才能依据完整讨论提交共识。
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={() => void saveReviewCats()}
+              disabled={busy || reviewerIds.length < 2 || !reviewerIds.includes(reviewRecorderId)}
+              className="rounded-lg bg-[var(--mc-accent)] px-4 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+            >
+              {busy ? '保存中...' : '保存 Review 配置'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -236,6 +387,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       {status && <p className="text-xs text-cafe-secondary">{status}</p>}
     </section>
   );
+}
+
+function validateReviewCatSelection(reviewers: readonly string[], recorderId: string): string | null {
+  if (reviewers.length < 2) return '请至少选择两只不同的 Review 猫猫';
+  if (!reviewers.includes(recorderId)) return '提交检视意见猫猫必须是参与本轮 Review 的猫猫';
+  return null;
 }
 
 async function ensureReviewHub(projectId: string): Promise<ProjectReviewHubView> {

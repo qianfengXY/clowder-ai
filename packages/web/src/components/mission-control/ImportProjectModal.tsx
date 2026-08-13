@@ -19,6 +19,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
   const [repository, setRepository] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [reviewerIds, setReviewerIds] = useState<string[]>([]);
+  const [reviewRecorderId, setReviewRecorderId] = useState('');
   const [allowPush, setAllowPush] = useState(true);
   const [allowPullRequest, setAllowPullRequest] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -30,6 +31,14 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
     if (!enableDesktopLoop || reviewerIds.length > 0 || reviewableCats.length < 2) return;
     setReviewerIds(reviewableCats.slice(0, 2).map((cat) => cat.id));
   }, [enableDesktopLoop, reviewerIds.length, reviewableCats]);
+
+  useEffect(() => {
+    if (reviewerIds.length === 0) {
+      setReviewRecorderId('');
+    } else if (!reviewerIds.includes(reviewRecorderId)) {
+      setReviewRecorderId(reviewerIds[0] ?? '');
+    }
+  }, [reviewRecorderId, reviewerIds]);
 
   const handleSubmit = async () => {
     if (!name.trim() || !sourcePath.trim()) {
@@ -44,6 +53,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
         repository,
         defaultBranch,
         reviewerIds,
+        reviewRecorderId,
         allowPush,
         allowPullRequest,
       });
@@ -163,6 +173,26 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
                   })}
                 </div>
               </fieldset>
+              <label className="block">
+                <span className="text-xs font-medium text-cafe-secondary">默认提交检视意见猫猫</span>
+                <select
+                  value={reviewRecorderId}
+                  onChange={(event) => setReviewRecorderId(event.target.value)}
+                  className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                >
+                  {reviewerIds.map((reviewerId) => {
+                    const cat = reviewableCats.find((item) => item.id === reviewerId);
+                    return (
+                      <option key={reviewerId} value={reviewerId}>
+                        {cat?.displayName ?? reviewerId}
+                      </option>
+                    );
+                  })}
+                </select>
+                <span className="mt-1 block text-micro text-cafe-secondary">
+                  Review 达成共识后，由这只猫猫把最终意见提交到 Review Hub。
+                </span>
+              </label>
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="flex items-center gap-2 text-xs text-cafe-secondary">
                   <input

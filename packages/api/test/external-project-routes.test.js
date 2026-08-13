@@ -95,10 +95,16 @@ describe('External Project Routes', () => {
       method: 'PATCH',
       url: `/api/external-projects/${projectId}/development-loop`,
       headers: H,
-      payload: { expectedVersion: 1, allowPush: true },
+      payload: {
+        expectedVersion: 1,
+        allowPush: true,
+        defaultReviewers: ['cat-a', 'cat-b'],
+        defaultReviewRecorder: 'cat-b',
+      },
     });
     assert.equal(updated.statusCode, 200);
     assert.equal(updated.json().project.desktopDevelopment.allowPush, true);
+    assert.equal(updated.json().project.desktopDevelopment.defaultReviewRecorder, 'cat-b');
     assert.equal(updated.json().project.desktopDevelopment.version, 2);
 
     const stale = await app.inject({
