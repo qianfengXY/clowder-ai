@@ -12,6 +12,8 @@ export interface ReviewRoundDispatchInput {
   readonly exactSha: string;
   readonly reviewerCatIds: readonly CatId[];
   readonly recorderCatId: CatId;
+  /** Server-derived retry identity. Omitted for the first canonical delivery. */
+  readonly deliveryKey?: string;
 }
 
 export interface IReviewRoundStageDispatcher {
@@ -59,7 +61,7 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
       payload: {
         content: buildStageMessage(input, handles),
         threadId: input.reviewHubThreadId,
-        idempotencyKey: deterministicMessageId(input.roundId, input.stage),
+        idempotencyKey: deterministicMessageId(input.roundId, input.stage, input.deliveryKey),
         messageDisposition: 'next_work',
         serverAuthoredKind: 'review_orchestration',
       },
@@ -82,9 +84,12 @@ function buildStageMessage(input: ReviewRoundDispatchInput, handles: readonly st
   return `${routing}\nF289 automatic review — consensus stage.\n${identity}\nYou are the server-designated recorder. Read the barrier-safe round and drafts, consolidate one exact-SHA verdict, and publish it with cat_cafe_review_consensus_publish. Do not publish an Issue, merge, push, or deploy.`;
 }
 
-function deterministicMessageId(roundId: string, stage: ReviewRoundDispatchStage): string {
+function deterministicMessageId(roundId: string, stage: ReviewRoundDispatchStage, deliveryKey?: string): string {
+  const identity = deliveryKey
+    ? `f289-review-dispatch:${roundId}:${stage}:${deliveryKey}`
+    : `f289-review-dispatch:${roundId}:${stage}`;
   const hex = createHash('sha256')
-    .update(`f289-review-dispatch:${roundId}:${stage}`)
+    .update(identity)
     .digest('hex')
     .slice(0, 32)
     .split('');

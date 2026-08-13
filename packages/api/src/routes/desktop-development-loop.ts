@@ -3,12 +3,14 @@ import { DESKTOP_DEVELOPMENT_PROTOCOL_VERSION } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { DesktopDevelopmentLoopService } from '../domains/desktop-development-loop/desktop-development-loop-service.js';
+import type { ReviewRoundCoordinatorService } from '../domains/desktop-development-loop/review-round-coordinator-service.js';
 import type { ProjectReviewHubService } from '../domains/projects/project-review-hub-service.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 
 export interface DesktopDevelopmentLoopRoutesOptions {
   projectReviewHubService: ProjectReviewHubService;
   desktopDevelopmentLoopService?: DesktopDevelopmentLoopService;
+  reviewRoundCoordinatorService?: ReviewRoundCoordinatorService;
   desktopDevelopmentToken?: string;
   desktopDevelopmentOwnerUserId?: string;
 }
@@ -109,6 +111,7 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
   const {
     projectReviewHubService,
     desktopDevelopmentLoopService,
+    reviewRoundCoordinatorService,
     desktopDevelopmentToken,
     desktopDevelopmentOwnerUserId,
   } = options;
@@ -367,6 +370,32 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
           ownerUserId,
         });
         return reply.send({ state });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/review-rounds/:roundId/replay',
+    async (request, reply) => {
+      const ownerUserId = resolveStrictUserId(request);
+      if (!ownerUserId) return reply.status(401).send({ error: 'Identity required' });
+      if (!reviewRoundCoordinatorService) {
+        return reply.status(503).send({ error: 'Review coordination capability is unavailable' });
+      }
+      const params = z.object({ projectId: idSchema, roundId: idSchema }).strict().safeParse(request.params);
+      const body = z.object({ protocolVersion: protocolSchema }).strict().safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      if (body.data.protocolVersion !== DESKTOP_DEVELOPMENT_PROTOCOL_VERSION) {
+        return sendError(reply, new Error('Desktop development protocol mismatch'));
+      }
+      try {
+        const reviewRound = await reviewRoundCoordinatorService.replayIndependent({
+          ...params.data,
+          ownerUserId,
+        });
+        return reply.send({ reviewRound, replayed: true });
       } catch (error) {
         return sendError(reply, error);
       }

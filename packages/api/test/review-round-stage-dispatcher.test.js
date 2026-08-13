@@ -34,6 +34,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       Array(3).fill('project-review-hub:project-1'),
     );
     assert.equal(requests[0].headers['x-cat-cafe-user'], 'owner-1');
+    assert.equal(requests[0].payload.idempotencyKey, '11991fed-3249-5197-8c55-b2ecd003663e');
     assert.equal(
       requests.every((request) => request.payload.serverAuthoredKind === 'review_orchestration'),
       true,
@@ -53,6 +54,11 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       ),
       true,
     );
+
+    await dispatcher.dispatch({ ...base, stage: 'independent', deliveryKey: 'replay:1' });
+    assert.notEqual(requests[0].payload.idempotencyKey, requests[3].payload.idempotencyKey);
+    await dispatcher.dispatch({ ...base, stage: 'independent', deliveryKey: 'replay:1' });
+    assert.equal(requests[3].payload.idempotencyKey, requests[4].payload.idempotencyKey);
   });
 
   test('fails closed for unroutable cats or rejected message ingress', async () => {

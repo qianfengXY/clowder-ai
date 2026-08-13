@@ -196,6 +196,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         delete: async () => {},
         resolveWorkingDirectory: () => '/tmp/test',
       },
+      messageStore: { getById: async () => null },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
     };

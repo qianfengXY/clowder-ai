@@ -4398,6 +4398,7 @@ async function main(): Promise<void> {
   await app.register(desktopDevelopmentLoopRoutes, {
     projectReviewHubService,
     ...(desktopDevelopmentLoopService ? { desktopDevelopmentLoopService } : {}),
+    ...(reviewRoundCoordinatorService ? { reviewRoundCoordinatorService } : {}),
     desktopDevelopmentToken: process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN,
     desktopDevelopmentOwnerUserId: privateUserId,
   });

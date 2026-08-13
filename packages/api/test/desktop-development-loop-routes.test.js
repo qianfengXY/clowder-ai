@@ -215,9 +215,16 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       },
     };
     const app = Fastify();
+    const reviewRoundCoordinatorService = {
+      replayIndependent: async (input) => {
+        calls.push(['replayIndependent', input]);
+        return { round: { roundId: input.roundId, projectId: input.projectId, phase: 'independent' } };
+      },
+    };
     await app.register(desktopDevelopmentLoopRoutes, {
       projectReviewHubService: { ensureForProject: async () => ({}) },
       desktopDevelopmentLoopService: service,
+      reviewRoundCoordinatorService,
       desktopDevelopmentToken: 'desktop-secret',
       desktopDevelopmentOwnerUserId: 'server-owner',
       ...options,
@@ -404,6 +411,28 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           backlogItemId: 'backlog-1',
         },
       ],
+    ]);
+  });
+
+  test('replays a Review round only through strict Cat Cafe identity', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/review-rounds/round-1/replay',
+      payload: { protocolVersion: 1 },
+    });
+    assert.equal(response.statusCode, 401);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/review-rounds/round-1/replay',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: { protocolVersion: 1 },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().replayed, true);
+    assert.deepEqual(calls, [
+      ['replayIndependent', { ownerUserId: 'operator-1', projectId: 'project-1', roundId: 'round-1' }],
     ]);
   });
 

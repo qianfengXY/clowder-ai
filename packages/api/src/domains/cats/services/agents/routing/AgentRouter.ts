@@ -1400,6 +1400,7 @@ export class AgentRouter {
       invocationDeps: {
         registry: this.registry,
         sessionManager: this.sessionManager,
+        messageStore: this.messageStore,
         threadStore: this.threadStore,
         apiUrl: `http://127.0.0.1:${apiPort}`,
         ...(this.turnExecutionStore ? { turnExecutionStore: this.turnExecutionStore } : {}),

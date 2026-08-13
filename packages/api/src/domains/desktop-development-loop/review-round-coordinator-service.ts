@@ -38,6 +38,12 @@ export interface PublishCoordinatedReviewConsensusInput extends FinishCoordinate
   readonly resolvedFindingIds: readonly string[];
 }
 
+export interface ReplayIndependentReviewInput {
+  readonly ownerUserId: string;
+  readonly projectId: string;
+  readonly roundId: string;
+}
+
 export class ReviewRoundCoordinatorService {
   constructor(
     private readonly reviewRounds: IReviewRoundStore,
@@ -166,6 +172,41 @@ export class ReviewRoundCoordinatorService {
     return completed;
   }
 
+  async replayIndependent(input: ReplayIndependentReviewInput): Promise<ReviewRoundSafeView> {
+    const safe = await this.reviewRounds.readSafe({ ownerUserId: input.ownerUserId, roundId: input.roundId });
+    const { round } = safe;
+    if (round.projectId !== input.projectId) throw new Error('Review round does not belong to this project');
+    if (!safe.currentForWork) throw new Error('Only the current Review round can be replayed');
+    if (round.phase !== 'independent') throw new Error('Only the independent Review stage can be replayed');
+    if (round.independentFinishedCatIds.length > 0) {
+      throw new Error('Independent Review replay requires no finished reviewer');
+    }
+    const drafts = await Promise.all(
+      round.reviewerCatIds.map((reviewerCatId) =>
+        this.reviewRounds.readPrivateDraft({
+          ownerUserId: input.ownerUserId,
+          roundId: input.roundId,
+          reviewerCatId,
+          draftOwnerCatId: reviewerCatId,
+        }),
+      ),
+    );
+    if (drafts.some(Boolean)) throw new Error('Independent Review replay requires no submitted draft');
+
+    await this.reviewDispatcher.dispatch({
+      stage: 'independent',
+      ownerUserId: round.ownerUserId,
+      projectId: round.projectId,
+      reviewHubThreadId: round.reviewThreadId ?? buildProjectReviewHubId(round.projectId),
+      roundId: round.roundId,
+      exactSha: round.exactSha,
+      reviewerCatIds: round.reviewerCatIds,
+      recorderCatId: round.recorderCatId,
+      deliveryKey: `replay:${round.version}`,
+    });
+    return safe;
+  }
+
   private async requireReviewerInHub(input: ReviewPrincipalInput): Promise<ReviewRoundSafeView> {
     const safe = await this.reviewRounds.readSafe({ ownerUserId: input.ownerUserId, roundId: input.roundId });
     const legacyReviewHubId = buildProjectReviewHubId(safe.round.projectId);
@@ -178,5 +219,4 @@ export class ReviewRoundCoordinatorService {
     }
     return safe;
   }
-
 }

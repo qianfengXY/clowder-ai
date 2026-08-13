@@ -89,6 +89,7 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
@@ -554,6 +555,7 @@ async function syncAntigravityRuntimeMetadata(input: {
 export interface InvocationDeps {
   readonly registry: InvocationRegistry;
   readonly sessionManager: SessionManager;
+  readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly threadStore: IThreadStore | null;
   readonly apiUrl: string;
   /** Durable child-execution lifecycle truth. Optional only for isolated tests/legacy wiring. */
@@ -845,6 +847,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     ownerUserId: userId,
     threadId,
     executorCatId: catId,
+    messageStore: deps.messageStore,
+    ...(params.executionCausal?.triggerMessageId ? { triggerMessageId: params.executionCausal.triggerMessageId } : {}),
     threadStore,
     ...(deps.workflowSopStore ? { workflowSopStore: deps.workflowSopStore } : {}),
   });
