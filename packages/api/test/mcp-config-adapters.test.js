@@ -555,7 +555,7 @@ describe('writeKimiMcpConfig', () => {
     });
   });
 
-  it('injects cat-cafe callback env placeholders for kimi cat-cafe servers', async () => {
+  it('keeps Kimi callback credentials invocation-scoped instead of persisting them', async () => {
     const file = join(dir, 'mcp.json');
     await writeKimiMcpConfig(file, [
       {
@@ -564,18 +564,26 @@ describe('writeKimiMcpConfig', () => {
         args: ['index.js'],
         enabled: true,
         source: 'cat-cafe',
+        env: {
+          CAT_CAFE_API_URL: 'http://stale.example',
+          CAT_CAFE_INVOCATION_ID: 'stale-invocation',
+          CAT_CAFE_CALLBACK_TOKEN: 'stale-token',
+          KEEP_ME: 'yes',
+        },
       },
     ]);
 
     const raw = JSON.parse(await readFile(file, 'utf-8'));
     const kimiEnv = raw.mcpServers['cat-cafe'].env;
-    assert.equal(kimiEnv.CAT_CAFE_API_URL, '${CAT_CAFE_API_URL}');
-    assert.equal(kimiEnv.CAT_CAFE_INVOCATION_ID, '${CAT_CAFE_INVOCATION_ID}');
-    assert.equal(kimiEnv.CAT_CAFE_CALLBACK_TOKEN, '${CAT_CAFE_CALLBACK_TOKEN}');
-    assert.equal(kimiEnv.CAT_CAFE_USER_ID, '${CAT_CAFE_USER_ID}');
-    assert.equal(kimiEnv.CAT_CAFE_CAT_ID, '${CAT_CAFE_CAT_ID}');
-    assert.equal(kimiEnv.CAT_CAFE_THREAD_ID, '${CAT_CAFE_THREAD_ID}');
-    assert.equal(kimiEnv.CAT_CAFE_SIGNAL_USER, '${CAT_CAFE_SIGNAL_USER}');
+    assert.equal(kimiEnv.CAT_CAFE_API_URL, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_INVOCATION_ID, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_USER_ID, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_CAT_ID, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_THREAD_ID, undefined);
+    assert.equal(kimiEnv.CAT_CAFE_SIGNAL_USER, undefined);
+    assert.equal(kimiEnv.KEEP_ME, 'yes');
+    assert.ok(kimiEnv.ALLOWED_WORKSPACE_DIRS);
   });
 
   // F213 Phase B: L5 cleanup applied to Kimi writer (.kimi/mcp.json).

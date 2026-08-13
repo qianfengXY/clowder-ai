@@ -28,6 +28,7 @@ import {
   readKimiMcpConfig,
   writeAntigravityMcpConfig,
   writeGeminiMcpConfig,
+  writeKimiMcpConfig,
 } from './mcp-config-adapters.js';
 import { CAT_CAFE_SPLIT_ENTRYPOINTS } from './mcp-constants.js';
 import {
@@ -179,16 +180,18 @@ export function comparePencilDirs(a: string, b: string): number {
  * invoke-time MCP override mechanism are listed here:
  *
  *   - Gemini: `gemini` CLI reads `.gemini/settings.json` natively; no --mcp-config flag.
+ *   - Kimi Code: `kimi` reads `$KIMI_CODE_HOME/mcp.json`; no override flag.
  *   - Antigravity: `agy` CLI reads `~/.gemini/antigravity/mcp_config.json`; no override flag.
  *
  * NOT listed (all use invoke-time injection, persistent write is redundant):
  *   - Claude: `--mcp-config JSON --strict-mcp-config` at invoke time
  *   - Codex: `--config mcp_servers.X...` inline overrides at invoke time
- *   - Kimi: temp mcp.json via `writeMcpConfigFile` + `--mcp-config-file`
+ *   - Legacy Kimi: temp mcp.json via `writeMcpConfigFile` + `--mcp-config-file`
  *   - OpenCode: temp opencode.json via `writeOpenCodeRuntimeConfig` + `OPENCODE_CONFIG`
  */
 const PROVIDER_WRITERS = {
   google: writeGeminiMcpConfig,
+  kimi: writeKimiMcpConfig,
   antigravity: writeAntigravityMcpConfig,
 } as const;
 
@@ -1543,10 +1546,11 @@ export function healCatCafeMcpTopology(
  *
  * Only providers that read persistent on-disk config files at startup
  * (no invoke-time MCP override CLI flag) are listed here.
- * Claude, Codex, Kimi, OpenCode all do invoke-time injection and are excluded.
+ * Claude, Codex, legacy Kimi, and OpenCode do invoke-time injection and are excluded.
  */
 export interface CliConfigPaths {
   google: string; // e.g. <projectRoot>/.gemini/settings.json
+  kimi?: string; // e.g. $KIMI_CODE_HOME/mcp.json
   antigravity?: string; // e.g. ~/.gemini/antigravity/mcp_config.json
 }
 
@@ -1742,8 +1746,8 @@ export async function resolveMachineSpecificServers(
 /**
  * Generate persistent CLI config files from capabilities.json.
  *
- * Only writes configs for providers in PROVIDER_WRITERS (Gemini, Antigravity).
- * Claude, Codex, Kimi, OpenCode all use invoke-time injection and are skipped.
+ * Only writes configs for providers in PROVIDER_WRITERS (Gemini, Kimi Code, Antigravity).
+ * Claude, Codex, legacy Kimi, and OpenCode use invoke-time injection and are skipped.
  */
 export async function generateCliConfigs(
   config: CapabilitiesConfig,

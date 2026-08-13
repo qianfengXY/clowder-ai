@@ -159,7 +159,10 @@ export class KimiAgentService implements AgentService {
     // before the not-found early-return (kimi/kimi-cli both absent + mcpServerPath set),
     // the temp dir would leak — finally cleanup (line ~440) is gated by the try block below
     // and the early-return jumps over it. Source clowder-ai#944 has the same regression.
-    const tempMcpConfig = this.mcpServerPath
+    // Official Kimi Code reads $KIMI_CODE_HOME/mcp.json and has no
+    // --mcp-config-file flag. Its MCP subprocesses inherit this invocation's
+    // callbackEnv. Only legacy kimi-cli accepts the temporary config flag.
+    const tempMcpConfig = isLegacy && this.mcpServerPath
       ? await writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
       : null;
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);

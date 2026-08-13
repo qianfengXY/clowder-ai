@@ -1004,6 +1004,7 @@ test('both kimi-cli and kimi absent: error emitted without leaking tempMcpConfig
     // the dir would be left behind because finally cleanup is gated by the try block.
     const service = new KimiAgentService({
       spawnFn,
+      model: 'kimi-code/kimi-for-coding',
       mcpServerPath: '/dummy/cat-cafe-mcp-server.js',
     });
 
@@ -1091,12 +1092,21 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const l0CompilerFn = mock.fn(async () => 'L0_COMPILED_IDENTITY_MARKER');
-    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+    const service = new KimiAgentService({
+      spawnFn,
+      model: 'kimi-code/k3',
+      l0CompilerFn,
+      mcpServerPath: '/dummy/cat-cafe-mcp-server.js',
+    });
 
     const promise = collect(
       service.invoke('Hello', {
         systemPrompt: 'PACK_ONLY_MARKER',
-        callbackEnv: { CAT_CAFE_USER_ID: 'user-1' },
+        callbackEnv: {
+          CAT_CAFE_USER_ID: 'user-1',
+          CAT_CAFE_INVOCATION_ID: 'fresh-invocation',
+          CAT_CAFE_CALLBACK_TOKEN: 'fresh-token',
+        },
       }),
     );
     // Flush microtasks until the CLI is spawned (MCP config write + L0 compile
@@ -1107,6 +1117,7 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
     assert.equal(spawnFn.mock.calls.length, 1, 'CLI should be spawned');
 
     const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.includes('--mcp-config-file'), false, 'native Kimi Code has no invoke-time MCP config flag');
     const agentFlagIndex = args.indexOf('--agent-file');
     assert.ok(agentFlagIndex >= 0, '--agent-file must be passed in native mode');
     const agentFilePath = args[agentFlagIndex + 1];
@@ -1138,6 +1149,8 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
     // v2 engine flag is forced into the child env
     const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
     assert.equal(env.KIMI_CODE_EXPERIMENTAL_FLAG, '1');
+    assert.equal(env.CAT_CAFE_INVOCATION_ID, 'fresh-invocation');
+    assert.equal(env.CAT_CAFE_CALLBACK_TOKEN, 'fresh-token');
 
     // temp agent file dir cleaned up after completion
     const { existsSync } = await import('node:fs');

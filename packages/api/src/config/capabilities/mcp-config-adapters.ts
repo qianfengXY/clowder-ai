@@ -5,12 +5,13 @@
  *
  * Persistent (written at startup via generateCliConfigs / PROVIDER_WRITERS):
  *   Gemini:      .gemini/settings.json            — { mcpServers: { name: { command, args, env, cwd } } }
+ *   Kimi Code:   $KIMI_CODE_HOME/mcp.json         — stdio children inherit current invocation env
  *   Antigravity: ~/.gemini/antigravity/mcp_config.json — { mcpServers: { name: { command, args, env, cwd } } }
  *
  * Invoke-time only (temp file or CLI args per invocation, NOT written at startup):
  *   Claude:      --mcp-config JSON --strict-mcp-config at invoke time
  *   Codex:       --config mcp_servers.X... inline overrides at invoke time
- *   Kimi:        temp mcp.json via writeMcpConfigFile + --mcp-config-file
+ *   Legacy Kimi: temp mcp.json via writeMcpConfigFile + --mcp-config-file
  *   OpenCode:    temp opencode.json via writeOpenCodeRuntimeConfig + OPENCODE_CONFIG
  *
  * Read adapters (readClaudeMcpConfig, readCodexMcpConfig, etc.) are still used
@@ -188,6 +189,19 @@ function ensureCatCafeEnvPlaceholders(name: string, env?: Record<string, string>
     ...CAT_CAFE_ENV_PLACEHOLDERS,
     ...(env ?? {}),
   };
+}
+
+/**
+ * Official Kimi Code has no invoke-time MCP config flag. Its stdio MCP client
+ * merges the current CLI process environment first and then applies persistent
+ * server env. Persisted callback values would therefore override the fresh
+ * invocation identity injected into the Kimi process.
+ */
+function inheritedKimiCallbackEnv(env?: Record<string, string>): Record<string, string> | undefined {
+  if (!env) return undefined;
+  const safe = { ...env };
+  for (const key of MCP_CALLBACK_ENV_KEYS) delete safe[key];
+  return Object.keys(safe).length > 0 ? safe : undefined;
 }
 
 function ensureWorkspaceEnvForManagedCatCafe(
@@ -466,7 +480,9 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
       continue;
     }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
-    const env = ensureCatCafeEnvPlaceholders(s.name, s.env);
+    const env = isCatCafeServer(s.name)
+      ? inheritedKimiCallbackEnv(ensureWorkspaceEnvForManagedCatCafe(s, s.env))
+      : s.env;
     if (env && Object.keys(env).length > 0) entry.env = env;
     if (s.workingDir) entry.cwd = s.workingDir;
     existingMcp[s.name] = entry;
@@ -477,7 +493,9 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const cfg = value as Record<string, unknown>;
     const currentEnv = toStringRecord(cfg.env);
-    cfg.env = ensureCatCafeEnvPlaceholders(name, currentEnv);
+    const safeEnv = inheritedKimiCallbackEnv(currentEnv);
+    if (safeEnv) cfg.env = safeEnv;
+    else delete cfg.env;
     existingMcp[name] = cfg;
   }
 

@@ -31,6 +31,7 @@ export function resolveStartupCliConfigContext(
     projectRoot,
     paths: {
       google: join(projectRoot, '.gemini', 'settings.json'),
+      kimi: join(env.KIMI_CODE_HOME?.trim() || join(homedir(), '.kimi-code'), 'mcp.json'),
       antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
     },
   };

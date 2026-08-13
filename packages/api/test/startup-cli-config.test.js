@@ -24,7 +24,7 @@ describe('resolveStartupCliConfigContext', () => {
       assert.equal(context.paths.anthropic, undefined, 'claude uses invoke-time --mcp-config');
       assert.equal(context.paths.openai, undefined, 'codex uses invoke-time --config overrides');
       assert.equal(context.paths.google, join(root, '.gemini', 'settings.json'));
-      assert.equal(context.paths.kimi, undefined, 'kimi uses invoke-time temp files');
+      assert.equal(context.paths.kimi, join(homedir(), '.kimi-code', 'mcp.json'));
       assert.equal(context.paths.antigravity, join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'));
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -47,7 +47,7 @@ describe('resolveStartupCliConfigContext', () => {
       assert.equal(context.paths.anthropic, undefined, 'claude uses invoke-time --mcp-config');
       assert.equal(context.paths.openai, undefined, 'codex uses invoke-time --config overrides');
       assert.equal(context.paths.google, join(root, '.gemini', 'settings.json'));
-      assert.equal(context.paths.kimi, undefined, 'kimi uses invoke-time temp files');
+      assert.equal(context.paths.kimi, join(homedir(), '.kimi-code', 'mcp.json'));
       assert.equal(context.paths.antigravity, join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'));
     } finally {
       await rm(root, { recursive: true, force: true });

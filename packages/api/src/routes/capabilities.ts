@@ -428,6 +428,7 @@ function getDiscoveryPaths(projectRoot: string) {
 function getCliConfigPaths(projectRoot: string) {
   return {
     google: join(projectRoot, '.gemini', 'settings.json'),
+    kimi: join(process.env.KIMI_CODE_HOME?.trim() || join(homedir(), '.kimi-code'), 'mcp.json'),
     antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
 }
