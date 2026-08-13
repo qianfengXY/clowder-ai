@@ -178,11 +178,12 @@ export class ReviewRoundCoordinatorService {
     if (round.projectId !== input.projectId) throw new Error('Review round does not belong to this project');
     if (!safe.currentForWork) throw new Error('Only the current Review round can be replayed');
     if (round.phase !== 'independent') throw new Error('Only the independent Review stage can be replayed');
-    if (round.independentFinishedCatIds.length > 0) {
-      throw new Error('Independent Review replay requires no finished reviewer');
-    }
+    const pendingReviewerCatIds = round.reviewerCatIds.filter(
+      (reviewerCatId) => !round.independentFinishedCatIds.includes(reviewerCatId),
+    );
+    if (pendingReviewerCatIds.length === 0) throw new Error('Independent Review replay has no pending reviewer');
     const drafts = await Promise.all(
-      round.reviewerCatIds.map((reviewerCatId) =>
+      pendingReviewerCatIds.map((reviewerCatId) =>
         this.reviewRounds.readPrivateDraft({
           ownerUserId: input.ownerUserId,
           roundId: input.roundId,
@@ -200,7 +201,7 @@ export class ReviewRoundCoordinatorService {
       reviewHubThreadId: round.reviewThreadId ?? buildProjectReviewHubId(round.projectId),
       roundId: round.roundId,
       exactSha: round.exactSha,
-      reviewerCatIds: round.reviewerCatIds,
+      reviewerCatIds: pendingReviewerCatIds,
       recorderCatId: round.recorderCatId,
       deliveryKey: `replay:${round.version}`,
     });

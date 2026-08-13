@@ -72,7 +72,7 @@ describe('ReviewRoundCoordinatorService replay', () => {
     );
     const cases = [
       fixture({}, { 'cat-kimi': { version: 1 } }),
-      fixture({ independentFinishedCatIds: ['cat-codex'] }),
+      fixture({ independentFinishedCatIds: ['cat-codex', 'cat-kimi'] }),
       fixture({ phase: 'cross_review' }),
       fixture({ currentForWork: false }),
     ];
@@ -89,5 +89,20 @@ describe('ReviewRoundCoordinatorService replay', () => {
       );
       assert.deepEqual(f.dispatches, []);
     }
+  });
+
+  test('replays only unfinished reviewers after partial independent progress', async () => {
+    const { ReviewRoundCoordinatorService } = await import(
+      '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
+    );
+    const f = fixture({ independentFinishedCatIds: ['cat-codex'], version: 2 });
+    const coordinator = new ReviewRoundCoordinatorService(f.reviewRounds, f.managedWork, f.dispatcher);
+    await coordinator.replayIndependent({
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      roundId: 'round-1',
+    });
+    assert.deepEqual(f.dispatches[0].reviewerCatIds, ['cat-kimi']);
+    assert.equal(f.dispatches[0].deliveryKey, 'replay:2');
   });
 });
