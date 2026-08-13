@@ -26,6 +26,7 @@ import type { ProjectReviewHubService } from '../projects/project-review-hub-ser
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
 import type { DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import { featureTitleForReview } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 import { verifyWorkspacePath, type WorkspacePathVerifier } from './workspace-path-verifier.js';
 
@@ -617,6 +618,12 @@ export class DesktopDevelopmentLoopService {
       project.desktopDevelopment.defaultReviewers[0];
     if (!recorderCatId) throw new Error('Review recorder is unavailable');
     const managed = await this.managedWork.read(this.managedIdentity(input));
+    const backlogItem = (await this.backlogStore.listByUser(input.ownerUserId)).find(
+      (candidate) => candidate.id === managed.admission.producerRef && candidate.projectId === input.projectId,
+    );
+    if (!backlogItem) throw new Error('Review display context backlog item is unavailable');
+    const featureId = featureIdForItem(backlogItem);
+    if (!featureId) throw new Error('Review display context feature id is unavailable');
     const reviewHub = await this.reviewHubs.ensureForFeature(
       input.projectId,
       managed.admission.producerRef,
@@ -644,7 +651,17 @@ export class DesktopDevelopmentLoopService {
       roundId: round.roundId,
       exactSha: round.exactSha,
       reviewerCatIds: round.reviewerCatIds,
+      allReviewerCatIds: round.reviewerCatIds,
+      completedReviewerCatIds: [],
       recorderCatId: round.recorderCatId,
+      displayContext: {
+        projectName: project.name,
+        repository: project.desktopDevelopment.repository.fullName,
+        backlogItemId: backlogItem.id,
+        featureId,
+        featureTitle: featureTitleForReview(featureId, backlogItem.title),
+        attemptNumber: managed.attempt.attemptNumber,
+      },
     });
 
     return this.readWork(

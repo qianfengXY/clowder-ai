@@ -19,6 +19,15 @@ const ROUND = {
   createdAt: 1,
 };
 
+const DISPLAY_CONTEXT = {
+  projectName: 'Traqen',
+  repository: 'qianfengXY/Traqen',
+  backlogItemId: 'backlog-1',
+  featureId: 'F006',
+  featureTitle: 'Workspace capability settings',
+  attemptNumber: 3,
+};
+
 function fixture(overrides = {}, drafts = {}) {
   const dispatches = [];
   const round = { ...ROUND, ...overrides };
@@ -35,7 +44,8 @@ function fixture(overrides = {}, drafts = {}) {
   };
   const managedWork = {};
   const dispatcher = { dispatch: async (input) => dispatches.push(input) };
-  return { reviewRounds, managedWork, dispatcher, dispatches, safe };
+  const displayContexts = { resolve: async () => DISPLAY_CONTEXT };
+  return { reviewRounds, managedWork, dispatcher, dispatches, safe, displayContexts };
 }
 
 describe('ReviewRoundCoordinatorService replay', () => {
@@ -44,7 +54,14 @@ describe('ReviewRoundCoordinatorService replay', () => {
       '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
     );
     const f = fixture();
-    const coordinator = new ReviewRoundCoordinatorService(f.reviewRounds, f.managedWork, f.dispatcher);
+    const coordinator = new ReviewRoundCoordinatorService(
+      f.reviewRounds,
+      f.managedWork,
+      f.dispatcher,
+      undefined,
+      undefined,
+      f.displayContexts,
+    );
     const result = await coordinator.replayIndependent({
       ownerUserId: 'owner-1',
       projectId: 'project-1',
@@ -60,7 +77,10 @@ describe('ReviewRoundCoordinatorService replay', () => {
         roundId: 'round-1',
         exactSha: 'a'.repeat(40),
         reviewerCatIds: ['cat-codex', 'cat-kimi'],
+        allReviewerCatIds: ['cat-codex', 'cat-kimi'],
+        completedReviewerCatIds: [],
         recorderCatId: 'cat-codex',
+        displayContext: DISPLAY_CONTEXT,
         deliveryKey: 'replay:1',
       },
     ]);
@@ -77,7 +97,14 @@ describe('ReviewRoundCoordinatorService replay', () => {
       fixture({ currentForWork: false }),
     ];
     for (const f of cases) {
-      const coordinator = new ReviewRoundCoordinatorService(f.reviewRounds, f.managedWork, f.dispatcher);
+      const coordinator = new ReviewRoundCoordinatorService(
+        f.reviewRounds,
+        f.managedWork,
+        f.dispatcher,
+        undefined,
+        undefined,
+        f.displayContexts,
+      );
       await assert.rejects(
         () =>
           coordinator.replayIndependent({
@@ -96,13 +123,22 @@ describe('ReviewRoundCoordinatorService replay', () => {
       '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
     );
     const f = fixture({ independentFinishedCatIds: ['cat-codex'], version: 2 });
-    const coordinator = new ReviewRoundCoordinatorService(f.reviewRounds, f.managedWork, f.dispatcher);
+    const coordinator = new ReviewRoundCoordinatorService(
+      f.reviewRounds,
+      f.managedWork,
+      f.dispatcher,
+      undefined,
+      undefined,
+      f.displayContexts,
+    );
     await coordinator.replayIndependent({
       ownerUserId: 'owner-1',
       projectId: 'project-1',
       roundId: 'round-1',
     });
     assert.deepEqual(f.dispatches[0].reviewerCatIds, ['cat-kimi']);
+    assert.deepEqual(f.dispatches[0].completedReviewerCatIds, ['cat-codex']);
+    assert.deepEqual(f.dispatches[0].displayContext, DISPLAY_CONTEXT);
     assert.equal(f.dispatches[0].deliveryKey, 'replay:2');
   });
 });

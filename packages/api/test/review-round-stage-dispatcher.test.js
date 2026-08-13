@@ -21,7 +21,17 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       roundId: 'rr-round-1',
       exactSha: 'a'.repeat(40),
       reviewerCatIds: ['cat-codex', 'cat-kimi'],
+      allReviewerCatIds: ['cat-codex', 'cat-kimi'],
+      completedReviewerCatIds: [],
       recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 3,
+      },
     };
 
     await dispatcher.dispatch({ ...base, stage: 'independent' });
@@ -40,13 +50,17 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       true,
     );
     assert.match(requests[0].payload.content, /^@gpt\n@kimi\n/);
-    assert.match(requests[0].payload.content, /independent/i);
+    assert.match(requests[0].payload.content, /Traqen · F006 Workspace capability settings/);
+    assert.match(requests[0].payload.content, /阶段：独立检视/);
+    assert.match(requests[0].payload.content, /仓库：qianfengXY\/Traqen/);
+    assert.match(requests[0].payload.content, /Attempt #3/);
+    assert.doesNotMatch(requests[0].payload.content, /F289/);
     assert.match(requests[0].payload.content, /a{40}/);
     assert.match(requests[1].payload.content, /^@gpt\n@kimi\n/);
-    assert.match(requests[1].payload.content, /barrier.*open/i);
+    assert.match(requests[1].payload.content, /独立检视 Barrier 已开启/);
     assert.match(requests[2].payload.content, /^@gpt\n/);
     assert.doesNotMatch(requests[2].payload.content, /^@gpt\n@kimi/m);
-    assert.match(requests[2].payload.content, /consensus/i);
+    assert.match(requests[2].payload.content, /阶段：共识整理/);
     assert.equal(new Set(requests.map((request) => request.payload.idempotencyKey)).size, 3);
     assert.equal(
       requests.every((request) =>
@@ -74,6 +88,14 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       exactSha: 'a'.repeat(40),
       reviewerCatIds: ['cat-codex'],
       recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 3,
+      },
     };
     await assert.rejects(
       () =>
@@ -91,5 +113,72 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         }).dispatch(base),
       /409.*thread unavailable/i,
     );
+  });
+
+  test('persists a failed stage message and retries it after restart', async () => {
+    const { ReviewRoundStageDispatcher } = await import(
+      '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'
+    );
+    const values = new Map();
+    const sets = new Map();
+    const redis = {
+      get: async (key) => values.get(key) ?? null,
+      set: async (key, value) => {
+        values.set(key, value);
+        return 'OK';
+      },
+      del: async (key) => (values.delete(key) ? 1 : 0),
+      sadd: async (key, value) => {
+        const members = sets.get(key) ?? new Set();
+        members.add(value);
+        sets.set(key, members);
+        return 1;
+      },
+      srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+      smembers: async (key) => [...(sets.get(key) ?? [])],
+    };
+    let attempts = 0;
+    const delivered = [];
+    const dispatcher = new ReviewRoundStageDispatcher(
+      {
+        sendMessage: async (request) => {
+          attempts += 1;
+          if (attempts === 1) return { statusCode: 503, body: 'temporarily unavailable' };
+          delivered.push(request);
+          return { statusCode: 202, body: '{}' };
+        },
+        resolveMentionHandle: () => '@kimi',
+      },
+      { redis, recoveryIntervalMs: 0 },
+    );
+    const input = {
+      stage: 'independent',
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      reviewHubThreadId: 'project-feature-review:project-1:backlog-1',
+      roundId: 'round-recovery',
+      exactSha: 'b'.repeat(40),
+      reviewerCatIds: ['cat-kimi'],
+      allReviewerCatIds: ['cat-codex', 'cat-kimi'],
+      completedReviewerCatIds: ['cat-codex'],
+      recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 3,
+      },
+      deliveryKey: 'replay:2',
+    };
+
+    await dispatcher.dispatch(input);
+    assert.equal((await redis.smembers('desktop-development:pending-review-stage-dispatches')).length, 1);
+    await dispatcher.recoverPendingDispatches();
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0].payload.content, /独立检视进度：1 \/ 2/);
+    assert.doesNotMatch(delivered[0].payload.content, /^@kimi\n@gpt/m);
+    assert.deepEqual(await redis.smembers('desktop-development:pending-review-stage-dispatches'), []);
   });
 });

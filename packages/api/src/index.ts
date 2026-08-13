@@ -4354,23 +4354,34 @@ async function main(): Promise<void> {
     ]);
     managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
     reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
-    const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher({
-      sendMessage: async ({ headers, payload }) => {
-        const response = await app.inject({
-          method: 'POST',
-          url: '/api/messages',
-          headers: { ...headers, 'x-cat-cafe-internal-message-token': internalMessageIngressToken },
-          payload,
-        });
-        return { statusCode: response.statusCode, body: response.body };
+    const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher(
+      {
+        sendMessage: async ({ headers, payload }) => {
+          const response = await app.inject({
+            method: 'POST',
+            url: '/api/messages',
+            headers: { ...headers, 'x-cat-cafe-internal-message-token': internalMessageIngressToken },
+            payload,
+          });
+          return { statusCode: response.statusCode, body: response.body };
+        },
+        resolveMentionHandle: primaryMentionHandleForCatId,
       },
-      resolveMentionHandle: primaryMentionHandleForCatId,
-    });
+      { redis },
+    );
     const { CodexDesktopTaskLauncher } = await import(
       './domains/desktop-development-loop/codex-desktop-task-launcher.js'
     );
     const desktopSessionStore = new sessionMod.DesktopSessionStore(redis);
     const desktopTaskLauncher = new CodexDesktopTaskLauncher(redis);
+    const { ReviewRoundDisplayContextResolver } = await import(
+      './domains/desktop-development-loop/review-round-display-context.js'
+    );
+    const reviewDisplayContexts = new ReviewRoundDisplayContextResolver(
+      externalProjectStore,
+      backlogStore,
+      managedWorkConsumerPort,
+    );
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,
       projectReviewHubService,
@@ -4388,6 +4399,7 @@ async function main(): Promise<void> {
       reviewRoundDispatcher,
       desktopSessionStore,
       desktopTaskLauncher,
+      reviewDisplayContexts,
     );
   }
   const intentCardStore = new IntentCardStore();

@@ -99,9 +99,25 @@ describe(
         undefined,
         async () => {},
       );
-      reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork, reviewDispatcher, sessions, {
-        activate: async (input) => desktopWakes.push(input),
-      });
+      reviewCoordinator = new ReviewRoundCoordinatorService(
+        reviewRounds,
+        managedWork,
+        reviewDispatcher,
+        sessions,
+        {
+          activate: async (input) => desktopWakes.push(input),
+        },
+        {
+          resolve: async () => ({
+            projectName: 'Example',
+            repository: 'owner/repo',
+            backlogItemId: 'backlog-1',
+            featureId: 'F289',
+            featureTitle: 'Implement the Desktop loop',
+            attemptNumber: 1,
+          }),
+        },
+      );
     });
 
     after(async () => {
@@ -151,6 +167,7 @@ describe(
         userId: 'owner-1',
         projectId: project.id,
         title: 'Implement the Desktop loop',
+        tags: ['feature:F289'],
         status: 'approved',
       });
       return { project, bundle };
@@ -320,7 +337,17 @@ describe(
           roundId: reported.reviewRoundId,
           exactSha: SHA_A,
           reviewerCatIds: ['cat-codex', 'cat-kimi'],
+          allReviewerCatIds: ['cat-codex', 'cat-kimi'],
+          completedReviewerCatIds: [],
           recorderCatId: 'cat-codex',
+          displayContext: {
+            projectName: 'Example',
+            repository: 'owner/repo',
+            backlogItemId: 'backlog-1',
+            featureId: 'F289',
+            featureTitle: 'Implement the Desktop loop',
+            attemptNumber: 1,
+          },
         },
       ]);
 

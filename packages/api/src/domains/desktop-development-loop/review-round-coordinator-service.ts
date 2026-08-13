@@ -7,6 +7,7 @@ import type {
 } from '../review-coordination/ReviewRoundStore.js';
 import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
@@ -53,6 +54,7 @@ export class ReviewRoundCoordinatorService {
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
     private readonly desktopSessions?: Pick<DesktopSessionStore, 'getCurrent'>,
     private readonly desktopTasks?: DesktopTaskActivator,
+    private readonly reviewDisplayContexts?: IReviewRoundDisplayContextResolver,
   ) {}
 
   async readSafe(input: ReviewPrincipalInput): Promise<ReviewRoundSafeView> {
@@ -94,7 +96,8 @@ export class ReviewRoundCoordinatorService {
   }
 
   async finishIndependent(input: FinishCoordinatedReviewStageInput) {
-    await this.requireReviewerInHub(input);
+    const before = await this.requireReviewerInHub(input);
+    const displayContext = await this.resolveDisplayContext(before.round);
     const round = await this.reviewRounds.finishIndependent({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
@@ -112,14 +115,18 @@ export class ReviewRoundCoordinatorService {
         roundId: round.roundId,
         exactSha: round.exactSha,
         reviewerCatIds: round.reviewerCatIds,
+        allReviewerCatIds: round.reviewerCatIds,
+        completedReviewerCatIds: [],
         recorderCatId: round.recorderCatId,
+        displayContext,
       });
     }
     return round;
   }
 
   async finishCrossReview(input: FinishCoordinatedReviewStageInput) {
-    await this.requireReviewerInHub(input);
+    const before = await this.requireReviewerInHub(input);
+    const displayContext = await this.resolveDisplayContext(before.round);
     const round = await this.reviewRounds.finishCrossReview({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
@@ -137,7 +144,10 @@ export class ReviewRoundCoordinatorService {
         roundId: round.roundId,
         exactSha: round.exactSha,
         reviewerCatIds: round.reviewerCatIds,
+        allReviewerCatIds: round.reviewerCatIds,
+        completedReviewerCatIds: round.reviewerCatIds,
         recorderCatId: round.recorderCatId,
+        displayContext,
       });
     }
     return round;
@@ -205,6 +215,7 @@ export class ReviewRoundCoordinatorService {
     );
     if (drafts.some(Boolean)) throw new Error('Independent Review replay requires no submitted draft');
 
+    const displayContext = await this.resolveDisplayContext(round);
     await this.reviewDispatcher.dispatch({
       stage: 'independent',
       ownerUserId: round.ownerUserId,
@@ -213,7 +224,10 @@ export class ReviewRoundCoordinatorService {
       roundId: round.roundId,
       exactSha: round.exactSha,
       reviewerCatIds: pendingReviewerCatIds,
+      allReviewerCatIds: round.reviewerCatIds,
+      completedReviewerCatIds: round.independentFinishedCatIds,
       recorderCatId: round.recorderCatId,
+      displayContext,
       deliveryKey: `replay:${round.version}`,
     });
     return safe;
@@ -230,6 +244,23 @@ export class ReviewRoundCoordinatorService {
       throw new Error('Authenticated cat is not a reviewer for this round');
     }
     return safe;
+  }
+
+  private async resolveDisplayContext(round: {
+    readonly ownerUserId: string;
+    readonly projectId: string;
+    readonly workId: string;
+    readonly attemptId: string;
+  }) {
+    if (!this.reviewDisplayContexts) {
+      throw new Error('Review display context resolver is unavailable');
+    }
+    return this.reviewDisplayContexts.resolve({
+      ownerUserId: round.ownerUserId,
+      projectId: round.projectId,
+      workId: round.workId,
+      attemptId: round.attemptId,
+    });
   }
 
   private async wakeBoundDesktopTask(input: {
