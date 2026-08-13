@@ -619,6 +619,7 @@ export class DesktopDevelopmentLoopService {
       managed.admission.producerRef,
       'review',
       input.ownerUserId,
+      session.workspace.worktreePath,
     );
     const round = await this.reviewRounds.createRound({
       ownerUserId: input.ownerUserId,

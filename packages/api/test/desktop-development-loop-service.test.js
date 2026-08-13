@@ -21,6 +21,7 @@ describe(
     let reviewCoordinator;
     let reviewHubEnsureCount;
     let reviewDispatches;
+    let reviewWorkspacePaths;
     let backlogItems;
     let connected = false;
 
@@ -66,8 +67,9 @@ describe(
             status: 'active',
           };
         },
-        ensureForFeature: async (projectId, backlogItemId, kind) => {
+        ensureForFeature: async (projectId, backlogItemId, kind, _userId, executionProjectPath) => {
           reviewHubEnsureCount += 1;
+          reviewWorkspacePaths.push(executionProjectPath);
           return {
             threadId: `project-feature-${kind}:${projectId}:${backlogItemId}`,
             projectId,
@@ -115,6 +117,7 @@ describe(
       if (!connected) return t.skip('Redis not connected');
       reviewHubEnsureCount = 0;
       reviewDispatches = [];
+      reviewWorkspacePaths = [];
       backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
         'external-project:*',
@@ -305,6 +308,7 @@ describe(
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
       assert.equal(reviewHubEnsureCount, 1);
+      assert.deepEqual(reviewWorkspacePaths, ['/Volumes/WorkSSD/example-worktree']);
       assert.deepEqual(reviewDispatches, [
         {
           stage: 'independent',

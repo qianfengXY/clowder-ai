@@ -27,6 +27,7 @@ export class ProjectReviewHubService {
     backlogItemId: string,
     kind: FeatureWorkspaceThreadKind,
     userId: string,
+    executionProjectPath?: string,
   ): Promise<FeatureWorkspaceThreadView> {
     const { project, item, featureId } = await this.requireFeature(projectId, backlogItemId, userId);
     const automaticThreadId = buildFeatureWorkspaceThreadId(project.id, item.id, kind);
@@ -48,12 +49,15 @@ export class ProjectReviewHubService {
     if (binding === 'automatic') {
       await Promise.all([
         this.threadStore.updateTitle(threadId, title),
-        this.threadStore.updateProjectPath(threadId, project.sourcePath),
+        this.threadStore.updateProjectPath(threadId, executionProjectPath ?? project.sourcePath),
         this.threadStore.linkBacklogItem(threadId, item.id),
         this.threadStore.indexForUser(threadId, userId),
       ]);
     } else {
-      await this.threadStore.indexForUser(threadId, userId);
+      await Promise.all([
+        this.threadStore.indexForUser(threadId, userId),
+        ...(executionProjectPath ? [this.threadStore.updateProjectPath(threadId, executionProjectPath)] : []),
+      ]);
     }
     return {
       threadId,
