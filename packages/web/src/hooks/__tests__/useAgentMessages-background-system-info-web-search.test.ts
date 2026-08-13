@@ -351,6 +351,35 @@ describe('consumeBackgroundSystemInfo web_search', () => {
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
   });
 
+  it('consumes provider_activity into the background thread liveness projection', () => {
+    const options = createMockOptions();
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'kimi',
+        threadId: 'thread-1',
+        content: JSON.stringify({
+          type: 'provider_activity',
+          phase: 'thinking',
+          lastActivityAt: 456_789,
+        }),
+        timestamp: 456_789,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith('thread-1', 'kimi', {
+      providerActivity: {
+        phase: 'thinking',
+        lastActivityAt: 456_789,
+      },
+    });
+    expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith('thread-1', 'kimi', 'streaming', '分析中');
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+  });
+
   it('consumes invocation_created and resets stale taskProgress for that cat', () => {
     const options = createMockOptions({
       getThreadState: vi.fn(() => ({
@@ -384,6 +413,8 @@ describe('consumeBackgroundSystemInfo web_search', () => {
       'codex',
       expect.objectContaining({
         invocationId: 'inv-new-2',
+        appServerLifecycle: undefined,
+        providerActivity: undefined,
         taskProgress: expect.objectContaining({
           tasks: [],
           snapshotStatus: 'running',

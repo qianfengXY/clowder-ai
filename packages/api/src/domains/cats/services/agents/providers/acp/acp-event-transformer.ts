@@ -39,6 +39,16 @@ export interface AcpSessionState {
   scratchpadDetected: boolean;
   /** Trailing text window for cross-chunk compaction signature detection. */
   textTail: string;
+  /** Last provider-activity pulse sent to the UI. Never contains model reasoning text. */
+  lastActivityEmittedAt: number;
+  /** Phase/tool identity used to bypass the interval when observable work changes. */
+  lastActivityKey: string;
+  /** One sanitized activity pulse waiting for the service to drain it as a side-channel event. */
+  pendingActivity?: {
+    phase: 'thinking' | 'tool' | 'writing';
+    lastActivityAt: number;
+    toolName?: string;
+  };
 }
 
 export function createAcpSessionState(): AcpSessionState {
@@ -48,6 +58,56 @@ export function createAcpSessionState(): AcpSessionState {
     thinkingBuffer: '',
     scratchpadDetected: false,
     textTail: '',
+    lastActivityEmittedAt: 0,
+    lastActivityKey: '',
+  };
+}
+
+const PROVIDER_ACTIVITY_REFRESH_MS = 15_000;
+
+function recordProviderActivity(
+  state: AcpSessionState,
+  phase: 'thinking' | 'tool' | 'writing',
+  now: number,
+  toolName?: string,
+): void {
+  const safeToolName = typeof toolName === 'string' ? toolName.trim().replace(/\s+/g, ' ').slice(0, 80) : undefined;
+  const activityKey = safeToolName ? `${phase}:${safeToolName}` : phase;
+  const phaseChanged = activityKey !== state.lastActivityKey;
+  if (!phaseChanged && now - state.lastActivityEmittedAt < PROVIDER_ACTIVITY_REFRESH_MS) return;
+
+  state.lastActivityEmittedAt = now;
+  state.lastActivityKey = activityKey;
+  state.pendingActivity = {
+    phase,
+    lastActivityAt: now,
+    ...(safeToolName ? { toolName: safeToolName } : {}),
+  };
+}
+
+/**
+ * Drain sanitized ACP activity without changing transformAcpEvent's canonical message mapping.
+ * This preserves tool_use/tool_result dedup invariants while giving the UI a live side channel.
+ */
+export function drainAcpProviderActivity(
+  state: AcpSessionState,
+  catId: CatId,
+  metadata: MessageMetadata,
+): AgentMessage | null {
+  const activity = state.pendingActivity;
+  if (!activity) return null;
+  state.pendingActivity = undefined;
+  return {
+    type: 'system_info',
+    catId,
+    content: JSON.stringify({
+      type: 'provider_activity',
+      phase: activity.phase,
+      ...(activity.toolName ? { toolName: activity.toolName } : {}),
+      lastActivityAt: activity.lastActivityAt,
+    }),
+    metadata,
+    timestamp: activity.lastActivityAt,
   };
 }
 
@@ -178,10 +238,12 @@ export function transformAcpEvent(
           // Trim trailing whitespace that precedes the scratchpad header.
           const clean = text.slice(0, cleanEnd).replace(/[\s\n]+$/, '');
           if (!clean) return withFlush(null);
+          recordProviderActivity(state, 'writing', now);
           return withFlush({ type: 'text', catId, content: clean, metadata, timestamp: now });
         }
         // Keep trailing window bounded for cross-chunk detection.
         state.textTail = combined.length > SCRATCHPAD_TAIL_CHARS ? combined.slice(-SCRATCHPAD_TAIL_CHARS) : combined;
+        recordProviderActivity(state, 'writing', now);
       }
       return withFlush({ type: 'text', catId, content: text, metadata, timestamp: now });
     }
@@ -190,6 +252,7 @@ export function transformAcpEvent(
       // Accumulate — emit nothing until a non-thinking event flushes the buffer.
       if (state) {
         state.thinkingBuffer += content?.text ?? '';
+        recordProviderActivity(state, 'thinking', now);
         return null;
       }
       // No state (shouldn't happen) — fall back to immediate emit.
@@ -265,6 +328,7 @@ export function transformAcpEvent(
       const status = inner.status;
       const final = isFinalStatus(status);
       const alreadyHasToolUse = state && toolCallId ? state.emittedToolUseByCallId.has(toolCallId) : false;
+      if (state) recordProviderActivity(state, 'tool', now, toolName);
       // F197 AC-A4 / KD-6: only status ∈ {completed, failed} is final. No-status
       // fallback removed — progress content is NOT promoted to result.
       if (!final) {

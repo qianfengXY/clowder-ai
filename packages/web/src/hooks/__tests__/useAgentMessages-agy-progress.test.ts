@@ -136,4 +136,38 @@ describe('F210-H1 agy_trajectory_progress frontend', () => {
       'AGY working · 3 steps · activity',
     );
   });
+
+  it('consumes provider_activity as live status without rendering a system bubble', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'kimi',
+        threadId: 'thread-1',
+        content: JSON.stringify({
+          type: 'provider_activity',
+          phase: 'tool',
+          toolName: 'cat_cafe_get_thread_context',
+          lastActivityAt: 123_456,
+        }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockSetCatInvocation).toHaveBeenCalledWith('kimi', {
+      providerActivity: {
+        phase: 'tool',
+        toolName: 'cat_cafe_get_thread_context',
+        lastActivityAt: 123_456,
+      },
+    });
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith(
+      'thread-1',
+      'kimi',
+      'streaming',
+      '正在使用工具 · cat_cafe_get_thread_context',
+    );
+  });
 });

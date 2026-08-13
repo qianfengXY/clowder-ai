@@ -168,3 +168,30 @@ export function formatAgyProgressDetail(parsed: Record<string, unknown>): string
   const latest = semantic ?? 'activity';
   return `AGY working · ${steps} step${steps > 1 ? 's' : ''} · ${latest}`;
 }
+
+export interface ProviderActivityProjection {
+  phase: 'thinking' | 'tool' | 'writing';
+  lastActivityAt: number;
+  toolName?: string;
+}
+
+export function parseProviderActivity(parsed: Record<string, unknown>): ProviderActivityProjection | null {
+  if (parsed.type !== 'provider_activity') return null;
+  if (parsed.phase !== 'thinking' && parsed.phase !== 'tool' && parsed.phase !== 'writing') return null;
+  if (typeof parsed.lastActivityAt !== 'number' || !Number.isFinite(parsed.lastActivityAt)) return null;
+  const toolName =
+    typeof parsed.toolName === 'string' ? parsed.toolName.trim().replace(/\s+/g, ' ').slice(0, 80) : undefined;
+  return {
+    phase: parsed.phase,
+    lastActivityAt: parsed.lastActivityAt,
+    ...(toolName ? { toolName } : {}),
+  };
+}
+
+export function formatProviderActivityDetail(activity: ProviderActivityProjection): string {
+  if (activity.phase === 'tool') {
+    return activity.toolName ? `正在使用工具 · ${activity.toolName}` : '正在使用工具';
+  }
+  if (activity.phase === 'writing') return '正在生成回复';
+  return '分析中';
+}

@@ -1221,11 +1221,28 @@ describe('GeminiAcpAdapter integration', () => {
     }
 
     const types = messages.map((m) => m.type);
-    assert.deepEqual(types, ['session_init', 'system_info', 'text', 'tool_use', 'text', 'done']);
+    assert.deepEqual(types, [
+      'session_init',
+      'system_info',
+      'system_info',
+      'system_info',
+      'text',
+      'tool_use',
+      'text',
+      'done',
+    ]);
     assert.equal(messages[0].sessionId, 'integ-sess');
-    const thinking = JSON.parse(messages[1].content);
+    const activity = JSON.parse(messages[1].content);
+    assert.equal(activity.type, 'provider_activity');
+    assert.equal(activity.phase, 'thinking');
+    assert.equal('text' in activity, false, 'Activity snapshots must not expose private thought text');
+    const writing = JSON.parse(messages[2].content);
+    assert.equal(writing.type, 'provider_activity');
+    assert.equal(writing.phase, 'writing');
+    assert.equal('text' in writing, false, 'Activity snapshots must not duplicate public response text');
+    const thinking = JSON.parse(messages[3].content);
     assert.equal(thinking.type, 'thinking');
-    assert.equal(messages[3].toolName, 'read_file');
+    assert.equal(messages[5].toolName, 'read_file');
   });
 
   it('P1-1: abort one invocation does not kill concurrent invocations', async () => {
@@ -2425,7 +2442,14 @@ describe('GeminiAcpAdapter integration', () => {
     }
 
     // Thinking must appear before error
-    const thinkingMsg = messages.find((m) => m.type === 'system_info' && m.content.includes('"thinking"'));
+    const thinkingMsg = messages.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'thinking';
+      } catch {
+        return false;
+      }
+    });
     assert.ok(thinkingMsg, 'Pending thinking must be flushed before error');
     const thinkingContent = JSON.parse(thinkingMsg.content);
     assert.equal(thinkingContent.text, 'Step 1: check the database schema', 'All thinking chunks must be concatenated');
@@ -3461,11 +3485,16 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
     assert.ok(!e1.done);
     assert.equal(e1.value.type, 'session_init', 'First event must be session_init');
 
-    // Event 2: real content from promptStream — proves promptStream is active
-    // and cancel callback IS registered in cancelCallbacks map
+    // Event 2: sanitized activity for the public response. Event 3 is the real
+    // content from promptStream; together they prove promptStream is active and
+    // the cancel callback IS registered in cancelCallbacks map.
     const e2 = await iter1.next();
     assert.ok(!e2.done);
-    assert.equal(e2.value.type, 'text', `Second event must be text from promptStream, got ${e2.value.type}`);
+    assert.equal(e2.value.type, 'system_info');
+    assert.equal(JSON.parse(e2.value.content).type, 'provider_activity');
+    const e3 = await iter1.next();
+    assert.ok(!e3.done);
+    assert.equal(e3.value.type, 'text', `Third event must be text from promptStream, got ${e3.value.type}`);
 
     // NOW abort — promptStream is running, cancel callback is registered
     ac.abort();

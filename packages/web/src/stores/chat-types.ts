@@ -540,6 +540,15 @@ export interface CompactBoundaryTelemetry {
   preTokens?: number;
 }
 
+export type ProviderActivityPhase = 'thinking' | 'tool' | 'writing';
+
+/** Sanitized provider progress. Deliberately excludes prompts, reasoning text, tool arguments, and tool results. */
+export interface ProviderActivitySnapshot {
+  phase: ProviderActivityPhase;
+  lastActivityAt: number;
+  toolName?: string;
+}
+
 export interface CatInvocationInfo {
   /** Exact concrete provider carrier; absent only for legacy events and fails closed in consumers. */
   freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;
@@ -572,6 +581,8 @@ export interface CatInvocationInfo {
   livenessWarning?: LivenessWarningSnapshot;
   /** F254 D2: canonical Codex app-server protocol stage, consumed by ThreadExecutionBar. */
   appServerLifecycle?: AppServerLifecycleSnapshot;
+  /** Provider-agnostic activity pulse for carriers without an app-server lifecycle (for example Kimi ACP). */
+  providerActivity?: ProviderActivitySnapshot;
   /** #939 part A (kimi auth dual-path): Latest provider capability reports keyed by capability
    *  name (e.g. 'thinking', 'image_input'). Backend emits these as `system_info` events with
    *  inner type `provider_capability`. Stored silently — MUST NOT render as a user-facing

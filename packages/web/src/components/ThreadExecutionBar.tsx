@@ -1,10 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatProviderActivityDetail } from '@/hooks/system-info-visible';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import type { AppServerLifecycleSnapshot, AppServerLifecycleStage, CatInvocationInfo } from '@/stores/chat-types';
+import type {
+  AppServerLifecycleSnapshot,
+  AppServerLifecycleStage,
+  CatInvocationInfo,
+  ProviderActivitySnapshot,
+} from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -64,6 +70,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     catId,
     startedAt: getStartedAt(catId, activeInvocations, catInvocations),
     lifecycle: catInvocations[catId]?.appServerLifecycle,
+    providerActivity: catInvocations[catId]?.providerActivity,
   }));
 
   // Build display info from cat-config (dynamic, not hardcoded)
@@ -131,7 +138,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     <div className="console-divider-b">
       <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
         <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-        {activeCats.map(({ catId, startedAt, lifecycle }) => {
+        {activeCats.map(({ catId, startedAt, lifecycle, providerActivity }) => {
           const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
           return (
             <CatStatusChip
@@ -141,6 +148,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
               color={info.color}
               startedAt={startedAt}
               lifecycle={lifecycle}
+              providerActivity={providerActivity}
               onStop={handleStopCat}
             />
           );
@@ -245,6 +253,7 @@ function CatStatusChip({
   color,
   startedAt,
   lifecycle,
+  providerActivity,
   onStop,
 }: {
   catId: string;
@@ -252,6 +261,7 @@ function CatStatusChip({
   color: string;
   startedAt: number;
   lifecycle?: AppServerLifecycleSnapshot;
+  providerActivity?: ProviderActivitySnapshot;
   onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -271,6 +281,11 @@ function CatStatusChip({
         <span className={appServerStalled ? 'text-conn-amber-text' : 'text-cafe-muted'}>
           {APP_SERVER_STAGE_LABELS[lifecycle.stage]} ·{' '}
           {appServerStalled ? '可能在等待模型' : `活动 ${formatActivityAge(lifecycle.lastActivityAt)}`}
+        </span>
+      )}
+      {!lifecycle && providerActivity && (
+        <span className="text-cafe-muted" data-provider-activity={providerActivity.phase}>
+          {formatProviderActivityDetail(providerActivity)} · 活动 {formatActivityAge(providerActivity.lastActivityAt)}
         </span>
       )}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>

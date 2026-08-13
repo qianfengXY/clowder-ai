@@ -189,6 +189,29 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(container.textContent).toMatch(/活动 [45] 秒前/);
   });
 
+  it('shows provider-agnostic Kimi activity and its real activity age', async () => {
+    const now = Date.now();
+    useChatStore.setState({
+      activeInvocations: {
+        'inv-kimi': { catId: 'kimi', mode: 'execute', startedAt: now - 70_000 },
+      },
+      hasActiveInvocation: true,
+      catInvocations: {
+        kimi: {
+          invocationId: 'inv-kimi',
+          providerActivity: {
+            phase: 'thinking',
+            lastActivityAt: now - 5_000,
+          },
+        } as never,
+      },
+    });
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.textContent).toContain('分析中');
+    expect(container.textContent).toMatch(/活动 [45] 秒前/);
+  });
+
   it('marks a silent active app-server turn as visible warning without auto-canceling it', async () => {
     const now = Date.now();
     useChatStore.setState({
