@@ -188,6 +188,85 @@ describe('ExternalProjectFeatureList', () => {
     expect(routerPushMock).toHaveBeenCalledWith('/thread/project-feature-review%3Aproject-Traqen%3Aitem-F006');
   });
 
+  it('binds an existing project conversation to a feature workspace', async () => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/threads/plan/candidates')) {
+        return {
+          ok: true,
+          json: async () => ({
+            binding: {
+              projectId: 'project-Traqen',
+              backlogItemId: 'item-F006',
+              featureId: 'F006',
+              kind: 'plan',
+              automaticThreadId: 'project-feature-plan:project-Traqen:item-F006',
+              selectedThreadId: 'project-feature-plan:project-Traqen:item-F006',
+              binding: 'automatic',
+              locked: false,
+              candidates: [
+                { threadId: 'existing-thread', title: 'Existing architecture chat', lastActiveAt: 10, selected: false },
+              ],
+            },
+          }),
+        };
+      }
+      if (init?.method === 'PUT') {
+        return {
+          ok: true,
+          json: async () => ({
+            thread: {
+              threadId: 'existing-thread',
+              projectId: 'project-Traqen',
+              backlogItemId: 'item-F006',
+              featureId: 'F006',
+              kind: 'plan',
+              status: 'active',
+              binding: 'manual',
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
+        }),
+      };
+    });
+    await act(async () => {
+      root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
+    });
+    await flush();
+
+    const bind = container.querySelector('[data-testid="external-project-bind-plan-item-F006"]') as HTMLButtonElement;
+    await act(async () => {
+      bind.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+
+    const select = container.querySelector(
+      '[data-testid="external-project-binding-select-item-F006"]',
+    ) as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'existing-thread';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const save = container.querySelector(
+      '[data-testid="external-project-binding-save-item-F006"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+
+    const putCall = apiFetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
+    expect(putCall?.[0]).toContain('/threads/plan/binding');
+    expect(JSON.parse((putCall?.[1] as RequestInit).body as string)).toEqual({ threadId: 'existing-thread' });
+    expect(container.textContent).toContain('F006 的方案已绑定到所选会话');
+  });
+
   it('keeps automatic Desktop launch failures retryable', async () => {
     apiFetchMock.mockImplementation(async (_path: string, init?: RequestInit) => {
       if (!init) {

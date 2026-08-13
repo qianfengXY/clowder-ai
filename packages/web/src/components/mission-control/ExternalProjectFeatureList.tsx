@@ -3,6 +3,7 @@
 import type {
   BacklogItem,
   ExternalProject,
+  FeatureWorkspaceThreadCandidatesView,
   FeatureWorkspaceThreadKind,
   FeatureWorkspaceThreadView,
 } from '@cat-cafe/shared';
@@ -60,6 +61,7 @@ function ExternalProjectFeatureRow({
   desktopBound,
   onStart,
   onOpenThread,
+  onBindThread,
 }: {
   item: BacklogItem;
   status: LaunchStatus;
@@ -67,6 +69,7 @@ function ExternalProjectFeatureRow({
   desktopBound: boolean;
   onStart: (item: BacklogItem) => void;
   onOpenThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
+  onBindThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
 }) {
   const featureId = featureIdFromItem(item);
   const unavailable = !desktopBound || !featureId;
@@ -96,12 +99,30 @@ function ExternalProjectFeatureRow({
           </button>
           <button
             type="button"
+            onClick={() => onBindThread(item, 'plan')}
+            disabled={unavailable}
+            className="rounded-lg px-2 py-1.5 text-micro font-medium text-cafe-secondary underline-offset-2 hover:underline disabled:opacity-40"
+            data-testid={`external-project-bind-plan-${item.id}`}
+          >
+            绑定
+          </button>
+          <button
+            type="button"
             onClick={() => onOpenThread(item, 'review')}
             disabled={unavailable}
             className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
             data-testid={`external-project-review-${item.id}`}
           >
             Review
+          </button>
+          <button
+            type="button"
+            onClick={() => onBindThread(item, 'review')}
+            disabled={unavailable}
+            className="rounded-lg px-2 py-1.5 text-micro font-medium text-cafe-secondary underline-offset-2 hover:underline disabled:opacity-40"
+            data-testid={`external-project-bind-review-${item.id}`}
+          >
+            绑定
           </button>
           <button
             type="button"
@@ -132,9 +153,21 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [launchRefreshKey, setLaunchRefreshKey] = useState(0);
+  const [bindingEditor, setBindingEditor] = useState<{
+    itemId: string;
+    kind: FeatureWorkspaceThreadKind;
+    data?: FeatureWorkspaceThreadCandidatesView;
+    selectedThreadId: string;
+    loading: boolean;
+    saving: boolean;
+    error?: string;
+  } | null>(null);
   const startingItemsRef = useRef(new Set<string>());
 
-  useEffect(() => setNotice(null), [project.id]);
+  useEffect(() => {
+    setNotice(null);
+    setBindingEditor(null);
+  }, [project.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +308,62 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
     }
   };
 
+  const openBindingEditor = async (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => {
+    setBindingEditor({ itemId: item.id, kind, selectedThreadId: '', loading: true, saving: false });
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(item.id)}/threads/${kind}/candidates`,
+      );
+      const body = (await response.json()) as { binding?: FeatureWorkspaceThreadCandidatesView; error?: string };
+      if (!response.ok || !body.binding) throw new Error(body.error ?? '无法读取可绑定会话');
+      setBindingEditor({
+        itemId: item.id,
+        kind,
+        data: body.binding,
+        selectedThreadId: body.binding.binding === 'manual' ? body.binding.selectedThreadId : '',
+        loading: false,
+        saving: false,
+      });
+    } catch (error) {
+      setBindingEditor({
+        itemId: item.id,
+        kind,
+        selectedThreadId: '',
+        loading: false,
+        saving: false,
+        error: error instanceof Error ? error.message : '无法读取可绑定会话',
+      });
+    }
+  };
+
+  const saveBinding = async () => {
+    if (!bindingEditor?.data || bindingEditor.data.locked) return;
+    setBindingEditor((current) => (current ? { ...current, saving: true, error: undefined } : current));
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(bindingEditor.itemId)}/threads/${bindingEditor.kind}/binding`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threadId: bindingEditor.selectedThreadId || null }),
+        },
+      );
+      const body = (await response.json()) as { thread?: FeatureWorkspaceThreadView; error?: string };
+      if (!response.ok || !body.thread) throw new Error(body.error ?? '绑定失败');
+      const label = bindingEditor.kind === 'plan' ? '方案' : 'Review';
+      setNotice(
+        body.thread.binding === 'manual'
+          ? `${bindingEditor.data.featureId} 的${label}已绑定到所选会话。`
+          : `${bindingEditor.data.featureId} 的${label}已恢复为自动会话。`,
+      );
+      setBindingEditor(null);
+    } catch (error) {
+      setBindingEditor((current) =>
+        current ? { ...current, saving: false, error: error instanceof Error ? error.message : '绑定失败' } : current,
+      );
+    }
+  };
+
   if (items.length === 0) {
     return (
       <div className="rounded-lg bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
@@ -299,15 +388,69 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
       )}
       <div className="space-y-2">
         {items.map((item) => (
-          <ExternalProjectFeatureRow
-            key={item.id}
-            item={item}
-            status={launchStatuses[item.id] ?? 'checking'}
-            error={launchErrors[item.id]}
-            desktopBound={Boolean(project.desktopDevelopment)}
-            onStart={(selected) => void startDevelopment(selected)}
-            onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
-          />
+          <div key={item.id} className="space-y-2">
+            <ExternalProjectFeatureRow
+              item={item}
+              status={launchStatuses[item.id] ?? 'checking'}
+              error={launchErrors[item.id]}
+              desktopBound={Boolean(project.desktopDevelopment)}
+              onStart={(selected) => void startDevelopment(selected)}
+              onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
+              onBindThread={(selected, kind) => void openBindingEditor(selected, kind)}
+            />
+            {bindingEditor?.itemId === item.id && (
+              <div
+                className="rounded-xl border border-[var(--console-border)] bg-[var(--console-shell-bg)] px-4 py-3"
+                data-testid={`external-project-binding-editor-${item.id}`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-cafe">
+                    绑定{bindingEditor.kind === 'plan' ? '方案' : 'Review'}会话
+                  </span>
+                  <button type="button" onClick={() => setBindingEditor(null)} className="text-xs text-cafe-secondary">
+                    取消
+                  </button>
+                </div>
+                {bindingEditor.loading ? (
+                  <p className="text-xs text-cafe-secondary">正在读取同项目会话…</p>
+                ) : bindingEditor.data ? (
+                  <div className="space-y-2">
+                    <select
+                      value={bindingEditor.selectedThreadId}
+                      onChange={(event) =>
+                        setBindingEditor((current) =>
+                          current ? { ...current, selectedThreadId: event.target.value } : current,
+                        )
+                      }
+                      disabled={bindingEditor.data.locked || bindingEditor.saving}
+                      className="w-full rounded-lg border border-[var(--console-border)] bg-[var(--console-card-bg)] px-3 py-2 text-xs text-cafe disabled:opacity-60"
+                      data-testid={`external-project-binding-select-${item.id}`}
+                    >
+                      <option value="">自动会话（功能专属）</option>
+                      {bindingEditor.data.candidates.map((candidate) => (
+                        <option key={candidate.threadId} value={candidate.threadId}>
+                          {candidate.title}
+                        </option>
+                      ))}
+                    </select>
+                    {bindingEditor.data.locked && (
+                      <p className="text-xs text-cafe-secondary">开发闭环正在进行，结束当前流程后才能更换 Review 绑定。</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void saveBinding()}
+                      disabled={bindingEditor.data.locked || bindingEditor.saving}
+                      className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-50"
+                      data-testid={`external-project-binding-save-${item.id}`}
+                    >
+                      {bindingEditor.saving ? '保存中…' : '保存绑定'}
+                    </button>
+                  </div>
+                ) : null}
+                {bindingEditor.error && <p className="mt-2 text-xs text-conn-red-text">{bindingEditor.error}</p>}
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>

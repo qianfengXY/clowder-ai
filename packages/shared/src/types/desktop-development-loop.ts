@@ -81,6 +81,26 @@ export interface FeatureWorkspaceThreadView {
   readonly featureId: string;
   readonly kind: FeatureWorkspaceThreadKind;
   readonly status: 'active' | 'restored';
+  readonly binding: 'automatic' | 'manual';
+}
+
+export interface FeatureWorkspaceThreadCandidate {
+  readonly threadId: string;
+  readonly title: string;
+  readonly lastActiveAt: number;
+  readonly selected: boolean;
+}
+
+export interface FeatureWorkspaceThreadCandidatesView {
+  readonly projectId: string;
+  readonly backlogItemId: string;
+  readonly featureId: string;
+  readonly kind: FeatureWorkspaceThreadKind;
+  readonly automaticThreadId: string;
+  readonly selectedThreadId: string;
+  readonly binding: 'automatic' | 'manual';
+  readonly locked: boolean;
+  readonly candidates: readonly FeatureWorkspaceThreadCandidate[];
 }
 
 export interface WorkspaceBinding {

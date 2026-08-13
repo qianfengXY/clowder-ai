@@ -20,6 +20,7 @@ import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/communit
 export class ExternalProjectStore {
   private readonly redis: RedisClient | undefined;
   private readonly fallbackProjects = new Map<string, ExternalProject>();
+  private readonly fallbackFeatureWorkspaceBindings = new Map<string, Record<string, string>>();
 
   constructor(redis?: RedisClient) {
     this.redis = redis;
@@ -94,6 +95,58 @@ export class ExternalProjectStore {
       return this.hydrateProject(data as Record<string, string>);
     }
     return this.fallbackProjects.get(id) ?? null;
+  }
+
+  async getFeatureWorkspaceBindings(projectId: string): Promise<Record<string, string>> {
+    if (!this.redis) return { ...(this.fallbackFeatureWorkspaceBindings.get(projectId) ?? {}) };
+    const raw = await this.redis.hget(ExternalProjectKeys.detail(projectId), 'featureWorkspaceBindings');
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  async setFeatureWorkspaceBinding(projectId: string, slot: string, threadId: string | null): Promise<void> {
+    if (!this.redis) {
+      const current = { ...(this.fallbackFeatureWorkspaceBindings.get(projectId) ?? {}) };
+      if (threadId && Object.entries(current).some(([key, value]) => key !== slot && value === threadId)) {
+        throw new Error('Conversation is already bound to another feature workspace');
+      }
+      if (threadId) current[slot] = threadId;
+      else delete current[slot];
+      this.fallbackFeatureWorkspaceBindings.set(projectId, current);
+      return;
+    }
+    const result = await this.redis.eval(
+      `
+        local raw = redis.call('HGET', KEYS[1], 'featureWorkspaceBindings')
+        local bindings = {}
+        if raw then
+          local ok, decoded = pcall(cjson.decode, raw)
+          if ok and type(decoded) == 'table' then bindings = decoded end
+        end
+        if ARGV[2] ~= '' then
+          for key, value in pairs(bindings) do
+            if key ~= ARGV[1] and value == ARGV[2] then return 0 end
+          end
+          bindings[ARGV[1]] = ARGV[2]
+        else
+          bindings[ARGV[1]] = nil
+        end
+        redis.call('HSET', KEYS[1], 'featureWorkspaceBindings', cjson.encode(bindings))
+        return 1
+      `,
+      1,
+      ExternalProjectKeys.detail(projectId),
+      slot,
+      threadId ?? '',
+    );
+    if (Number(result) !== 1) throw new Error('Conversation is already bound to another feature workspace');
   }
 
   async update(id: string, patch: Partial<CreateExternalProjectInput>): Promise<ExternalProject | null> {

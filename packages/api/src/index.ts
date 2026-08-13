@@ -4309,7 +4309,34 @@ async function main(): Promise<void> {
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
   const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
-  const projectReviewHubService = new ProjectReviewHubService(externalProjectStore, threadStore, backlogStore);
+  let reviewRoundStore: import('./domains/review-coordination/ReviewRoundStore.js').IReviewRoundStore | undefined;
+  let managedWorkConsumerPort:
+    | import('./domains/cats/services/stores/ports/ManagedWorkConsumerPort.js').IManagedWorkConsumerPort
+    | undefined;
+  const projectReviewHubService = new ProjectReviewHubService(
+    externalProjectStore,
+    threadStore,
+    backlogStore,
+    async ({ userId, projectId, backlogItemId }) => {
+      if (!workflowSopStore || !managedWorkConsumerPort) return false;
+      const bundle = await workflowSopStore.getManagedWorkAdmission(userId, backlogItemId);
+      if (!bundle) return false;
+      const managed = await managedWorkConsumerPort.read({
+        consumerId: 'f289_desktop_development_loop',
+        ownerUserId: userId,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+      });
+      if (managed.state.lifecycle === 'active') return true;
+      if (!reviewRoundStore) return false;
+      const current = await reviewRoundStore.readCurrentSafe({
+        ownerUserId: userId,
+        projectId,
+        workId: bundle.admission.workId,
+      });
+      return Boolean(current && current.round.phase !== 'complete');
+    },
+  );
   let desktopDevelopmentLoopService:
     | import('./domains/desktop-development-loop/desktop-development-loop-service.js').DesktopDevelopmentLoopService
     | undefined;
@@ -4325,8 +4352,8 @@ async function main(): Promise<void> {
       import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
       import('./domains/review-coordination/RedisReviewRoundStore.js'),
     ]);
-    const managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
-    const reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
+    managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
+    reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
     const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher({
       sendMessage: async ({ headers, payload }) => {
         const response = await app.inject({

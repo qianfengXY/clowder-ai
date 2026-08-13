@@ -92,6 +92,27 @@ describe('F289 desktop development loop routes', () => {
       assert.equal(response.json().thread.threadId, `project-feature-${kind}:${project.id}:backlog-f006`);
     }
   });
+
+  test('lists same-project candidates and binds an existing conversation', async () => {
+    const existing = await threadStore.create('user1', 'Existing plan', project.sourcePath);
+    const candidates = await app.inject({
+      method: 'GET',
+      url: `/api/external-projects/${project.id}/development-loop/features/backlog-f006/threads/plan/candidates`,
+      headers: { 'x-cat-cafe-user': 'user1' },
+    });
+    assert.equal(candidates.statusCode, 200);
+    assert.ok(candidates.json().binding.candidates.some((candidate) => candidate.threadId === existing.id));
+
+    const bound = await app.inject({
+      method: 'PUT',
+      url: `/api/external-projects/${project.id}/development-loop/features/backlog-f006/threads/plan/binding`,
+      headers: { 'x-cat-cafe-user': 'user1' },
+      payload: { threadId: existing.id },
+    });
+    assert.equal(bound.statusCode, 200);
+    assert.equal(bound.json().thread.threadId, existing.id);
+    assert.equal(bound.json().thread.binding, 'manual');
+  });
 });
 
 describe('F289 ChatGPT Desktop service-principal routes', () => {
