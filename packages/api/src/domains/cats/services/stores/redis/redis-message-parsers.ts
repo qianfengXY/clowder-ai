@@ -140,7 +140,7 @@ export function safeParseExtra(raw: string | undefined):
       supplement?: NonNullable<StoredMessage['extra']>['supplement'];
       recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing' | 'context_briefing';
+      systemKind?: 'a2a_routing' | 'context_briefing' | 'review_orchestration';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
       /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
       pluginMessage?: {
@@ -190,7 +190,7 @@ export function safeParseExtra(raw: string | undefined):
       supplement?: NonNullable<StoredMessage['extra']>['supplement'];
       recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing' | 'context_briefing';
+      systemKind?: 'a2a_routing' | 'context_briefing' | 'review_orchestration';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
       /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
       pluginMessage?: {
@@ -428,7 +428,11 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'context_briefing') {
+    if (
+      parsed.systemKind === 'a2a_routing' ||
+      parsed.systemKind === 'context_briefing' ||
+      parsed.systemKind === 'review_orchestration'
+    ) {
       result.systemKind = parsed.systemKind;
       hasField = true;
     }

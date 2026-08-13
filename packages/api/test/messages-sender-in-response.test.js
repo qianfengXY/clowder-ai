@@ -19,6 +19,7 @@ function buildDeps(overrides = {}) {
       append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
       getByThread: mock.fn(async () => []),
       getByThreadBefore: mock.fn(async () => []),
+      getByIdempotencyKey: mock.fn(async () => null),
     },
     socketManager: {
       broadcastAgentMessage: mock.fn(),
@@ -214,5 +215,143 @@ describe('GET /api/messages source.sender serialization', () => {
     assert.ok(msg.source.sender, 'sender must be present');
     assert.equal(msg.source.sender.id, 'ou_xyz789');
     assert.equal(msg.source.sender.name, undefined, 'name should not be fabricated');
+  });
+});
+
+describe('POST /api/messages internal Review Hub orchestration', () => {
+  let app;
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('rejects a server-authored marker without the process-local capability', async () => {
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, buildDeps({ internalMessageIngressToken: 'internal-secret' }));
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('persists internal orchestration provenance and the caller idempotency key', async () => {
+    const deps = buildDeps({ internalMessageIngressToken: 'internal-secret' });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const idempotencyKey = '33333333-3333-4333-8333-333333333333';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+      },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        idempotencyKey,
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const authored = deps.messageStore.append.mock.calls.find(
+      (call) => call.arguments[0]?.content === '@opus review this',
+    );
+    assert.ok(authored);
+    assert.equal(authored.arguments[0].idempotencyKey, idempotencyKey);
+    assert.deepEqual(authored.arguments[0].extra, { systemKind: 'review_orchestration' });
+  });
+
+  it('does not invoke or append when a restart replays the same orchestration stage', async () => {
+    const deps = buildDeps({
+      internalMessageIngressToken: 'internal-secret',
+      messageStore: {
+        append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+        getByThread: mock.fn(async () => []),
+        getByThreadBefore: mock.fn(async () => []),
+        getByIdempotencyKey: mock.fn(async () => ({ id: 'existing-review-stage-message' })),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+      },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        idempotencyKey: '44444444-4444-4444-8444-444444444444',
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), {
+      status: 'duplicate',
+      userMessageId: 'existing-review-stage-message',
+    });
+    assert.equal(deps.messageStore.append.mock.callCount(), 0);
+    assert.equal(deps.invocationRecordStore.create.mock.callCount(), 0);
+  });
+
+  it('does not acknowledge a queued orchestration replay until durable queue recovery restores custody', async () => {
+    const deps = buildDeps({
+      internalMessageIngressToken: 'internal-secret',
+      messageStore: {
+        append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+        getByThread: mock.fn(async () => []),
+        getByThreadBefore: mock.fn(async () => []),
+        getByIdempotencyKey: mock.fn(async () => ({
+          id: 'queued-review-stage-message',
+          deliveryStatus: 'queued',
+        })),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+      },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        idempotencyKey: '55555555-5555-4555-8555-555555555555',
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.body).code, 'REVIEW_QUEUE_RECOVERY_PENDING');
+    assert.equal(deps.messageStore.append.mock.callCount(), 0);
+    assert.equal(deps.invocationRecordStore.create.mock.callCount(), 0);
   });
 });

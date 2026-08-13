@@ -34,6 +34,10 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       Array(3).fill('project-review-hub:project-1'),
     );
     assert.equal(requests[0].headers['x-cat-cafe-user'], 'owner-1');
+    assert.equal(
+      requests.every((request) => request.payload.serverAuthoredKind === 'review_orchestration'),
+      true,
+    );
     assert.match(requests[0].payload.content, /^@gpt\n@kimi\n/);
     assert.match(requests[0].payload.content, /independent/i);
     assert.match(requests[0].payload.content, /a{40}/);

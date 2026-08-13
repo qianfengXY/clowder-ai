@@ -669,6 +669,43 @@ describe('GET /api/messages', () => {
     });
   });
 
+  it('maps only provenance-marked Review Hub orchestration messages to system presentation', async () => {
+    const content = '@gpt\n@kimi\nF289 automatic review — independent stage.\nProject: project-1\nReviewRound: rr-1';
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content,
+      mentions: ['gpt', 'kimi'],
+      timestamp: 3100,
+      threadId: 'project-review-hub:project-1',
+      extra: { systemKind: 'review_orchestration' },
+    });
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: content.replace('rr-1', 'rr-user-authored-lookalike'),
+      mentions: ['gpt', 'kimi'],
+      timestamp: 3200,
+      threadId: 'project-review-hub:project-1',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=project-review-hub%3Aproject-1',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 2);
+    assert.deepEqual(
+      body.messages.map((message) => message.type),
+      ['system', 'user'],
+    );
+    assert.deepEqual(
+      body.messages.map((message) => message.extra?.systemKind),
+      ['review_orchestration', undefined],
+    );
+  });
+
   it('respects limit parameter', async () => {
     for (let i = 0; i < 10; i++) {
       messageStore.append({

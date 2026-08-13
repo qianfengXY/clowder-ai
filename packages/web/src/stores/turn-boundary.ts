@@ -5,6 +5,7 @@ type TurnBoundaryPoint = {
   timestamp?: number;
   deliveredAt?: number;
   timelineOrderAt?: number;
+  extra?: { systemKind?: string };
 };
 
 function getTurnBoundaryTimestamp(point: TurnBoundaryPoint): number | undefined {
@@ -30,7 +31,9 @@ export function crossesUserTurnBoundary(
   const earlier = Math.min(leftTs, rightTs);
   const later = Math.max(leftTs, rightTs);
   return messages.some((message) => {
-    if (message.type !== 'user') return false;
+    const isReviewOrchestrationBoundary =
+      message.type === 'system' && message.extra?.systemKind === 'review_orchestration';
+    if (message.type !== 'user' && !isReviewOrchestrationBoundary) return false;
     const ts = getTurnBoundaryTimestamp(message);
     return ts !== undefined && ts > earlier && ts <= later;
   });

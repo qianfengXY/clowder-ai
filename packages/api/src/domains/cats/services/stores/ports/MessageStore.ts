@@ -215,7 +215,7 @@ export interface StoredMessage {
     };
     scheduler?: SchedulerMessageExtra['scheduler'];
     tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-    systemKind?: 'a2a_routing' | 'context_briefing';
+    systemKind?: 'a2a_routing' | 'context_briefing' | 'review_orchestration';
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
     /** F264: derived browser projection; canonical truth remains queueCustody. */
     queueReceipt?: QueueMessageReceipt;

@@ -1304,6 +1304,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...message,
             ...(serverMessage
               ? {
+                  ...(serverMessage.extra?.systemKind === 'review_orchestration' ? { type: 'system' as const } : {}),
                   content: serverMessage.content,
                   timestamp: serverMessage.timestamp,
                   ...(serverMessage.contentBlocks
@@ -1339,7 +1340,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const incoming: ChatMessage = {
               id: sm.id,
               // #607: cat-originated messages (A2A triggers) have catId set
-              type: sm.catId ? 'assistant' : 'user',
+              type: sm.extra?.systemKind === 'review_orchestration' ? 'system' : sm.catId ? 'assistant' : 'user',
               content: sm.content,
               timestamp: sm.timestamp,
               deliveredAt,

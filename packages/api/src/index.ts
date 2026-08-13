@@ -5,6 +5,7 @@
 
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -2475,8 +2476,10 @@ async function main(): Promise<void> {
   }
 
   // Register routes (socketManager injected, no circular import)
+  const internalMessageIngressToken = randomUUID();
   const messagesOpts = {
     projectRoot: resolveActiveProjectRoot(),
+    internalMessageIngressToken,
     registry,
     messageStore,
     socketManager,
@@ -4326,7 +4329,12 @@ async function main(): Promise<void> {
     const reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
     const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher({
       sendMessage: async ({ headers, payload }) => {
-        const response = await app.inject({ method: 'POST', url: '/api/messages', headers, payload });
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/messages',
+          headers: { ...headers, 'x-cat-cafe-internal-message-token': internalMessageIngressToken },
+          payload,
+        });
         return { statusCode: response.statusCode, body: response.body };
       },
       resolveMentionHandle: primaryMentionHandleForCatId,

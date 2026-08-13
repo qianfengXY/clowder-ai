@@ -25,6 +25,7 @@ interface MessageIngressRequest {
     readonly threadId: string;
     readonly idempotencyKey: string;
     readonly messageDisposition: 'next_work';
+    readonly serverAuthoredKind: 'review_orchestration';
   };
 }
 
@@ -39,8 +40,8 @@ export interface ReviewRoundStageDispatcherDeps {
 }
 
 /**
- * Sends server-authored review work through the same canonical message ingress
- * used by a human-authored Review Hub turn. Invocation records, callback
+ * Sends server-authored review work through canonical message ingress while
+ * preserving explicit orchestration provenance. Invocation records, callback
  * credentials, queueing, and per-cat execution remain owned by that pipeline.
  */
 export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
@@ -60,6 +61,7 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
         threadId: input.reviewHubThreadId,
         idempotencyKey: deterministicMessageId(input.roundId, input.stage),
         messageDisposition: 'next_work',
+        serverAuthoredKind: 'review_orchestration',
       },
     });
     if (response.statusCode < 200 || response.statusCode >= 300) {

@@ -943,7 +943,7 @@ export function useChatHistory(threadId: string) {
               turnExecution?: NonNullable<ChatMessageData['extra']>['turnExecution'];
               auxiliaryTurnExecutions?: NonNullable<ChatMessageData['extra']>['auxiliaryTurnExecutions'];
               scheduler?: SchedulerMessageExtra['scheduler'];
-              systemKind?: 'a2a_routing' | 'context_briefing';
+              systemKind?: 'a2a_routing' | 'context_briefing' | 'review_orchestration';
               /** #814: explicit post_message bypass — survives hydration so F5/thread-switch
                *  preserves the "don't merge by invocation" semantic. */
               isExplicitPost?: boolean;

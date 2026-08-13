@@ -206,6 +206,12 @@ describe('safeParseExtra', () => {
     assert.equal(result.systemKind, 'a2a_routing');
   });
 
+  it('preserves systemKind review_orchestration through round-trip', () => {
+    const raw = JSON.stringify({ systemKind: 'review_orchestration' });
+    const result = safeParseExtra(raw);
+    assert.equal(result.systemKind, 'review_orchestration');
+  });
+
   it('ignores unknown systemKind values', () => {
     const raw = JSON.stringify({ systemKind: 'unknown_kind' });
     assert.equal(safeParseExtra(raw), undefined);

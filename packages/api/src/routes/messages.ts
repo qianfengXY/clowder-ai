@@ -184,6 +184,8 @@ const routeChainTracker = new RouteChainCompletionTracker();
 export interface MessagesRoutesOptions {
   /** Shared owner-preference root. Optional test harnesses retain product-default behavior. */
   projectRoot?: string;
+  /** Process-local capability required for internal server-authored message markers. */
+  internalMessageIngressToken?: string;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
   socketManager: SocketManager;
@@ -418,6 +420,10 @@ const getMessagesSchema = z.object({
   threadId: z.string().min(1).max(100).optional(),
 });
 
+function isReviewOrchestrationMessage(message: StoredMessage): boolean {
+  return message.extra?.systemKind === 'review_orchestration';
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
@@ -487,6 +493,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // F39: Delivery mode
     let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
     let messageDisposition: MessageWorkDisposition | undefined;
+    let serverAuthoredKind: 'review_orchestration' | undefined;
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
@@ -526,6 +533,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       ({ content, userId: legacyUserId, threadId, idempotencyKey } = parseResult.data);
       deliveryMode = parseResult.data.deliveryMode;
       messageDisposition = parseResult.data.messageDisposition;
+      serverAuthoredKind = parseResult.data.serverAuthoredKind;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -543,6 +551,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
+    if (
+      serverAuthoredKind &&
+      (!opts.internalMessageIngressToken ||
+        request.headers['x-cat-cafe-internal-message-token'] !== opts.internalMessageIngressToken)
+    ) {
+      reply.status(403);
+      return { error: 'Server-authored message marker requires internal ingress authority' };
+    }
     const ownerAuthProvenance = resolveStrictUserId(request) === userId ? 'strict' : 'compatibility_fallback';
 
     // Default to 'default' thread for lobby (prevents global broadcast)
@@ -550,7 +566,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // F167 L1 AC-A3: user message is a fresh turn — clear any in-flight ping-pong
     // streak on this thread's active worklist (no-op if none).
-    resetStreak(resolvedThreadId);
+    if (!serverAuthoredKind) resetStreak(resolvedThreadId);
 
     // Ensure thread exists and auto-title on first message
     if (resolvedThreadId !== 'default' && opts.threadStore) {
@@ -758,6 +774,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
+    if (serverAuthoredKind) {
+      const existing = await opts.messageStore.getByIdempotencyKey(userId, resolvedThreadId, resolvedIdempotencyKey);
+      if (existing) {
+        if (existing.deliveryStatus === 'queued') {
+          const durableQueueEntry = opts.invocationQueue
+            ?.list(resolvedThreadId, userId)
+            .find((entry) => entry.messageId === existing.id || entry.idempotencyKey === resolvedIdempotencyKey);
+          if (!durableQueueEntry) {
+            reply.status(503);
+            return {
+              error: 'Review orchestration queue recovery is still pending',
+              code: 'REVIEW_QUEUE_RECOVERY_PENDING',
+            };
+          }
+        }
+        reply.status(200);
+        return { status: 'duplicate', userMessageId: existing.id };
+      }
+    }
 
     // F39+F108B: Slot-aware delivery mode routing
     // Whisper → check target cat's slot (side-dispatch to idle cat)
@@ -861,18 +896,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
               : {}),
             ...(replyTo ? { replyTo } : {}),
+            ...(serverAuthoredKind ? { extra: { systemKind: serverAuthoredKind } } : {}),
           });
           storedUserMessageId = userMessage.id;
 
           // F192 Phase G AC-G12 / F227: detect magic words → Event Memory (queued path)
-          void tryDetectMagicWords(
-            content,
-            resolvedThreadId,
-            targetCats,
-            storedUserMessageId,
-            userId,
-            opts.onMagicWordDetected,
-          );
+          if (!serverAuthoredKind) {
+            void tryDetectMagicWords(
+              content,
+              resolvedThreadId,
+              targetCats,
+              storedUserMessageId,
+              userId,
+              opts.onMagicWordDetected,
+            );
+          }
 
           const queueEntryId = enqueueResult.entry?.id;
           if (queueEntryId) {
@@ -897,7 +935,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         enqueueResult.outcome,
       );
 
-      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+      if (!serverAuthoredKind) tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
       reply.status(202);
       return {
@@ -1003,6 +1041,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                     ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
                     : {}),
                   ...(replyTo ? { replyTo } : {}),
+                  ...(serverAuthoredKind ? { extra: { systemKind: serverAuthoredKind } } : {}),
                 });
                 toctouUserMessageId = toctouUserMessage.id;
                 const queueEntryId = enqueueResult.entry?.id;
@@ -1025,7 +1064,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               opts.messageStore,
               enqueueResult.outcome,
             );
-            tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+            if (!serverAuthoredKind) tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
             reply.status(202);
             return {
               status: 'queued',
@@ -1134,11 +1173,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           mentions: targetCats,
           timestamp: Date.now(),
           threadId: resolvedThreadId,
+          ...(serverAuthoredKind ? { idempotencyKey: resolvedIdempotencyKey } : {}),
           ...(contentBlocks ? { contentBlocks } : {}),
           ...(whisperVisibility && whisperRecipients
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
             : {}),
           ...(replyTo ? { replyTo } : {}),
+          ...(serverAuthoredKind ? { extra: { systemKind: serverAuthoredKind } } : {}),
         });
 
         // ③ Backfill InvocationRecord.userMessageId
@@ -1147,14 +1188,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         });
 
         // F192 Phase G AC-G12 / F227: detect magic words → Event Memory (immediate path)
-        void tryDetectMagicWords(
-          content,
-          resolvedThreadId,
-          targetCats,
-          storedUserMessage.id,
-          userId,
-          opts.onMagicWordDetected,
-        );
+        if (!serverAuthoredKind) {
+          void tryDetectMagicWords(
+            content,
+            resolvedThreadId,
+            targetCats,
+            storedUserMessage.id,
+            userId,
+            opts.onMagicWordDetected,
+          );
+        }
       } catch (preExecErr) {
         // Release slots — we haven't entered background coroutine yet
         opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
@@ -1175,7 +1218,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         timestamp: Date.now(),
       });
 
-      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+      if (!serverAuthoredKind) tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
       // ⑤ Background: execute cat invocation via routeExecution
       void (async () => {
@@ -2060,6 +2103,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // or if we haven't exhausted the store (more may exist deeper).
     const hasMore = allVisible.length > limit || !storeExhausted;
     const page = allVisible.length > limit ? allVisible.slice(allVisible.length - limit) : allVisible;
+    const reviewOrchestrationMessageIds = new Set(
+      page.filter(isReviewOrchestrationMessage).map((message) => message.id),
+    );
 
     const supplementProjectionByOriginal = new Map<
       string,
@@ -2103,7 +2149,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           : 'assistant'
         : m.source
           ? 'connector'
-          : isSystemUserMessage(m)
+          : isSystemUserMessage(m) || reviewOrchestrationMessageIds.has(m.id)
             ? 'system'
             : 'user') as TimelineItem['type'],
       catId: m.catId,
@@ -2121,6 +2167,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.targetCats ||
       m.extra?.scheduler ||
       m.extra?.systemKind ||
+      reviewOrchestrationMessageIds.has(m.id) ||
       m.extra?.a2aRouting ||
       m.extra?.freshness ||
       m.extra?.supplement ||
@@ -2141,7 +2188,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
               ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
               ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
-              ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
+              ...(m.extra?.systemKind
+                ? { systemKind: m.extra.systemKind }
+                : reviewOrchestrationMessageIds.has(m.id)
+                  ? { systemKind: 'review_orchestration' as const }
+                  : {}),
               ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
               ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
               ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),

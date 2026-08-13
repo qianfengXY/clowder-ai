@@ -28,6 +28,8 @@ export const sendMessageSchema = z
     deliveryMode: z.enum(['immediate', 'queue', 'force']).optional(),
     /** F264: author-declared work disposition. Missing is server-default next_work. */
     messageDisposition: z.enum(['continue_current', 'next_work']).optional(),
+    /** Internal-only presentation marker for server-authored Review Hub orchestration. */
+    serverAuthoredKind: z.enum(['review_orchestration']).optional(),
     /** #699: ID of message being replied to (quote). */
     replyTo: z.string().min(1).max(100).optional(),
   })

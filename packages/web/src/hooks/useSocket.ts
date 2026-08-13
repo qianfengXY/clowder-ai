@@ -936,9 +936,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       }) => {
         const store = useChatStore.getState();
         for (const message of data.messages) {
+          const isReviewOrchestration = message.extra?.systemKind === 'review_orchestration';
           store.addMessageToThread(data.threadId, {
             id: message.id,
-            type: message.catId ? 'assistant' : 'user',
+            type: isReviewOrchestration ? 'system' : message.catId ? 'assistant' : 'user',
             content: message.content,
             timestamp: message.timestamp,
             ...(message.catId ? { catId: message.catId } : {}),

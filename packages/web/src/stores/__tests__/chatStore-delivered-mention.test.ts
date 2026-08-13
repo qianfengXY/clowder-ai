@@ -269,4 +269,41 @@ describe('markMessagesDelivered mentionsUser notification', () => {
       seenAt: NOW + 20,
     });
   });
+
+  it('presents delivered review orchestration as a system message', () => {
+    useChatStore.setState({
+      currentThreadId: 'thread-1',
+      messages: [
+        {
+          id: 'review-existing',
+          type: 'user',
+          content: 'automatic independent review',
+          timestamp: NOW,
+        },
+      ],
+      threadStates: {},
+    });
+
+    useChatStore.getState().markMessagesDelivered('thread-1', ['review-existing', 'review-new'], NOW + 50, [
+      {
+        id: 'review-existing',
+        content: 'automatic independent review',
+        catId: null,
+        timestamp: NOW,
+        extra: { systemKind: 'review_orchestration' },
+      },
+      {
+        id: 'review-new',
+        content: 'automatic cross review',
+        catId: null,
+        timestamp: NOW + 10,
+        extra: { systemKind: 'review_orchestration' },
+      },
+    ]);
+
+    expect(useChatStore.getState().messages).toEqual([
+      expect.objectContaining({ id: 'review-existing', type: 'system' }),
+      expect.objectContaining({ id: 'review-new', type: 'system' }),
+    ]);
+  });
 });

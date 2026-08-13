@@ -775,6 +775,39 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     );
   });
 
+  it('messages_queued presents trusted review orchestration as a system message', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('messages_queued', {
+        threadId: 'thread-B',
+        messageIds: ['review-stage'],
+        messages: [
+          {
+            id: 'review-stage',
+            content: 'automatic review stage',
+            catId: null,
+            timestamp: 1234,
+            extra: { systemKind: 'review_orchestration' },
+          },
+        ],
+      });
+    });
+
+    expect(mockAddMessageToThread).toHaveBeenCalledWith('thread-B', {
+      id: 'review-stage',
+      type: 'system',
+      content: 'automatic review stage',
+      timestamp: 1234,
+      extra: { systemKind: 'review_orchestration' },
+    });
+  });
+
   it('queue_updated processing hydrates current-thread slot truth when intent_mode is missing', async () => {
     mockStoreCurrentThreadId = 'thread-B';
     mockApiFetch.mockResolvedValue({
