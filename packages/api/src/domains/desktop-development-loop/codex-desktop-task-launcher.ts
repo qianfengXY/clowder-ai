@@ -1,15 +1,16 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { createDirectAgentCarrierSession } from '../cats/services/agents/providers/DirectAgentCarrierSession.js';
+import { connectCodexAppServerSocket } from '../cats/services/agents/providers/CodexUnixWebSocketSession.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory } from '../cats/services/types.js';
 
 const execFileAsync = promisify(execFile);
 const PENDING_WAKE_SET = 'desktop-development:pending-native-wakes';
 const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
-const CHATGPT_CODEX_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex';
+const DEFAULT_DAEMON_SOCKET = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock');
 
 export interface DesktopTaskLaunchInput {
   readonly projectId: string;
@@ -51,7 +52,7 @@ interface DesktopTaskLauncherOptions {
   readonly sessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
   readonly recoveryIntervalMs?: number;
-  readonly command?: string;
+  readonly daemonSocketPath?: string;
 }
 
 export function buildDesktopTaskName(featureId: string, title: string): string {
@@ -68,9 +69,9 @@ export function buildDesktopTaskName(featureId: string, title: string): string {
 /**
  * Creates and wakes native ChatGPT Desktop tasks.
  *
- * The short-lived app-server process only updates persisted task metadata. It
- * deliberately never sends turn/start: opening the codex:// deep link lets the
- * running ChatGPT app own the visible turn and its subsequent Goal continuation.
+ * Cat Cafe connects to the durable ChatGPT app-server daemon. The daemon owns
+ * the turn after this short-lived proxy connection closes, while the codex://
+ * deep link makes that same persisted thread visible in ChatGPT Desktop.
  */
 export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly active = new Map<string, Promise<DesktopTaskLaunchResult>>();
@@ -78,15 +79,16 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly completed = new Map<string, DesktopTaskLaunchResult>();
   private readonly sessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
-  private readonly command: string;
+  private readonly daemonSocketPath: string;
 
   constructor(
     private readonly redis?: RedisClient,
     options: DesktopTaskLauncherOptions = {},
   ) {
-    this.sessionFactory = options.sessionFactory ?? createDirectAgentCarrierSession;
+    this.sessionFactory =
+      options.sessionFactory ?? (async () => connectCodexAppServerSocket(this.daemonSocketPath));
     this.openThread = options.openThread ?? openChatGptThread;
-    this.command = options.command ?? resolveChatGptCodexCommand();
+    this.daemonSocketPath = options.daemonSocketPath ?? process.env.CODEX_APP_SERVER_SOCKET ?? DEFAULT_DAEMON_SOCKET;
     if (redis && options.recoveryIntervalMs !== 0) {
       const interval = setInterval(
         () => void this.recoverPendingActivations().catch(() => undefined),
@@ -213,10 +215,16 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
           status: 'active',
           tokenBudget: null,
         });
+        await this.openThread(thread.id);
+        await rpc.request('turn/start', {
+          threadId: thread.id,
+          input: [{ type: 'text', text: buildInitialObjective(input, runtimeSessionId) }],
+          cwd: input.sourcePath,
+          approvalPolicy: 'on-request',
+        });
         return thread.id;
       },
     );
-    await this.openThread(threadId);
     return { status: 'created', threadId };
   }
 
@@ -237,14 +245,26 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
 
   private async wake(input: DesktopTaskActivationInput): Promise<void> {
     await this.withProtocol(input.sourcePath, `desktop-wake-${input.threadId}`, async (rpc) => {
+      await rpc.request('thread/resume', {
+        threadId: input.threadId,
+        cwd: input.sourcePath,
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'on-request',
+      });
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
         objective: input.objective,
         status: 'active',
         tokenBudget: null,
       });
+      await this.openThread(input.threadId);
+      await rpc.request('turn/start', {
+        threadId: input.threadId,
+        input: [{ type: 'text', text: input.objective }],
+        cwd: input.sourcePath,
+        approvalPolicy: 'on-request',
+      });
     });
-    await this.openThread(input.threadId);
   }
 
   private storageKey(projectId: string, backlogItemId: string): string {
@@ -312,8 +332,8 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 15_000);
     const session = await this.sessionFactory({
-      command: this.command,
-      args: ['app-server', '--stdio'],
+      command: 'codex-app-server-daemon',
+      args: [],
       cwd,
       invocationId: `${invocationPrefix}-${Date.now()}`,
       signal: abortController.signal,
@@ -392,13 +412,6 @@ export function buildReviewCompletionObjective(input: {
     '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
     '若需要修复，先按 Resume Packet 重连并取得新的 attempt，再在这个可见任务中完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
   ].join('\n');
-}
-
-function resolveChatGptCodexCommand(): string {
-  const configured = process.env.CHATGPT_APP_CODEX_BIN?.trim() || process.env.CODEX_BIN?.trim();
-  if (configured) return configured;
-  if (process.platform === 'darwin' && existsSync(CHATGPT_CODEX_BIN)) return CHATGPT_CODEX_BIN;
-  return 'codex';
 }
 
 async function openChatGptThread(threadId: string): Promise<void> {

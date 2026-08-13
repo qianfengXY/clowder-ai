@@ -98,14 +98,13 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
   });
 });
 
-test('Desktop task launcher delegates the visible turn to ChatGPT instead of starting a background turn', async () => {
+test('Desktop task launcher starts the visible turn through the durable ChatGPT daemon', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   const sessions = [];
   const opened = [];
   const launcher = new CodexDesktopTaskLauncher(undefined, {
-    command: '/Applications/ChatGPT.app/Contents/Resources/codex',
     sessionFactory: async () => {
       const session = new FakeNativeSession();
       sessions.push(session);
@@ -127,15 +126,24 @@ test('Desktop task launcher delegates the visible turn to ChatGPT instead of sta
   assert.deepEqual(result, { status: 'created', threadId: 'native-thread-f006' });
   assert.deepEqual(opened, ['native-thread-f006']);
   const methods = sessions[0].writes.map((message) => message.method);
-  assert.deepEqual(methods, ['initialize', 'initialized', 'thread/start', 'thread/name/set', 'thread/goal/set']);
-  assert.equal(methods.includes('turn/start'), false);
+  assert.deepEqual(methods, [
+    'initialize',
+    'initialized',
+    'thread/start',
+    'thread/name/set',
+    'thread/goal/set',
+    'turn/start',
+  ]);
   const goal = sessions[0].writes.find((message) => message.method === 'thread/goal/set');
   assert.equal(goal.params.threadId, 'native-thread-f006');
   assert.equal(goal.params.status, 'active');
   assert.match(goal.params.objective, /runtimeSessionId/);
+  const turn = sessions[0].writes.find((message) => message.method === 'turn/start');
+  assert.equal(turn.params.threadId, 'native-thread-f006');
+  assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
-test('Desktop task activation sets the Goal before opening the existing ChatGPT task', async () => {
+test('Desktop task activation sets the Goal, opens the task, then starts its visible turn', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
@@ -146,7 +154,9 @@ test('Desktop task activation sets the Goal before opening the existing ChatGPT 
       session = new FakeNativeSession();
       const originalWrite = session.write.bind(session);
       session.write = async (message) => {
+        if (message.method === 'thread/resume') order.push('resume');
         if (message.method === 'thread/goal/set') order.push('goal');
+        if (message.method === 'turn/start') order.push('turn');
         await originalWrite(message);
       };
       return session;
@@ -161,11 +171,10 @@ test('Desktop task activation sets the Goal before opening the existing ChatGPT 
     objective: 'Continue from the latest Resume Packet',
   });
 
-  assert.deepEqual(order, ['goal', 'open']);
-  assert.equal(
-    session.writes.some((message) => message.method === 'turn/start'),
-    false,
-  );
+  assert.deepEqual(order, ['resume', 'goal', 'open', 'turn']);
+  const turn = session.writes.find((message) => message.method === 'turn/start');
+  assert.equal(turn.params.threadId, 'existing-thread');
+  assert.equal(turn.params.input[0].text, 'Continue from the latest Resume Packet');
 });
 
 test('Desktop task activation survives a temporary ChatGPT open failure and recovers from Redis', async () => {

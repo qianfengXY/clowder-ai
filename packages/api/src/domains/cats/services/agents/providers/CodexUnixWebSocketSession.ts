@@ -236,10 +236,14 @@ export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch):
 }
 
 export async function connectCodexAppServerHost(host: CodexAppServerHostProcess): Promise<AgentCarrierSession> {
+  return connectCodexAppServerSocket(host.socketPath);
+}
+
+export async function connectCodexAppServerSocket(socketPath: string): Promise<AgentCarrierSession> {
   const socket = new WebSocket('ws://localhost/', {
     handshakeTimeout: 3_000,
     perMessageDeflate: false,
-    createConnection: () => connect({ path: host.socketPath }),
+    createConnection: () => connect({ path: socketPath }),
   });
   await new Promise<void>((resolve, reject) => {
     const onOpen = () => {
