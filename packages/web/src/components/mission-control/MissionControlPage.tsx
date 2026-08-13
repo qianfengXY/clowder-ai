@@ -39,6 +39,7 @@ type SelfClaimPolicyBlocker = 'once' | 'thread' | null;
 
 const CONTENT_SURFACE_CLASS =
   'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
+const MISSION_HUB_ACTIVE_TAB_KEY = 'cat-cafe:mission-hub:active-tab';
 
 function detectSelfClaimPolicyBlocker(rawError: string): SelfClaimPolicyBlocker {
   if (rawError.includes('Self-claim once policy already consumed')) return 'once';
@@ -410,6 +411,9 @@ export function MissionControlPage() {
 
   // Tab state (string allows project IDs as tab values)
   const [activeTab, setActiveTab] = useState<string>('features');
+  const [tabPreferenceReady, setTabPreferenceReady] = useState(false);
+  const [hadSavedTab, setHadSavedTab] = useState(false);
+  const [externalProjectsLoaded, setExternalProjectsLoaded] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const { projects, setProjects, setActiveProjectId } = useExternalProjectStore();
 
@@ -422,12 +426,50 @@ export function MissionControlPage() {
       }
     } catch {
       /* ignore */
+    } finally {
+      setExternalProjectsLoaded(true);
     }
   }, [setProjects]);
+
+  const selectActiveTab = useCallback((tab: string) => {
+    setActiveTab(tab);
+    setHadSavedTab(true);
+    try {
+      window.localStorage.setItem(MISSION_HUB_ACTIVE_TAB_KEY, tab);
+    } catch {
+      /* local storage is an optional navigation convenience */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedTab = window.localStorage.getItem(MISSION_HUB_ACTIVE_TAB_KEY)?.trim();
+      if (savedTab) {
+        setActiveTab(savedTab);
+        setHadSavedTab(true);
+      }
+    } catch {
+      /* local storage may be unavailable in hardened browsers */
+    } finally {
+      setTabPreferenceReady(true);
+    }
+  }, []);
 
   useEffect(() => {
     void loadExternalProjects();
   }, [loadExternalProjects]);
+
+  useEffect(() => {
+    if (!tabPreferenceReady || !externalProjectsLoaded) return;
+    const isBuiltInTab = activeTab === 'features' || activeTab === 'dependencies';
+    const isKnownProject = projects.some((project) => project.id === activeTab);
+    const defaultProject = projects.find((project) => project.name.trim().toLowerCase() === 'traqen') ?? projects[0];
+    if (!hadSavedTab && projects.length > 0) {
+      selectActiveTab(defaultProject.id);
+    } else if (!isBuiltInTab && !isKnownProject) {
+      selectActiveTab(defaultProject?.id ?? 'features');
+    }
+  }, [activeTab, externalProjectsLoaded, hadSavedTab, projects, selectActiveTab, tabPreferenceReady]);
 
   // Sync active project
   const activeProject = useMemo(() => projects.find((p) => p.id === activeTab) ?? null, [projects, activeTab]);
@@ -472,7 +514,7 @@ export function MissionControlPage() {
           <div className="mt-4 flex console-divider-b">
             <button
               type="button"
-              onClick={() => setActiveTab('features')}
+              onClick={() => selectActiveTab('features')}
               className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === 'features'
                   ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
@@ -484,7 +526,7 @@ export function MissionControlPage() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('dependencies')}
+              onClick={() => selectActiveTab('dependencies')}
               className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === 'dependencies'
                   ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
@@ -498,7 +540,8 @@ export function MissionControlPage() {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setActiveTab(p.id)}
+                onClick={() => selectActiveTab(p.id)}
+                data-testid={`mc-tab-project-${p.id}`}
                 className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                   activeTab === p.id
                     ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
@@ -540,7 +583,7 @@ export function MissionControlPage() {
 
           <div className="min-h-0 flex-1 pt-4">
             {activeProject ? (
-              <ExternalProjectTab project={activeProject} />
+              <ExternalProjectTab key={activeProject.id} project={activeProject} />
             ) : activeTab === 'features' ? (
               <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="space-y-4">

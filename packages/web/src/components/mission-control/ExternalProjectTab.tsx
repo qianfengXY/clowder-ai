@@ -37,6 +37,24 @@ type SubTab =
   | 'slices'
   | 'reflux';
 
+const DEFAULT_PROJECT_SUB_TAB: SubTab = 'features';
+const PROJECT_SUB_TAB_KEY_PREFIX = 'cat-cafe:mission-hub:project-sub-tab:';
+const SUB_TAB_IDS = new Set<SubTab>([
+  'development',
+  'features',
+  'audit',
+  'health',
+  'progress',
+  'risk',
+  'resolutions',
+  'slices',
+  'reflux',
+]);
+
+function isSubTab(value: string): value is SubTab {
+  return SUB_TAB_IDS.has(value as SubTab);
+}
+
 interface ExternalProjectTabProps {
   project: ExternalProject;
 }
@@ -62,12 +80,33 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
     setRefluxPatterns,
     setLoading,
   } = useExternalProjectStore();
-  const [subTab, setSubTab] = useState<SubTab>('audit');
+  const [subTab, setSubTab] = useState<SubTab>(DEFAULT_PROJECT_SUB_TAB);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [projectItems, setProjectItems] = useState<BacklogItem[]>([]);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedSubTab = window.localStorage.getItem(`${PROJECT_SUB_TAB_KEY_PREFIX}${project.id}`)?.trim();
+      setSubTab(savedSubTab && isSubTab(savedSubTab) ? savedSubTab : DEFAULT_PROJECT_SUB_TAB);
+    } catch {
+      setSubTab(DEFAULT_PROJECT_SUB_TAB);
+    }
+  }, [project.id]);
+
+  const selectSubTab = useCallback(
+    (nextSubTab: SubTab) => {
+      setSubTab(nextSubTab);
+      try {
+        window.localStorage.setItem(`${PROJECT_SUB_TAB_KEY_PREFIX}${project.id}`, nextSubTab);
+      } catch {
+        /* local storage is an optional navigation convenience */
+      }
+    },
+    [project.id],
+  );
 
   // Data is stale when it belongs to a different project than the one we're viewing
   const isStale = loadedProjectId !== project.id;
@@ -257,7 +296,8 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
             <button
               key={t.id}
               type="button"
-              onClick={() => setSubTab(t.id)}
+              onClick={() => selectSubTab(t.id)}
+              data-testid={`external-project-sub-tab-${t.id}`}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                 subTab === t.id
                   ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'

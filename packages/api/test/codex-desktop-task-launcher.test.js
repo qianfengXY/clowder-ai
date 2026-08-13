@@ -3,6 +3,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+test('Desktop task names include the feature name without repeating the project name', async () => {
+  const { buildDesktopTaskName } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  assert.equal(
+    buildDesktopTaskName('F006', '[F006] Workspace capability settings'),
+    'F006 · Workspace capability settings',
+  );
+  assert.equal(buildDesktopTaskName('f120', 'F120 — Export audit trail'), 'F120 · Export audit trail');
+  assert.equal(buildDesktopTaskName('F009', 'Traqen sync'), 'F009 · Traqen sync');
+});
+
 test('Desktop task launcher reuses the persisted task for one project feature', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'

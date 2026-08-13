@@ -1,8 +1,9 @@
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, ExternalProject } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MissionControlPage } from '@/components/mission-control/MissionControlPage';
+import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import {
   createMissionControlMockBackend,
@@ -28,6 +29,10 @@ vi.mock('@/components/ThreadSidebar', () => ({
   ThreadSidebar: () => React.createElement('aside', { 'data-testid': 'thread-sidebar' }),
 }));
 
+afterEach(() => {
+  useExternalProjectStore.setState({ projects: [], activeProjectId: null });
+});
+
 describe('MissionControlPage', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -39,6 +44,7 @@ describe('MissionControlPage', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1029,6 +1035,7 @@ describe('MissionControlPage — Done lane + dependencies', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1155,6 +1162,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1188,6 +1196,75 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     expect(depsTab).not.toBeNull();
     expect(featuresTab?.textContent).toContain('功能列表');
     expect(depsTab?.textContent).toContain('依赖全景');
+  });
+
+  it('opens Traqen features initially and restores the last Mission Hub location', async () => {
+    const projects: ExternalProject[] = [
+      {
+        id: 'project-nalo',
+        userId: 'u_test',
+        name: 'Nalo',
+        description: '',
+        sourcePath: '/work/Nalo',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'project-traqen',
+        userId: 'u_test',
+        name: 'Traqen',
+        description: '',
+        sourcePath: '/work/Traqen',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    window.localStorage.removeItem('cat-cafe:mission-hub:project-sub-tab:project-traqen');
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
+      if (path.includes('/intent-cards')) return Promise.resolve(mockResponse(200, { cards: [] }));
+      if (path.endsWith('/frame')) return Promise.resolve(mockResponse(200, { frame: null }));
+      if (path.startsWith('/api/execution-digests')) return Promise.resolve(mockResponse(200, { digests: [] }));
+      if (path.endsWith('/resolutions')) return Promise.resolve(mockResponse(200, { resolutions: [] }));
+      if (path.endsWith('/slices')) return Promise.resolve(mockResponse(200, { slices: [] }));
+      if (path.endsWith('/reflux-patterns')) return Promise.resolve(mockResponse(200, { patterns: [] }));
+      return backend.handleRequest(path, init);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage));
+    });
+    await flush(act);
+    await flush(act);
+
+    const traqenTab = container.querySelector('[data-testid="mc-tab-project-project-traqen"]') as HTMLButtonElement;
+    const featuresSubTab = container.querySelector(
+      '[data-testid="external-project-sub-tab-features"]',
+    ) as HTMLButtonElement;
+    expect(traqenTab.className).toContain('console-active-bg');
+    expect(featuresSubTab.className).toContain('mc-accent');
+
+    const auditSubTab = container.querySelector('[data-testid="external-project-sub-tab-audit"]') as HTMLButtonElement;
+    await act(async () => auditSubTab.click());
+    expect(window.localStorage.getItem('cat-cafe:mission-hub:project-sub-tab:project-traqen')).toBe('audit');
+
+    const dependenciesTab = container.querySelector('[data-testid="mc-tab-dependencies"]') as HTMLButtonElement;
+    await act(async () => dependenciesTab.click());
+    await act(async () => traqenTab.click());
+    await flush(act);
+    expect(
+      (container.querySelector('[data-testid="external-project-sub-tab-audit"]') as HTMLButtonElement).className,
+    ).toContain('mc-accent');
+
+    await act(async () => dependenciesTab.click());
+    await act(async () => root.render(React.createElement('div')));
+    await act(async () => root.render(React.createElement(MissionControlPage)));
+    await flush(act);
+    expect((container.querySelector('[data-testid="mc-tab-dependencies"]') as HTMLButtonElement).className).toContain(
+      'console-active-bg',
+    );
   });
 
   it('shows feature row list by default, dep graph after tab switch', async () => {
@@ -1735,6 +1812,7 @@ describe('Feature progress panel', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

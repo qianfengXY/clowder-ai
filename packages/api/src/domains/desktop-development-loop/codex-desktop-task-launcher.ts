@@ -23,6 +23,17 @@ export interface DesktopTaskLauncher {
   get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null>;
 }
 
+export function buildDesktopTaskName(featureId: string, title: string): string {
+  const normalizedFeatureId = featureId.trim().toUpperCase();
+  const featurePrefix = normalizedFeatureId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const featureName = title
+    .trim()
+    .replace(new RegExp(`^\\[${featurePrefix}\\]\\s*`, 'i'), '')
+    .replace(new RegExp(`^${featurePrefix}\\s*[-—:：·]?\\s*`, 'i'), '')
+    .trim();
+  return featureName ? `${normalizedFeatureId} · ${featureName}` : normalizedFeatureId;
+}
+
 /** Creates a native, persisted Codex Desktop task and lets its first turn connect through the scoped MCP flow. */
 export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly active = new Map<string, Promise<DesktopTaskLaunchResult>>();
@@ -88,8 +99,9 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     });
     const runtimeSessionId = randomUUID();
     const abortController = new AbortController();
+    const taskName = buildDesktopTaskName(input.featureId, input.title);
     const prompt = [
-      `开发 ${input.projectName} ${input.featureId}：${input.title}`,
+      `开发功能：${taskName}`,
       '使用 catcafe-desktop-executor 技能执行这个已绑定的 Cat Café managed work。',
       `项目：${input.projectName}（${input.repository}）`,
       `功能：${input.featureId} — ${input.title}`,
@@ -112,6 +124,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
           },
           runInput: {
             prompt,
+            threadName: taskName,
             thread: existingThreadId ? { kind: 'resume', threadId: existingThreadId } : { kind: 'start' },
             cwd: input.sourcePath,
             sandbox: 'danger-full-access',

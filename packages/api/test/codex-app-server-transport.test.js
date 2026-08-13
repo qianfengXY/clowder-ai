@@ -89,6 +89,7 @@ class ProtocolWire {
     if (message.method === 'thread/resume') {
       this.inbox.push({ id: message.id, result: { thread: { id: message.params.threadId } } });
     }
+    if (message.method === 'thread/name/set') this.inbox.push({ id: message.id, result: {} });
     if (message.method === 'turn/start') {
       if (message.params.additionalContext && !this.experimentalApiEnabled) {
         this.inbox.push({
@@ -115,6 +116,29 @@ class ProtocolWire {
     this.inbox.close();
   }
 }
+
+test('app-server sets an explicit thread name before starting the first turn', async () => {
+  const wire = new ProtocolWire();
+  const client = new CodexAppServerClient({ wire });
+  const outputPromise = collect(
+    client.run({ prompt: 'work', thread: { kind: 'start' }, threadName: 'F006 · Workspace capability settings' }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  const nameIndex = wire.writes.findIndex((message) => message.method === 'thread/name/set');
+  const turnIndex = wire.writes.findIndex((message) => message.method === 'turn/start');
+  assert.ok(nameIndex >= 0 && nameIndex < turnIndex);
+  assert.deepEqual(wire.writes[nameIndex].params, {
+    threadId: 'thread-1',
+    name: 'F006 · Workspace capability settings',
+  });
+
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await outputPromise;
+});
 
 test('app-server emits agentMessage deltas only for the active thread and turn', async () => {
   const wire = new ProtocolWire();

@@ -37,6 +37,8 @@ type RequestId = number;
 export interface CodexAppServerRunInput {
   prompt: string;
   thread: { kind: 'start' } | { kind: 'resume'; threadId: string };
+  /** Explicit user-facing name persisted for the native Codex thread. */
+  threadName?: string;
   model?: string;
   cwd?: string;
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -137,6 +139,10 @@ export class CodexAppServerClient {
       const threadId = thread?.id;
       if (typeof threadId !== 'string') throw new Error('Codex app-server did not return a thread id');
       activeThreadId = threadId;
+      const threadName = input.threadName?.trim();
+      if (threadName) {
+        await this.request('thread/name/set', { threadId, name: threadName });
+      }
       yield this.lifecycle.event(this.lifecycle.transition('thread_ready', { threadId }));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
       yield { type: 'thread.started', thread_id: threadId };
