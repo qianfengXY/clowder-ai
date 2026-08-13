@@ -215,13 +215,13 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
           status: 'active',
           tokenBudget: null,
         });
-        await this.openThread(thread.id);
         await rpc.request('turn/start', {
           threadId: thread.id,
           input: [{ type: 'text', text: buildInitialObjective(input, runtimeSessionId) }],
           cwd: input.sourcePath,
           approvalPolicy: 'on-request',
         });
+        await this.openThread(thread.id);
         return thread.id;
       },
     );
@@ -245,25 +245,32 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
 
   private async wake(input: DesktopTaskActivationInput): Promise<void> {
     await this.withProtocol(input.sourcePath, `desktop-wake-${input.threadId}`, async (rpc) => {
-      await rpc.request('thread/resume', {
-        threadId: input.threadId,
-        cwd: input.sourcePath,
-        sandbox: 'danger-full-access',
-        approvalPolicy: 'on-request',
-      });
+      try {
+        await rpc.request('thread/resume', {
+          threadId: input.threadId,
+          cwd: input.sourcePath,
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'on-request',
+        });
+      } catch (error) {
+        // A durable daemon keeps the resumed thread loaded after the websocket
+        // client disconnects. In that case it already owns the writer and the
+        // following goal/turn requests must continue on that loaded thread.
+        if (!/already has an active writer/i.test(String(error))) throw error;
+      }
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
         objective: input.objective,
         status: 'active',
         tokenBudget: null,
       });
-      await this.openThread(input.threadId);
       await rpc.request('turn/start', {
         threadId: input.threadId,
         input: [{ type: 'text', text: input.objective }],
         cwd: input.sourcePath,
         approvalPolicy: 'on-request',
       });
+      await this.openThread(input.threadId);
     });
   }
 

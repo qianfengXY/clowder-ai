@@ -143,7 +143,7 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
-test('Desktop task activation sets the Goal, opens the task, then starts its visible turn', async () => {
+test('Desktop task activation starts the daemon-owned turn before opening the task', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
@@ -171,10 +171,46 @@ test('Desktop task activation sets the Goal, opens the task, then starts its vis
     objective: 'Continue from the latest Resume Packet',
   });
 
-  assert.deepEqual(order, ['resume', 'goal', 'open', 'turn']);
+  assert.deepEqual(order, ['resume', 'goal', 'turn', 'open']);
   const turn = session.writes.find((message) => message.method === 'turn/start');
   assert.equal(turn.params.threadId, 'existing-thread');
   assert.equal(turn.params.input[0].text, 'Continue from the latest Resume Packet');
+});
+
+test('Desktop task activation reuses a thread already loaded by the durable daemon', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  let session;
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    sessionFactory: async () => {
+      session = new FakeNativeSession();
+      const originalWrite = session.write.bind(session);
+      session.write = async (message) => {
+        if (message.method === 'thread/resume') {
+          session.writes.push(message);
+          session.push({
+            id: message.id,
+            error: { code: -32600, message: 'thread already has an active writer' },
+          });
+          return;
+        }
+        await originalWrite(message);
+      };
+      return session;
+    },
+    openThread: async () => {},
+    recoveryIntervalMs: 0,
+  });
+
+  await launcher.activate({
+    threadId: 'loaded-thread',
+    sourcePath: '/work/traqen',
+    objective: 'Continue after Review',
+  });
+
+  assert.equal(session.writes.some((message) => message.method === 'thread/goal/set'), true);
+  assert.equal(session.writes.some((message) => message.method === 'turn/start'), true);
 });
 
 test('Desktop task activation survives a temporary ChatGPT open failure and recovers from Redis', async () => {
