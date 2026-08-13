@@ -3,6 +3,35 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+class FakeNativeSession {
+  writes = [];
+  responses = [];
+  waiters = [];
+
+  async write(message) {
+    this.writes.push(message);
+    if (message.id === undefined) return;
+    let result = {};
+    if (message.method === 'thread/start') result = { thread: { id: 'native-thread-f006' } };
+    this.push({ id: message.id, result });
+  }
+
+  push(value) {
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ value, done: false });
+    else this.responses.push(value);
+  }
+
+  async *read() {
+    while (true) {
+      if (this.responses.length > 0) yield this.responses.shift();
+      else yield await new Promise((resolve) => this.waiters.push(resolve)).then((entry) => entry.value);
+    }
+  }
+
+  async close() {}
+}
+
 test('Desktop task names include the feature name without repeating the project name', async () => {
   const { buildDesktopTaskName } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
@@ -30,6 +59,7 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
   };
   const launcher = new CodexDesktopTaskLauncher(redis);
   launcher.threadExists = async () => true;
+  launcher.activate = async () => {};
   let starts = 0;
   launcher.start = async () => {
     starts += 1;
@@ -50,6 +80,7 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
 
   const afterRestart = new CodexDesktopTaskLauncher(redis);
   afterRestart.threadExists = async () => true;
+  afterRestart.activate = async () => {};
   afterRestart.start = async () => {
     throw new Error('must not create a duplicate task');
   };
@@ -65,4 +96,118 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
     status: 'created',
     threadId: 'codex-thread-f006-replacement',
   });
+});
+
+test('Desktop task launcher delegates the visible turn to ChatGPT instead of starting a background turn', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const sessions = [];
+  const opened = [];
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    command: '/Applications/ChatGPT.app/Contents/Resources/codex',
+    sessionFactory: async () => {
+      const session = new FakeNativeSession();
+      sessions.push(session);
+      return session;
+    },
+    openThread: async (threadId) => opened.push(threadId),
+    recoveryIntervalMs: 0,
+  });
+  const result = await launcher.launch({
+    projectId: 'project-1',
+    projectName: 'Traqen',
+    repository: 'owner/traqen',
+    sourcePath: '/work/traqen',
+    backlogItemId: 'backlog-1',
+    featureId: 'F006',
+    title: 'Workspace settings',
+  });
+
+  assert.deepEqual(result, { status: 'created', threadId: 'native-thread-f006' });
+  assert.deepEqual(opened, ['native-thread-f006']);
+  const methods = sessions[0].writes.map((message) => message.method);
+  assert.deepEqual(methods, ['initialize', 'initialized', 'thread/start', 'thread/name/set', 'thread/goal/set']);
+  assert.equal(methods.includes('turn/start'), false);
+  const goal = sessions[0].writes.find((message) => message.method === 'thread/goal/set');
+  assert.equal(goal.params.threadId, 'native-thread-f006');
+  assert.equal(goal.params.status, 'active');
+  assert.match(goal.params.objective, /runtimeSessionId/);
+});
+
+test('Desktop task activation sets the Goal before opening the existing ChatGPT task', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const order = [];
+  let session;
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    sessionFactory: async () => {
+      session = new FakeNativeSession();
+      const originalWrite = session.write.bind(session);
+      session.write = async (message) => {
+        if (message.method === 'thread/goal/set') order.push('goal');
+        await originalWrite(message);
+      };
+      return session;
+    },
+    openThread: async () => order.push('open'),
+    recoveryIntervalMs: 0,
+  });
+
+  await launcher.activate({
+    threadId: 'existing-thread',
+    sourcePath: '/work/traqen',
+    objective: 'Continue from the latest Resume Packet',
+  });
+
+  assert.deepEqual(order, ['goal', 'open']);
+  assert.equal(
+    session.writes.some((message) => message.method === 'turn/start'),
+    false,
+  );
+});
+
+test('Desktop task activation survives a temporary ChatGPT open failure and recovers from Redis', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map();
+  const sets = new Map();
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  let opens = 0;
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    sessionFactory: async () => new FakeNativeSession(),
+    openThread: async () => {
+      opens += 1;
+      if (opens === 1) throw new Error('ChatGPT is restarting');
+    },
+    recoveryIntervalMs: 0,
+  });
+
+  await launcher.activate({
+    threadId: 'recoverable-thread',
+    sourcePath: '/work/traqen',
+    objective: 'Continue after Review',
+  });
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['recoverable-thread']);
+
+  await launcher.recoverPendingActivations();
+  assert.equal(opens, 2);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
 });

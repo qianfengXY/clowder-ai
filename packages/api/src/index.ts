@@ -4369,21 +4369,25 @@ async function main(): Promise<void> {
     const { CodexDesktopTaskLauncher } = await import(
       './domains/desktop-development-loop/codex-desktop-task-launcher.js'
     );
+    const desktopSessionStore = new sessionMod.DesktopSessionStore(redis);
+    const desktopTaskLauncher = new CodexDesktopTaskLauncher(redis);
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,
       projectReviewHubService,
-      new sessionMod.DesktopSessionStore(redis),
+      desktopSessionStore,
       managedWorkConsumerPort,
       reviewRoundStore,
       reviewRoundDispatcher,
       backlogStore,
       workflowSopStore,
-      new CodexDesktopTaskLauncher(redis),
+      desktopTaskLauncher,
     );
     reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
       reviewRoundStore,
       managedWorkConsumerPort,
       reviewRoundDispatcher,
+      desktopSessionStore,
+      desktopTaskLauncher,
     );
   }
   const intentCardStore = new IntentCardStore();
