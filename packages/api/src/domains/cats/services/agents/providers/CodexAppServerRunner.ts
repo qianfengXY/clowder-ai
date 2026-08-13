@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import type { TurnExecutionStepSpanV1 } from '@cat-cafe/shared';
 import {
   codexAppServerRecovery,
   codexAppServerStageDuration,
@@ -53,6 +54,8 @@ export interface CodexAppServerRunnerOptions {
   recoveryAnchor?: CodexCapacityRecoveryAnchor;
   stageDurationRecorder?: CodexAppServerStageDurationRecorder;
   monotonicNow?: () => number;
+  wallClockNow?: () => number;
+  onPreparationSpan?: (span: TurnExecutionStepSpanV1) => void;
 }
 
 const MODEL_CAPACITY_ERROR = 'Selected model is at capacity. Please try a different model.';
@@ -155,6 +158,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   const checkpoint = new CodexCapacityRecoveryCheckpoint(options.recoveryAnchor);
   const stageDurationRecorder = options.stageDurationRecorder ?? codexAppServerStageDuration;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const wallClockNow = options.wallClockNow ?? Date.now;
   checkpoint.setNativeThreadId(resumeThreadId);
 
   for (;;) {
@@ -166,6 +170,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       // caller signal into the raw carrier would race turn/interrupt with SIGINT.
       const { signal: _transportSignal, ...transportOptions } = options.sessionOptions;
       const carrierAcquireStartedAt = monotonicNow();
+      const carrierAcquireStartedAtMs = wallClockNow();
       const wire = await options.sessionFactory({
         ...transportOptions,
         ...(resumeThreadId ? { sessionId: resumeThreadId } : {}),
@@ -173,6 +178,17 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       stageDurationRecorder.record(Math.max(0, monotonicNow() - carrierAcquireStartedAt) / 1_000, {
         status: wire.reusedSessionHost ? 'carrier_acquire_warm' : 'carrier_acquire_new',
       });
+      const carrierAcquireCompletedAtMs = wallClockNow();
+      try {
+        options.onPreparationSpan?.({
+          key: wire.reusedSessionHost ? 'carrier_acquire_warm' : 'carrier_acquire_new',
+          startedAt: carrierAcquireStartedAtMs,
+          completedAt: carrierAcquireCompletedAtMs,
+          attempt: recoveryAttempt,
+        });
+      } catch {
+        // Observation must never change carrier acquisition, recovery, or lease semantics.
+      }
       const client = new CodexAppServerClient({
         ...options.clientDeps,
         wire,

@@ -59,6 +59,7 @@ function createMockDeps(services) {
   const draftOps = [];
   return {
     draftOps,
+    storedById,
     services,
     invocationDeps: {
       registry: {
@@ -145,6 +146,23 @@ describe('F194 Phase Z9 — routeSerial stamps ownInvocationId on yielded events
     assert.ok(doneMsg, 'done event yielded');
     assert.ok(doneMsg.invocationId, 'yielded done event MUST carry invocationId');
     assert.notEqual(doneMsg.invocationId, 'parent-z9-yield-test', 'done invocationId is own, not parent');
+  });
+
+  it('persists the terminal execution timeline with the visible reply', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'hello') });
+
+    for await (const _message of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const storedReply = [...deps.storedById.values()].find((message) => message.catId === 'opus');
+    assert.equal(storedReply?.extra?.executionTimeline?.status, 'completed');
+    assert.equal(storedReply?.extra?.executionTimeline?.v, 1);
+    assert.equal(
+      storedReply?.extra?.executionTimeline?.steps.some((step) => step.key === 'first_text'),
+      true,
+    );
   });
 
   it('F233 PR3: records invocation.started + heartbeat with own turn invocationId', async () => {

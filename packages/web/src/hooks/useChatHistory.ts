@@ -941,6 +941,7 @@ export function useChatHistory(threadId: string) {
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
               turnExecution?: NonNullable<ChatMessageData['extra']>['turnExecution'];
+              executionTimeline?: NonNullable<ChatMessageData['extra']>['executionTimeline'];
               auxiliaryTurnExecutions?: NonNullable<ChatMessageData['extra']>['auxiliaryTurnExecutions'];
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing' | 'context_briefing' | 'review_orchestration';
@@ -1003,6 +1004,7 @@ export function useChatHistory(threadId: string) {
                   m.extra?.crossPost ||
                   m.extra?.stream ||
                   m.extra?.turnExecution ||
+                  m.extra?.executionTimeline ||
                   m.extra?.auxiliaryTurnExecutions ||
                   m.extra?.scheduler ||
                   m.extra?.systemKind ||
@@ -1021,6 +1023,7 @@ export function useChatHistory(threadId: string) {
                     ...(m.extra?.crossPost ? { crossPost: m.extra.crossPost } : {}),
                     ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
                     ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
+                    ...(m.extra?.executionTimeline ? { executionTimeline: m.extra.executionTimeline } : {}),
                     ...(m.extra?.auxiliaryTurnExecutions
                       ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions }
                       : {}),

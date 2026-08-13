@@ -11,6 +11,7 @@ import type {
   MessageContent,
   QueueTerminalConsumptionWitness,
   ReplyPreview,
+  TurnExecutionTimelineV1,
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
@@ -231,6 +232,8 @@ export interface AgentMessage {
     causal?: { kind: 'invocation_reply'; triggerMessageId: string };
     /** Immutable child identity for live/F5 execution-kind parity. */
     turnExecution?: TurnExecutionMessageProjection;
+    /** User-visible, bounded, argument-free timeline for this exact turn. */
+    executionTimeline?: TurnExecutionTimelineV1;
     /** Bodyless child executions attached to the visible child they assisted. */
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */

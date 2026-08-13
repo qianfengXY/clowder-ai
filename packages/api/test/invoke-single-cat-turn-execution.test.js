@@ -123,6 +123,18 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       parentInvocationId: 'parent-1',
       executionKind: 'freshness_supplement',
     });
+    assert.deepEqual(
+      created.extra?.executionTimeline?.steps.map((step) => step.key),
+      ['request_accepted', 'context_prepared'],
+    );
+    const text = messages.find((message) => message.type === 'text');
+    assert.equal(
+      text.extra?.executionTimeline?.steps.some((step) => step.key === 'first_text'),
+      true,
+    );
+    const done = messages.find((message) => message.type === 'done');
+    assert.equal(done.extra?.executionTimeline?.status, 'completed');
+    assert.equal(done.extra?.executionTimeline?.completedAt >= done.extra?.executionTimeline?.startedAt, true);
 
     const terminal = await store.get('child-success');
     assert.equal(terminal.status, 'succeeded');
@@ -150,7 +162,7 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       },
     };
 
-    await collect(
+    const messages = await collect(
       invokeSingleCat(makeDeps(store, 'child-failed'), {
         catId: 'codex',
         service,
@@ -168,6 +180,7 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     assert.equal(terminal.status, 'failed');
     assert.equal(terminal.terminalReason, 'provider_execution_failed');
     assert.doesNotMatch(JSON.stringify(terminal), /secret-token-should-not-persist/);
+    assert.equal(messages.find((message) => message.type === 'done')?.extra?.executionTimeline?.status, 'failed');
   });
 
   test('provider iterator ending without terminal done is interrupted, never succeeded', async () => {

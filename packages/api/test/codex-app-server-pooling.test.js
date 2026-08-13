@@ -196,6 +196,7 @@ test('app-server records provider setup and new carrier acquisition before lifec
   const pool = new FakeHostPool();
   const records = [];
   let nowMs = 1_000;
+  let wallClockMs = 10_000;
   const service = new CodexAgentService({
     carrierMode: 'app_server',
     appServerHostPool: pool,
@@ -206,17 +207,30 @@ test('app-server records provider setup and new carrier acquisition before lifec
       nowMs += 125;
       return nowMs;
     },
+    wallClockNow: () => {
+      wallClockMs += 25;
+      return wallClockMs;
+    },
     appServerStageDurationRecorder: {
       record: (value, attributes) => records.push({ value, attributes }),
     },
   });
 
-  await drain(service.invoke('measure setup', { invocationId: 'invocation-stage-new' }));
+  const output = await drain(service.invoke('measure setup', { invocationId: 'invocation-stage-new' }));
 
   assert.deepEqual(records, [
     { value: 0.125, attributes: { status: 'provider_setup' } },
     { value: 0.125, attributes: { status: 'carrier_acquire_new' } },
   ]);
+  assert.deepEqual(
+    output
+      .filter((event) => event.type === 'status' && event.metadata?.diagnostics?.executionStep)
+      .map((event) => event.metadata.diagnostics.executionStep),
+    [
+      { key: 'provider_setup', startedAt: 10_025, completedAt: 10_050 },
+      { key: 'carrier_acquire_new', startedAt: 10_075, completedAt: 10_100, attempt: 0 },
+    ],
+  );
 });
 
 test('app-server labels acquisition from a bound session host as warm reuse', async () => {
@@ -238,7 +252,7 @@ test('app-server labels acquisition from a bound session host as warm reuse', as
     },
   });
 
-  await drain(
+  const output = await drain(
     service.invoke('measure warm resume', {
       invocationId: 'invocation-stage-warm',
       sessionId: 'codex-thread-existing',
@@ -249,6 +263,11 @@ test('app-server labels acquisition from a bound session host as warm reuse', as
     { value: 0.05, attributes: { status: 'provider_setup' } },
     { value: 0.05, attributes: { status: 'carrier_acquire_warm' } },
   ]);
+  assert.equal(
+    output.find((event) => event.metadata?.diagnostics?.executionStep?.key === 'carrier_acquire_warm')?.metadata
+      .diagnostics.executionStep.key,
+    'carrier_acquire_warm',
+  );
 });
 
 test('provider setup failure does not emit a success-classified duration sample', async () => {

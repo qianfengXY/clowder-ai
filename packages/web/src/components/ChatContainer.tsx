@@ -1087,6 +1087,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     invocationId={invocation.invocationId}
                     catStatus={catStatuses[invocation.catId]}
                     appServerLifecycle={catInvocations[invocation.catId]?.appServerLifecycle}
+                    executionTimeline={catInvocations[invocation.catId]?.executionTimeline}
                     tipContexts={pendingTipContexts}
                     showCapabilityTip={invocation.invocationId === pendingTipInvocationId}
                   />

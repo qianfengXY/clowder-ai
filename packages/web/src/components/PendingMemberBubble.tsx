@@ -1,12 +1,13 @@
 'use client';
 
-import type { CapabilityTipContext } from '@cat-cafe/shared';
+import type { CapabilityTipContext, TurnExecutionTimelineV1 } from '@cat-cafe/shared';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import type { AppServerLifecycleSnapshot, CatStatusType } from '@/stores/chat-types';
 import { CapabilityTipStrip } from './CapabilityTipStrip';
 import { CatAvatar } from './CatAvatar';
 import { DEFAULT_STREAMING_TIP_CONTEXTS, isStreamingTipSuppressed } from './capability-tip-placement';
 import { MessageBubble } from './MessageBubble';
+import { TurnExecutionTimeline } from './TurnExecutionTimeline';
 
 interface PendingMemberBubbleProps {
   catId: string;
@@ -19,6 +20,7 @@ interface PendingMemberBubbleProps {
   tipContexts?: readonly CapabilityTipContext[];
   /** Only one pending bubble per thread should show tips (dedup — cloud review P2). */
   showCapabilityTip?: boolean;
+  executionTimeline?: TurnExecutionTimelineV1;
 }
 
 /**
@@ -60,6 +62,7 @@ export function PendingMemberBubble({
   appServerLifecycle,
   tipContexts,
   showCapabilityTip = false,
+  executionTimeline,
 }: PendingMemberBubbleProps) {
   const { getCatById } = useCatData();
   const catData = getCatById(catId);
@@ -88,6 +91,7 @@ export function PendingMemberBubble({
       ) : (
         <PendingDots />
       )}
+      {executionTimeline ? <TurnExecutionTimeline timeline={executionTimeline} /> : null}
     </MessageBubble>
   );
 }

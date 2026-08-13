@@ -21,6 +21,8 @@ import {
   type MessageContent,
   type SealReason,
   type SessionRecord,
+  type TurnExecutionStepKey,
+  type TurnExecutionStepSpanV1,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -108,6 +110,7 @@ import {
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
 import { resolveManagedWorkInvocationBinding } from './managed-work-invocation-binding.js';
+import { TurnExecutionTimelineCollector } from './turn-execution-timeline.js';
 
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -863,6 +866,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const executionKind = params.executionKind ?? 'ordinary';
   const executionParentInvocationId = params.parentInvocationId ?? invocationId;
   const executionStartedAt = Date.now();
+  const executionTimeline = new TurnExecutionTimelineCollector(executionStartedAt);
+  executionTimeline.transition('context_prepared', Date.now());
   const exposedMessageIds = [...new Set(params.promptMessageIds ?? [])];
   let ownsTurnExecution = false;
   let turnExecutionFailureReason: string | undefined;
@@ -1196,6 +1201,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           parentInvocationId: executionParentInvocationId,
           executionKind,
         },
+        executionTimeline: executionTimeline.snapshot(),
       },
       content: JSON.stringify({
         type: 'invocation_created',
@@ -3230,6 +3236,56 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (out.type === 'done' && out.errorCode !== undefined) {
           turnExecutionFailureReason ??= 'provider_execution_failed';
         }
+        const diagnostics = out.metadata?.diagnostics;
+        const executionStep = diagnostics?.executionStep;
+        if (executionStep && typeof executionStep === 'object') {
+          const span = executionStep as Partial<TurnExecutionStepSpanV1>;
+          if (
+            typeof span.key === 'string' &&
+            typeof span.startedAt === 'number' &&
+            typeof span.completedAt === 'number'
+          ) {
+            executionTimeline.recordSpan(
+              span.key as TurnExecutionStepKey,
+              span.startedAt,
+              span.completedAt,
+              span.attempt,
+            );
+          }
+        }
+        const appServerLifecycle = diagnostics?.appServerLifecycle;
+        if (appServerLifecycle && typeof appServerLifecycle === 'object') {
+          const lifecycle = appServerLifecycle as {
+            stage?: string;
+            lastActivityAt?: number;
+            recoveryAttempt?: number;
+          };
+          const stage = lifecycle.stage === 'active' ? 'provider_active' : lifecycle.stage;
+          if (
+            typeof stage === 'string' &&
+            typeof lifecycle.lastActivityAt === 'number' &&
+            !['completed', 'interrupted', 'failed'].includes(stage)
+          ) {
+            executionTimeline.transition(
+              stage as TurnExecutionStepKey,
+              lifecycle.lastActivityAt,
+              lifecycle.recoveryAttempt,
+            );
+          }
+        }
+        if (out.type === 'system_info' && out.content) {
+          try {
+            const content = JSON.parse(out.content) as { type?: string; kind?: string };
+            if (content.type === 'invocation_metrics' && content.kind === 'session_started') {
+              executionTimeline.transition('session_ready', out.timestamp);
+            }
+          } catch {
+            // Non-JSON system messages are unrelated to the execution timeline.
+          }
+        }
+        if (out.type === 'text' && out.content?.trim()) {
+          executionTimeline.transition('first_text', out.timestamp);
+        }
         await maybePersistTaskProgress(out);
         if (out.type === 'done' && terminalTaskProgressStatus === null) {
           if (hadError) {
@@ -3289,8 +3345,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (!hadError && out.errorCode === undefined && !signal?.aborted) {
             turnExecutionCompletedSuccessfully = true;
           }
+          executionTimeline.finish(
+            hadError || out.errorCode !== undefined ? 'failed' : signal?.aborted ? 'interrupted' : 'completed',
+            Date.now(),
+          );
         }
-        yield out;
+        yield {
+          ...out,
+          extra: {
+            ...out.extra,
+            executionTimeline: executionTimeline.snapshot(),
+          },
+        };
       }
     };
 
@@ -3843,21 +3909,27 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     hadError = true;
     turnExecutionFailureReason ??= 'invocation_exception';
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
-    yield {
+    const errorMessage: AgentMessage = {
       type: 'error' as const,
       catId,
       error: err instanceof Error ? err.message : String(err),
       timestamp: Date.now(),
     };
+    yield {
+      ...errorMessage,
+      extra: { executionTimeline: executionTimeline.snapshot() },
+    };
     await finalizeTaskProgress();
     const sc = invocationSpan.spanContext();
     const parentSid = params.routeSpan?.spanContext().spanId;
+    executionTimeline.finish('failed', Date.now());
     yield {
       type: 'done' as const,
       catId,
       isFinal: isLastCat,
       timestamp: Date.now(),
       tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
+      extra: { executionTimeline: executionTimeline.snapshot() },
     };
   } finally {
     await closeActiveServiceIterator();

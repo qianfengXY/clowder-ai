@@ -1652,6 +1652,7 @@ export async function* routeParallel(
                 : {}),
               ...(turnExecution ? { turnExecution } : {}),
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
+              ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
             },
           };
           let storedMsg = null;
@@ -1818,6 +1819,7 @@ export async function* routeParallel(
                   : {}),
                 ...(turnExecution ? { turnExecution } : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
+                ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
               },
             };
             const answerBearingNoText =
