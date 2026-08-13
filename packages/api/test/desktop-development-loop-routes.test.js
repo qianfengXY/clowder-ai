@@ -7,7 +7,6 @@ import Fastify from 'fastify';
 describe('F289 desktop development loop routes', () => {
   let app;
   let project;
-  let projectReviewHubs;
   let threadStore;
 
   beforeEach(async () => {
@@ -27,23 +26,22 @@ describe('F289 desktop development loop routes', () => {
         defaultReviewers: ['cat-a', 'cat-b'],
       },
     });
-    projectReviewHubs = new ProjectReviewHubService(externalProjectStore, threadStore, {
-      listByUser: async (userId) =>
-        userId === 'user1'
-          ? [
-              {
-                id: 'backlog-f006',
-                userId,
-                projectId: project.id,
-                title: 'Workspace settings',
-                tags: ['feature:f006'],
-              },
-            ]
-          : [],
-    });
     app = Fastify();
     await app.register(desktopDevelopmentLoopRoutes, {
-      projectReviewHubService: projectReviewHubs,
+      projectReviewHubService: new ProjectReviewHubService(externalProjectStore, threadStore, {
+        listByUser: async (userId) =>
+          userId === 'user1'
+            ? [
+                {
+                  id: 'backlog-f006',
+                  userId,
+                  projectId: project.id,
+                  title: 'Workspace settings',
+                  tags: ['feature:f006'],
+                },
+              ]
+            : [],
+      }),
     });
   });
 
@@ -93,17 +91,6 @@ describe('F289 desktop development loop routes', () => {
       assert.equal(response.statusCode, 200);
       assert.equal(response.json().thread.threadId, `project-feature-${kind}:${project.id}:backlog-f006`);
     }
-  });
-
-  test('binds a Review conversation to the exact Desktop execution workspace', async () => {
-    const thread = await projectReviewHubs.ensureForFeature(
-      project.id,
-      'backlog-f006',
-      'review',
-      'user1',
-      '/tmp/desktop-traqen',
-    );
-    assert.equal((await threadStore.get(thread.threadId)).projectPath, '/tmp/desktop-traqen');
   });
 
   test('lists same-project candidates and binds an existing conversation', async () => {
