@@ -45,7 +45,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works.
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
 5. Desktop author identity is distinct from reviewer CatIds and cannot appear in the reviewer roster.
-6. Chat/lease disappearance never deletes work, ReviewRound, evidence or pilot state.
+6. Chat disappearance never expires the binding and never deletes work, ReviewRound, evidence or pilot state.
 7. Missing F275/F253/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers, and never falls through to F211 by impersonating a Cat session.
 
 ## Extend By
@@ -58,7 +58,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 ## Do NOT Unify With
 
 - Do not use thread ID, ChatGPT chat ID, branch, PR, TaskItem or scheduled-task reference as work identity.
-- Do not turn F167 cat baton custody into the Desktop execution lease.
+- Do not turn F167 cat baton custody into a Desktop execution lease; Desktop ownership is fenced by epoch.
 - Do not let F289 own or infer F275 attempt order/terminal state.
 - Do not let visible Hub/chat deletion cascade into durable lifecycle deletion.
 - Do not expose shell, arbitrary filesystem writes, Git merge/deploy or credentials through the MCP profile.

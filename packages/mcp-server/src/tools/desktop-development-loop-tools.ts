@@ -82,7 +82,8 @@ export const developmentWorkConnectInputSchema = {
     .int()
     .min(1_000)
     .max(86_400_000)
-    .describe('Requested active session lease duration in milliseconds, from 1000 to 86400000.'),
+    .optional()
+    .describe('Deprecated protocol-v1 compatibility field. Desktop bindings are permanent and this value is ignored.'),
   workspace: workspaceSchema,
 };
 
@@ -97,7 +98,8 @@ export const developmentWorkHeartbeatInputSchema = {
     .int()
     .min(1_000)
     .max(86_400_000)
-    .describe('Requested renewed lease duration in milliseconds, from 1000 to 86400000.'),
+    .optional()
+    .describe('Deprecated protocol-v1 compatibility field. Desktop bindings are permanent and this value is ignored.'),
   workspace: workspaceSchema.optional().describe('Optional freshly validated committed workspace state.'),
 };
 
@@ -154,7 +156,7 @@ type WorkConnectInput = WorkReadInput & {
   expectedBindingEpoch: number;
   expectedManagedWorkVersion: number;
   idempotencyKey: string;
-  leaseDurationMs: number;
+  leaseDurationMs?: number;
   workspace: WorkspaceInput;
 };
 
@@ -163,7 +165,7 @@ type WorkHeartbeatInput = WorkReadInput & {
   bindingEpoch: number;
   expectedSessionVersion: number;
   idempotencyKey: string;
-  leaseDurationMs: number;
+  leaseDurationMs?: number;
   workspace?: WorkspaceInput;
 };
 
@@ -273,7 +275,7 @@ export const desktopDevelopmentLoopTools = [
     description:
       'Read one managed implementation attempt as a server-derived Resume Packet. ' +
       'Use when: starting a turn, resuming after restart, or checking review, merge, or acceptance progress. ' +
-      'NOT for: claiming a work attempt, extending a lease, mutating Git, or reading private reviewer drafts. ' +
+      'NOT for: claiming a work attempt, mutating Git, or reading private reviewer drafts. ' +
       'Output: current lifecycle, fenced session epoch, exact SHA, barrier-safe findings, and next legal actions.',
     inputSchema: developmentWorkReadInputSchema,
     handler: handleDevelopmentWorkRead,
@@ -289,7 +291,7 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_work_connect',
     description:
       'Claim or rebind one managed work attempt to the current ChatGPT Desktop session. ' +
-      'Use when: the first Desktop chat starts the attempt or a replacement chat resumes it after deletion or lease loss. ' +
+      'Use when: the first Desktop chat starts the attempt or a replacement chat takes ownership. ' +
       'NOT for: creating managed work, reviewing code, committing, pushing, merging, or deploying. ' +
       'Output: a Resume Packet with the newly active fenced epoch and next legal actions. ' +
       'GOTCHA: a successful rebind advances the epoch, so the previous chat immediately loses write authority.',
@@ -306,10 +308,10 @@ export const desktopDevelopmentLoopTools = [
   defineTool({
     name: 'cat_cafe_development_work_heartbeat',
     description:
-      'Renew the current fenced ChatGPT Desktop session lease and optionally refresh committed workspace metadata. ' +
-      'Use when: a long implementation is still active or the committed workspace SHA changed. ' +
+      'Refresh committed workspace metadata for the current permanent fenced ChatGPT Desktop binding. ' +
+      'Use when: the committed workspace SHA or worktree state changed. ' +
       'NOT for: reconnecting a deleted chat, reporting finished implementation, mutating Git, or keeping uncommitted work recoverable. ' +
-      'Output: an updated Resume Packet and lease/session version. GOTCHA: stale sessions or epochs are rejected.',
+      'Output: an updated Resume Packet and session version. GOTCHA: stale sessions or epochs are rejected.',
     inputSchema: developmentWorkHeartbeatInputSchema,
     handler: handleDevelopmentWorkHeartbeat,
     governance: {

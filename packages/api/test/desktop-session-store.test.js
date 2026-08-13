@@ -28,7 +28,6 @@ function bindInput(overrides = {}) {
     chatRef: 'opaque-chat-1',
     expectedEpoch: 0,
     idempotencyKey: 'bind-1',
-    leaseDurationMs: 60_000,
     workspace,
     now: 1_000,
     ...overrides,
@@ -46,7 +45,7 @@ describe('F289 DesktopSessionStore', () => {
     assert.equal(first.bindingEpoch, 1);
     assert.equal(first.version, 1);
     assert.equal(first.status, 'active');
-    assert.equal(first.leaseExpiresAt, 61_000);
+    assert.equal(first.leaseExpiresAt, Number.MAX_SAFE_INTEGER);
 
     await assert.rejects(
       () => store.bind(bindInput({ runtimeSessionId: 'different-session' })),
@@ -79,18 +78,17 @@ describe('F289 DesktopSessionStore', () => {
           runtimeSessionId: 'chatgpt-session-1',
           expectedVersion: 1,
           idempotencyKey: 'heartbeat-old',
-          leaseDurationMs: 60_000,
           now: 3_000,
         }),
       /stale binding epoch/i,
     );
   });
 
-  test('heartbeat is versioned, replay-safe, and can revive a detached current epoch', async () => {
+  test('binding is permanent and heartbeat only refreshes versioned workspace metadata', async () => {
     const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
     const store = new DesktopSessionStore();
-    const first = await store.bind(bindInput({ leaseDurationMs: 1_000 }));
-    assert.equal((await store.getCurrent('ep-1', 'work-1', 2_000)).status, 'detached');
+    const first = await store.bind(bindInput());
+    assert.equal((await store.getCurrent('ep-1', 'work-1', Number.MAX_SAFE_INTEGER)).status, 'active');
 
     const heartbeat = {
       projectId: 'ep-1',
@@ -99,14 +97,13 @@ describe('F289 DesktopSessionStore', () => {
       runtimeSessionId: first.runtimeSessionId,
       expectedVersion: first.version,
       idempotencyKey: 'heartbeat-1',
-      leaseDurationMs: 1_000,
       now: 2_500,
       workspace: { ...workspace, currentSha: '3'.repeat(40), lastCommittedSha: '3'.repeat(40) },
     };
     const updated = await store.heartbeat(heartbeat);
     assert.equal(updated.status, 'active');
     assert.equal(updated.version, 2);
-    assert.equal(updated.leaseExpiresAt, 3_500);
+    assert.equal(updated.leaseExpiresAt, Number.MAX_SAFE_INTEGER);
     assert.equal(updated.workspace.currentSha, '3'.repeat(40));
     assert.deepEqual(await store.heartbeat(heartbeat), updated);
 
@@ -156,11 +153,11 @@ describe('F289 DesktopSessionStore', () => {
     assert.equal(binding.workspace.lastCommittedSha, '3'.repeat(40));
   });
 
-  test('lists only the current bindings for one project and derives detached status', async () => {
+  test('lists only permanent current bindings for one project', async () => {
     const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
     const store = new DesktopSessionStore();
-    await store.bind(bindInput({ workId: 'work-b', idempotencyKey: 'bind-b', leaseDurationMs: 1_000 }));
-    await store.bind(bindInput({ workId: 'work-a', idempotencyKey: 'bind-a', leaseDurationMs: 60_000 }));
+    await store.bind(bindInput({ workId: 'work-b', idempotencyKey: 'bind-b' }));
+    await store.bind(bindInput({ workId: 'work-a', idempotencyKey: 'bind-a' }));
     await store.bind(bindInput({ projectId: 'ep-2', workId: 'work-c', idempotencyKey: 'bind-c' }));
 
     const bindings = await store.listCurrentByProject('ep-1', 2_000);
@@ -168,7 +165,7 @@ describe('F289 DesktopSessionStore', () => {
       bindings.map((binding) => [binding.workId, binding.status]),
       [
         ['work-a', 'active'],
-        ['work-b', 'detached'],
+        ['work-b', 'active'],
       ],
     );
   });

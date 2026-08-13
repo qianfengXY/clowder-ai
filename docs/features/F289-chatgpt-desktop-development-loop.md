@@ -51,7 +51,7 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 ### 聊天窗口不是状态根
 
 - ChatGPT chat 只是一条可替换的 session binding。
-- heartbeat/lease 过期只会使该 binding `detached`，不会把 work 判失败或删除永久 worktree。
+- Desktop binding 不按时间过期；只有显式 rebind 提升 epoch 才会让旧会话失去写权限。
 - 新 ChatGPT chat 通过同一项目重新连接，获得更高 binding epoch 和 Resume Packet；旧 chat 随即失去写权限。
 - Cat Café thread 软删除只影响可见性；恢复后继续显示同一个 Hub。
 - worktree 丢失时仅从最后一个已 commit（及按策略已 push）的 SHA 恢复；未提交内容不声称可恢复。
@@ -71,13 +71,13 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 |---|---|---|---|
 | `DesktopDevelopmentProjectBinding` | F289 | `projectId`、repo、default branch、本地 checkout 引用、reviewer roster、merge policy、pilot count、protocol version、version | TTL=0；路径仅本地返回；不得从目录/聊天猜绑定 |
 | `FeatureWorkspaceThreads` | F289 + existing ThreadStore view | deterministic `projectId/backlogItemId/kind`、plan/review thread views | 每功能至多一个 plan 与一个 Review 会话；软删除原位恢复；旧 project Hub 仅兼容在途回调 |
-| `DesktopSessionBinding` | F289 | project/work、external actor runtime session、chat ref、lease、binding epoch、status | 同一 work 仅最高 epoch 可写；窗口消失不终止 work；不伪装成 F211 Cat session |
+| `DesktopSessionBinding` | F289 | project/work、external actor runtime session、chat ref、binding epoch、status | 绑定永久有效；同一 work 仅最高 epoch 可写；窗口消失不终止 work；不伪装成 F211 Cat session |
 | `WorkspaceBinding` | F289 | repo identity、永久 worktree、branch、base/current SHA、validation time | 不对公共消息暴露路径；丢失只恢复 committed truth |
 | `WorkAdmission` / `WorkAttempt` / terminal evidence | F275 | canonical work root、ordered attempts、typed evidence、whole-work terminal | F289 不创建平行 job/attempt/terminal ledger |
 | `ReviewRound` | F253 review coordination | work/attempt、full SHA、private drafts、barrier、consensus、finding status、version | full SHA immutable；两名非作者；barrier 前草稿隔离 |
 | `ResumePacket` | derived projection | project/work/attempt/session/workspace/review 的只读合成 | 不持久化第二份 phase；不含 secret/private draft |
 
-所有用户可见、可追溯、可恢复对象 TTL=0。会话 lease 可以过期，但对应 durable binding/history 不删除。
+所有用户可见、可追溯、可恢复对象 TTL=0。Desktop 会话 binding 同样不按时间过期。
 
 ## 生命周期
 
@@ -104,7 +104,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 3. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
 4. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
 5. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过且历史共识 finding 全关闭。
-6. session/lease/transition/evidence 写入同时验证 actor、项目 scope、expected version、binding epoch 与 idempotency key。
+6. session/transition/evidence 写入同时验证 actor、项目 scope、expected version、binding epoch 与 idempotency key。
 7. Resume Packet 是 server-derived projection，不能包含凭据、私有 reviewer draft 或可从远端滥用的本地绝对路径。
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
 9. 协议版本或 capability 不兼容时写操作 fail closed；只读状态与恢复指引仍可返回。
@@ -119,7 +119,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 - `cat_cafe_development_work_connect`：claim/rebind 当前 Desktop chat，提升 binding epoch。
 - 当 Resume Packet 为 `fix_required` 时，同一 connect 工具幂等创建下一 F275 attempt 并把当前 chat 绑定到
   新 attempt；返回递增的 `attemptNumber`，不新增第八个 lifecycle 工具或 F289 私有 attempt ledger。
-- `cat_cafe_development_work_heartbeat`：续租并可刷新 committed workspace metadata。
+- `cat_cafe_development_work_heartbeat`：刷新 committed workspace metadata；不承担续租。
 - `cat_cafe_development_implementation_report`：报告 committed exact SHA 并在当前 backlog 功能的 Review 会话触发新 round。
 - `cat_cafe_development_merge_confirmation_record`：记录前两次试点中当前 chat 的用户确认；不执行 Git。
 - `cat_cafe_development_merge_report`：记录 Desktop 原生 Git 已产生的 merge receipt；不执行 Git。
@@ -131,7 +131,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 ## 依赖边界（用功能说明，不要求用户记 F 号）
 
 - **managed-work（F275）**：拥有 work/attempt/evidence/accepted-rejected 真相；F289 只消费命名接口。
-- **successor lease（F167）**：只用于 Cat Café 内部把 Review 棒交给猫猫，不用于 Desktop execution lease。
+- **successor lease（F167）**：只用于 Cat Café 内部把 Review 棒交给猫猫；Desktop binding 不使用时间租约。
 - **review coordination（F253）**：拥有 independent-first、exact-SHA、barrier、cross-review、repeat-until-zero 语义。
 - **Cat runtime session（F211 compatibility boundary）**：继续只登记具备 CatId/agent-key/Antigravity provenance 的 Cat session；F289 不改写也不复用这套身份模型。
 - **MCP governance（F286）**：约束 strict profile、authority、annotation 和 fail-closed capability negotiation。
@@ -149,7 +149,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 
 - [x] AC-S1: F289 以独立 external actor 持久化 Desktop session provenance；F211 继续只接受 `antigravity-desktop` Cat session，既有行为零修改。（`desktop-session-store.test.js` + source inventory）
 - [x] AC-S2: 新 chat rebind 提升 epoch；旧 epoch 的 heartbeat/report 被拒绝。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`）
-- [x] AC-S3: chat/app 消失、lease 过期或 Cat Café 重启后，同一 work 可通过 Resume Packet 恢复且不重复 attempt/commit/round。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`）
+- [x] AC-S3: chat/app 消失或 Cat Café 重启后，永久 binding 与同一 work 可通过 Resume Packet 恢复且不重复 attempt/commit/round。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`）
 - [x] AC-S4: worktree 丢失返回 committed recovery point 和明确人工/自动重建动作，不声称恢复未提交数据。（`desktop-session-store.test.js`、`desktop-development-loop-service.test.js`、`desktop-executor-skill.test.ts`）
 
 ### Review / feedback loop
@@ -176,7 +176,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 ## 分阶段交付
 
 1. **Contract + Project/Hub foundation**：类型、项目绑定、唯一 Review Hub、软删除恢复、UI 配置面。
-2. **Session + Resume**：F289 external Desktop session source、binding epoch、lease、Resume Packet；F211 Cat session contract 不变。
+2. **Session + Resume**：F289 external Desktop session source、永久 binding epoch、Resume Packet；F211 Cat session contract 不变。
 3. **Managed work port**：接通 F275 ordered attempt/evidence/terminal 接口；不可用时 fail closed。
 4. **Review coordinator**：F253 durable round、private barrier、consensus/finding closure。
 5. **Strict MCP + Desktop skill**：治理 profile、executor skill、Scheduled Task 幂等 polling/recovery。

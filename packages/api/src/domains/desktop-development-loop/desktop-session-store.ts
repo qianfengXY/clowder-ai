@@ -15,7 +15,6 @@ export interface BindDesktopSessionInput {
   readonly chatRef?: string;
   readonly expectedEpoch: number;
   readonly idempotencyKey: string;
-  readonly leaseDurationMs: number;
   readonly workspace: WorkspaceBinding;
   readonly now?: number;
 }
@@ -27,7 +26,6 @@ export interface HeartbeatDesktopSessionInput {
   readonly runtimeSessionId: string;
   readonly expectedVersion: number;
   readonly idempotencyKey: string;
-  readonly leaseDurationMs: number;
   readonly workspace?: WorkspaceBinding;
   readonly now?: number;
 }
@@ -50,7 +48,9 @@ type StoreResult =
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,239}$/;
 const FULL_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
-const MAX_LEASE_DURATION_MS = 24 * 60 * 60 * 1_000;
+// Kept in the persisted shape for protocol-v1 compatibility. Desktop bindings
+// are permanent and are fenced only by an explicit higher binding epoch.
+const PERMANENT_BINDING_EXPIRES_AT = Number.MAX_SAFE_INTEGER;
 
 const BIND_LUA = `
 local operationField = 'operation:' .. ARGV[2]
@@ -116,7 +116,6 @@ if tonumber(current.version) ~= tonumber(ARGV[5]) then
 end
 
 local patch = cjson.decode(ARGV[6])
-current.leaseExpiresAt = patch.leaseExpiresAt
 current.status = 'active'
 current.version = tonumber(current.version) + 1
 if patch.workspace then current.workspace = patch.workspace end
@@ -144,7 +143,7 @@ export class DesktopSessionStore {
       runtimeSessionId: normalized.runtimeSessionId,
       ...(normalized.chatRef ? { chatRef: normalized.chatRef } : {}),
       bindingEpoch: 0,
-      leaseExpiresAt: normalized.now + normalized.leaseDurationMs,
+      leaseExpiresAt: PERMANENT_BINDING_EXPIRES_AT,
       status: 'active',
       workspace: normalized.workspace,
       version: 0,
@@ -203,10 +202,7 @@ export class DesktopSessionStore {
         fingerprint,
         normalized.runtimeSessionId,
         String(normalized.expectedVersion),
-        JSON.stringify({
-          leaseExpiresAt: normalized.now + normalized.leaseDurationMs,
-          ...(normalized.workspace ? { workspace: normalized.workspace } : {}),
-        }),
+        JSON.stringify(normalized.workspace ? { workspace: normalized.workspace } : {}),
       );
       return unwrapResult(parseStoreResult(raw));
     }
@@ -233,7 +229,7 @@ export class DesktopSessionStore {
       }
       const binding: DesktopSessionBinding = {
         ...current,
-        leaseExpiresAt: normalized.now + normalized.leaseDurationMs,
+        leaseExpiresAt: PERMANENT_BINDING_EXPIRES_AT,
         status: 'active',
         ...(normalized.workspace ? { workspace: normalized.workspace } : {}),
         version: current.version + 1,
@@ -244,19 +240,16 @@ export class DesktopSessionStore {
     });
   }
 
-  async getCurrent(projectId: string, workId: string, now = Date.now()): Promise<DesktopSessionBinding | null> {
+  async getCurrent(projectId: string, workId: string, _now = Date.now()): Promise<DesktopSessionBinding | null> {
     assertId(projectId, 'projectId');
     assertId(workId, 'workId');
-    assertTimestamp(now, 'now');
+    assertTimestamp(_now, 'now');
     const key = sessionKey(projectId, workId);
     const current = this.redis
       ? parseBinding(await this.redis.hget(key, 'current'))
       : (this.states.get(key)?.current ?? null);
     if (!current) return null;
-    if (current.status === 'active' && current.leaseExpiresAt <= now) {
-      return cloneBinding({ ...current, status: 'detached' });
-    }
-    return cloneBinding(current);
+    return cloneBinding(current.status === 'detached' ? { ...current, status: 'active' } : current);
   }
 
   async listCurrentByProject(projectId: string, now = Date.now()): Promise<readonly DesktopSessionBinding[]> {
@@ -280,11 +273,7 @@ export class DesktopSessionStore {
       );
     }
     return bindings
-      .map((binding) =>
-        binding.status === 'active' && binding.leaseExpiresAt <= now
-          ? cloneBinding({ ...binding, status: 'detached' })
-          : cloneBinding(binding),
-      )
+      .map((binding) => cloneBinding(binding.status === 'detached' ? { ...binding, status: 'active' } : binding))
       .sort((left, right) => left.workId.localeCompare(right.workId));
   }
 
@@ -344,7 +333,6 @@ function normalizeBindInput(input: BindDesktopSessionInput): Required<Omit<BindD
   if (input.chatRef !== undefined) assertOpaqueString(input.chatRef, 'chatRef');
   assertNonNegativeInteger(input.expectedEpoch, 'expectedEpoch');
   assertIdempotencyKey(input.idempotencyKey);
-  assertLease(input.leaseDurationMs);
   assertTimestamp(now, 'now');
   const workspace = normalizeWorkspace(input.workspace);
   return { ...input, now, workspace };
@@ -360,7 +348,6 @@ function normalizeHeartbeatInput(
   assertOpaqueString(input.runtimeSessionId, 'runtimeSessionId');
   assertPositiveInteger(input.expectedVersion, 'expectedVersion');
   assertIdempotencyKey(input.idempotencyKey);
-  assertLease(input.leaseDurationMs);
   assertTimestamp(now, 'now');
   return { ...input, now, ...(input.workspace ? { workspace: normalizeWorkspace(input.workspace) } : {}) };
 }
@@ -465,12 +452,6 @@ function assertOpaqueString(value: string, name: string): void {
 
 function assertFullSha(value: string, name: string): void {
   if (!FULL_SHA_PATTERN.test(value)) throw new Error(`${name} must be a full Git SHA`);
-}
-
-function assertLease(value: number): void {
-  if (!Number.isInteger(value) || value < 1_000 || value > MAX_LEASE_DURATION_MS) {
-    throw new Error('leaseDurationMs is invalid');
-  }
 }
 
 function assertTimestamp(value: number, name: string): void {

@@ -56,7 +56,8 @@ const connectSchema = z
     expectedBindingEpoch: z.number().int().nonnegative(),
     expectedManagedWorkVersion: z.number().int().positive(),
     idempotencyKey: idSchema,
-    leaseDurationMs: z.number().int().min(1_000).max(86_400_000),
+    // Protocol-v1 compatibility only. Bindings are permanent; this value is ignored.
+    leaseDurationMs: z.number().int().min(1_000).max(86_400_000).optional(),
     workspace: workspaceSchema,
   })
   .strict();
@@ -66,7 +67,8 @@ const heartbeatSchema = z
     bindingEpoch: z.number().int().positive(),
     expectedSessionVersion: z.number().int().positive(),
     idempotencyKey: idSchema,
-    leaseDurationMs: z.number().int().min(1_000).max(86_400_000),
+    // Protocol-v1 compatibility only. Bindings are permanent; this value is ignored.
+    leaseDurationMs: z.number().int().min(1_000).max(86_400_000).optional(),
     workspace: workspaceSchema.optional(),
   })
   .strict();

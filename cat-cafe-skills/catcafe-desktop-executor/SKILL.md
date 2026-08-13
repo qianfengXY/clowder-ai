@@ -76,8 +76,9 @@ F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `at
 
 MCP 不负责 shell、文件写、Git commit、push、merge 或 deploy。不要寻找绕过严格 profile 的 MCP 工具。
 
-长任务期间用 `cat_cafe_development_work_heartbeat` 续约，并携带最新 workspace 状态。Heartbeat 失败时先重新
-读取 Resume Packet；epoch 已被替换就停止写入，不能抢回旧会话所有权。
+workspace 的 committed SHA 或 worktree 状态变化时，用 `cat_cafe_development_work_heartbeat` 刷新绑定元数据。
+绑定不会因时间或应用休眠而过期；Heartbeat 失败时先重新读取 Resume Packet，epoch 已被显式重绑替换就停止
+写入，不能抢回旧会话所有权。
 
 ## 4. 等待 Review 与修复
 

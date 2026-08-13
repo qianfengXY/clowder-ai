@@ -275,6 +275,14 @@ describe(
       assert.equal(connectedProject.managedWorkDiscovery.works[0].sessionStatus, 'active');
       assert.equal(connectedProject.managedWorkDiscovery.works[0].managedWorkVersion, 2);
 
+      const connectedProjectMuchLater = await service.readProject({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        now: 2_500 + 365 * 24 * 60 * 60 * 1_000,
+      });
+      assert.equal(connectedProjectMuchLater.managedWorkDiscovery.works[0].sessionStatus, 'active');
+
       const second = await service.connect({
         protocolVersion: 1,
         ownerUserId: 'owner-1',

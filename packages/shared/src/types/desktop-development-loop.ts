@@ -124,6 +124,7 @@ export interface DesktopSessionBinding {
   readonly runtimeSessionId: string;
   readonly chatRef?: string;
   readonly bindingEpoch: number;
+  /** @deprecated Protocol-v1 persisted compatibility field; bindings no longer expire by time. */
   readonly leaseExpiresAt: number;
   readonly status: DesktopSessionBindingStatus;
   readonly workspace: WorkspaceBinding;

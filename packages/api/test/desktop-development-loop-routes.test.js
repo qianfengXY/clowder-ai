@@ -474,7 +474,6 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         expectedBindingEpoch: 0,
         expectedManagedWorkVersion: 1,
         idempotencyKey: 'connect-1',
-        leaseDurationMs: 60_000,
         workspace,
       },
     });
@@ -490,7 +489,6 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         bindingEpoch: 1,
         expectedSessionVersion: 1,
         idempotencyKey: 'heartbeat-1',
-        leaseDurationMs: 60_000,
       },
     });
     assert.equal(response.statusCode, 200);

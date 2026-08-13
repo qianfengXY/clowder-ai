@@ -43,7 +43,6 @@ export interface ConnectDesktopWorkInput {
   readonly expectedBindingEpoch: number;
   readonly expectedManagedWorkVersion: number;
   readonly idempotencyKey: string;
-  readonly leaseDurationMs: number;
   readonly workspace: WorkspaceBinding;
   readonly now?: number;
 }
@@ -58,7 +57,6 @@ export interface HeartbeatDesktopWorkInput {
   readonly bindingEpoch: number;
   readonly expectedSessionVersion: number;
   readonly idempotencyKey: string;
-  readonly leaseDurationMs: number;
   readonly workspace?: WorkspaceBinding;
   readonly now?: number;
 }
@@ -532,7 +530,6 @@ export class DesktopDevelopmentLoopService {
       ...(input.chatRef ? { chatRef: input.chatRef } : {}),
       expectedEpoch: input.expectedBindingEpoch,
       idempotencyKey: `${input.idempotencyKey}:session`,
-      leaseDurationMs: input.leaseDurationMs,
       workspace: input.workspace,
       ...(input.now === undefined ? {} : { now: input.now }),
     });
@@ -584,7 +581,6 @@ export class DesktopDevelopmentLoopService {
       runtimeSessionId: input.runtimeSessionId,
       expectedVersion: input.expectedSessionVersion,
       idempotencyKey: input.idempotencyKey,
-      leaseDurationMs: input.leaseDurationMs,
       ...(input.workspace ? { workspace: input.workspace } : {}),
       ...(input.now === undefined ? {} : { now: input.now }),
     });
@@ -897,14 +893,14 @@ export class DesktopDevelopmentLoopService {
       bindingEpoch: number;
     },
     now: number,
-    requireActiveLease: boolean,
+    requireActiveBinding: boolean,
   ): Promise<DesktopSessionBinding> {
     const session = await this.sessions.getCurrent(input.projectId, input.workId, now);
     if (!session || session.attemptId !== input.attemptId) throw new Error('Desktop session binding not found');
     if (session.bindingEpoch !== input.bindingEpoch || session.runtimeSessionId !== input.runtimeSessionId) {
       throw new Error('Desktop session does not own the current binding epoch');
     }
-    if (requireActiveLease && session.status !== 'active') throw new Error('Desktop session lease is not active');
+    if (requireActiveBinding && session.status !== 'active') throw new Error('Desktop session binding is not active');
     return session;
   }
 
