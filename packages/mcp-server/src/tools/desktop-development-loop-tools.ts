@@ -14,6 +14,7 @@ const idSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const fullShaSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i);
+const REVIEW_WAIT_DEFAULT_MS = 60 * 60 * 1_000;
 const protocolVersionSchema = z.number().int().positive().describe('Protocol version returned by project discovery.');
 const repositorySchema = z
   .object({
@@ -72,9 +73,9 @@ export const developmentReviewWaitInputSchema = {
     .number()
     .int()
     .min(1_000)
-    .max(30_000)
+    .max(REVIEW_WAIT_DEFAULT_MS)
     .optional()
-    .describe('Maximum time to wait in this call before returning the latest Resume Packet; defaults to 20 seconds.'),
+    .describe('Maximum time to wait in this call before returning the latest Resume Packet; defaults to 60 minutes.'),
 };
 
 export const developmentWorkConnectInputSchema = {
@@ -221,7 +222,7 @@ export async function handleDevelopmentWorkRead(input: WorkReadInput): Promise<T
 }
 
 export async function handleDevelopmentReviewWait(input: ReviewWaitInput): Promise<ToolResult> {
-  const timeoutMs = input.timeoutMs ?? 20_000;
+  const timeoutMs = input.timeoutMs ?? REVIEW_WAIT_DEFAULT_MS;
   const deadline = Date.now() + timeoutMs;
   const query = new URLSearchParams({
     protocolVersion: String(input.protocolVersion),
@@ -349,10 +350,10 @@ export const desktopDevelopmentLoopTools = [
   defineTool({
     name: 'cat_cafe_development_review_wait',
     description:
-      'Wait briefly for the current Cat Café multi-cat ReviewRound while keeping execution in the same ChatGPT Desktop turn. ' +
-      'Use when: implementation was reported and the Resume Packet says Review is in progress; call again when reviewWait is pending. ' +
+      'Keep one long-lived call open for the current Cat Café multi-cat ReviewRound so execution stays in the same ChatGPT Desktop turn. ' +
+      'Use when: implementation was reported and the Resume Packet says Review is in progress; the default 60-minute wait covers a full Review round. ' +
       'NOT for: running reviewers in the Desktop app-server, starting a new Desktop turn, mutating Git, or replacing the permanent binding. ' +
-      'Output: the latest barrier-safe Resume Packet plus reviewWait=complete or pending.',
+      'Output: the completed barrier-safe Resume Packet, or reviewWait=pending only when the explicit wait ceiling is reached.',
     inputSchema: developmentReviewWaitInputSchema,
     handler: handleDevelopmentReviewWait,
     governance: {

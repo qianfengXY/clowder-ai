@@ -47,6 +47,8 @@ describe('F289 Desktop executor skill contract', () => {
     assert.match(skill, /Cat Café 自己的 provider\/app-server/);
     assert.match(skill, /thread\/resume/);
     assert.match(skill, /不得结束当前\s+Desktop turn/s);
+    assert.match(skill, /单次长等待/);
+    assert.match(skill, /60 分钟/);
   });
 
   test('is registered in the canonical manifest', () => {

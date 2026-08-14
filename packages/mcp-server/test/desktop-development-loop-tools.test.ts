@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   desktopDevelopmentLoopTools,
+  developmentReviewWaitInputSchema,
   handleDevelopmentMergeConfirmationRecord,
   handleDevelopmentMergeReport,
   handleDevelopmentProjectRead,
@@ -87,6 +88,18 @@ describe('F289 ChatGPT Desktop development-loop tools', () => {
     const output = JSON.parse(result.content[0].text);
     assert.equal(output.reviewWait, 'complete');
     assert.equal(output.resumePacket.phase, 'fix_required');
+  });
+
+  it('keeps one Desktop tool call alive for a full Review round', () => {
+    const timeoutSchema = developmentReviewWaitInputSchema.timeoutMs;
+    assert.equal(timeoutSchema.safeParse(60 * 60 * 1_000).success, true);
+    assert.equal(timeoutSchema.safeParse(60 * 60 * 1_000 + 1).success, false);
+    assert.match(timeoutSchema.description ?? '', /defaults to 60 minutes/i);
+
+    const waitTool = desktopDevelopmentLoopTools.find((tool) => tool.name === 'cat_cafe_development_review_wait');
+    assert.ok(waitTool);
+    assert.match(waitTool.description, /one long-lived call/i);
+    assert.doesNotMatch(waitTool.description, /call again when reviewWait is pending/i);
   });
 
   it('documents routing, exclusions, output, and every top-level input parameter', () => {

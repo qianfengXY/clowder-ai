@@ -84,10 +84,12 @@ workspace 的 committed SHA 或 worktree 状态变化时，用 `cat_cafe_develop
 
 implementation report 会在当前 backlog 功能的独立 Review 会话中启动精确 SHA 的多猫 ReviewRound。Review 猫猫始终
 使用 Cat Café 自己的 provider/app-server；不得复用或写入 ChatGPT Desktop 的 app-server。Desktop 原窗口在同一个 turn
-内通过 `cat_cafe_development_review_wait` 等待 barrier-safe Resume Packet：
+内通过 `cat_cafe_development_review_wait` 的单次长等待取得 barrier-safe Resume Packet。默认等待 60 分钟，足以覆盖
+正常完整 ReviewRound，避免短轮询结束 turn 后无人消费共识结果：
 
-- `review_in_progress`：持续调用 `cat_cafe_development_review_wait`；返回 `reviewWait=pending` 时继续等待，不得结束当前
-  Desktop turn 或让 Cat Café daemon 对该 chat 执行 `thread/resume` / `turn/start`。
+- `review_in_progress`：调用一次 `cat_cafe_development_review_wait` 并保持该工具调用；只有达到完整 60 分钟上限仍未完成时
+  才会返回 `reviewWait=pending`，此时必须立即再次长等待，不得结束当前 Desktop turn 或让 Cat Café daemon 对该 chat
+  执行 `thread/resume` / `turn/start`。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
