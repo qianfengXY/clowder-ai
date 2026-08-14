@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { createConnection, type Socket } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,9 +13,12 @@ import type { AgentCarrierSession, AgentCarrierSessionFactory } from '../cats/se
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_DAEMON_SOCKET = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock');
+const DEFAULT_DESKTOP_IPC_SOCKET = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'ipc', 'ipc.sock');
 const PENDING_WAKE_SET = 'desktop-development:pending-native-wakes';
 const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
 const CHATGPT_CODEX_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex';
+const DESKTOP_IPC_TIMEOUT_MS = 15_000;
+const MAX_DESKTOP_IPC_FRAME_BYTES = 16 * 1024 * 1024;
 
 export interface DesktopTaskLaunchInput {
   readonly projectId: string;
@@ -64,7 +69,9 @@ interface DesktopTaskLauncherOptions {
   readonly sessionFactory?: AgentCarrierSessionFactory;
   readonly goalSessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
+  readonly sendDesktopTurn?: (threadId: string, objective: string) => Promise<void>;
   readonly daemonSocketPath?: string;
+  readonly desktopIpcSocketPath?: string;
   readonly recoveryIntervalMs?: number;
   readonly command?: string;
 }
@@ -87,10 +94,10 @@ export function buildDesktopTaskName(featureId: string, title: string): string {
 /**
  * Creates and wakes native ChatGPT Desktop tasks.
  *
- * Cat Cafe connects to the durable ChatGPT app-server daemon. Initial tasks
- * start one visible turn. Review completion only updates the bound thread goal
- * and opens its codex:// deep link; ChatGPT Desktop remains the sole owner that
- * turns the goal into the next visible turn.
+ * Initial tasks use Cat Cafe's durable app-server daemon. Review completion
+ * writes the durable goal separately, then asks the current ChatGPT Desktop
+ * owner to start exactly one turn through Desktop IPC. Review execution remains
+ * on Cat Cafe's independent provider sessions.
  */
 export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly active = new Map<string, Promise<DesktopTaskLaunchResult>>();
@@ -99,6 +106,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly sessionFactory: AgentCarrierSessionFactory;
   private readonly goalSessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
+  private readonly sendDesktopTurn: (threadId: string, objective: string) => Promise<void>;
   private readonly daemonSocketPath: string;
   private readonly command: string;
 
@@ -110,6 +118,10 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     this.goalSessionFactory = options.goalSessionFactory ?? options.sessionFactory ?? createDirectAgentCarrierSession;
     this.openThread = options.openThread ?? openChatGptThread;
     this.daemonSocketPath = options.daemonSocketPath ?? process.env.CODEX_APP_SERVER_SOCKET ?? DEFAULT_DAEMON_SOCKET;
+    const desktopIpcSocketPath = options.desktopIpcSocketPath ?? DEFAULT_DESKTOP_IPC_SOCKET;
+    this.sendDesktopTurn =
+      options.sendDesktopTurn ??
+      (async (threadId, objective) => sendChatGptDesktopTurn(desktopIpcSocketPath, threadId, objective));
     this.command = options.command ?? resolveChatGptCodexCommand();
     if (redis && options.recoveryIntervalMs !== 0) {
       const interval = setInterval(
@@ -277,11 +289,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     await this.wake(input);
   }
 
-  /**
-   * Proven native wake path: write only the persisted goal, then open the exact
-   * bound thread. Never resume the thread or start a turn from Cat Cafe; doing
-   * either would compete with ChatGPT Desktop's active writer.
-   */
+  /** Ask the current Desktop owner to start one turn in the bound thread. */
   private async wake(input: DesktopTaskActivationInput): Promise<void> {
     await this.withGoalProtocol(input.sourcePath, `desktop-review-goal-${input.threadId}`, async (rpc) => {
       await rpc.request('thread/goal/set', {
@@ -291,7 +299,10 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         tokenBudget: null,
       });
     });
-    await this.openThread(input.threadId);
+    await this.sendDesktopTurn(input.threadId, input.objective);
+    // Delivery already succeeded. A focus failure must not retain the outbox and
+    // duplicate the turn on recovery.
+    await this.openThread(input.threadId).catch(() => undefined);
   }
 
   /** Stop the durable goal from creating another turn while Cat Cafe reviews. */
@@ -392,11 +403,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     }
   }
 
-  /**
-   * Goal metadata must be written through the Desktop-native short-lived
-   * app-server. The pooled daemon persists the value but its notification is
-   * not observed by the running ChatGPT Desktop client.
-   */
+  /** Goal metadata is persisted without competing for Desktop thread ownership. */
   private async withGoalProtocol<T>(
     cwd: string,
     invocationPrefix: string,
@@ -425,6 +432,126 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     } finally {
       clearTimeout(timeout);
       await session.close();
+    }
+  }
+}
+
+interface DesktopIpcResponse {
+  readonly type: 'response';
+  readonly requestId: string;
+  readonly resultType: 'success' | 'error';
+  readonly method: string;
+  readonly handledByClientId?: string;
+  readonly result?: unknown;
+  readonly error?: unknown;
+}
+
+/**
+ * Forward one message to the ChatGPT Desktop window that currently owns the
+ * bound conversation. The owner window performs the real turn/start on its own
+ * embedded app-server, so Cat Cafe never becomes a second writer.
+ */
+export async function sendChatGptDesktopTurn(
+  socketPath: string,
+  threadId: string,
+  objective: string,
+): Promise<void> {
+  const socket = createConnection(socketPath);
+  const timeout = setTimeout(
+    () => socket.destroy(new Error('Timed out while delivering the Review result to ChatGPT Desktop')),
+    DESKTOP_IPC_TIMEOUT_MS,
+  );
+  try {
+    await once(socket, 'connect');
+    const reader = readDesktopIpcFrames(socket)[Symbol.asyncIterator]();
+    let sourceClientId = 'initializing-client';
+    const initialize = await requestDesktopIpc(reader, socket, {
+      sourceClientId,
+      version: 0,
+      method: 'initialize',
+      params: { clientType: 'cat-cafe' },
+    });
+    const initializedClientId = asRecord(initialize.result)?.clientId;
+    if (typeof initializedClientId !== 'string') {
+      throw new Error('ChatGPT Desktop IPC initialize response did not include a client id');
+    }
+    sourceClientId = initializedClientId;
+
+    const discovery = await requestDesktopIpc(reader, socket, {
+      sourceClientId,
+      version: 1,
+      method: 'thread-owner-discovery',
+      params: { hostId: 'local', conversationId: threadId },
+    });
+    if (!discovery.handledByClientId) {
+      throw new Error(`No ChatGPT Desktop window owns bound thread ${threadId}`);
+    }
+
+    await requestDesktopIpc(reader, socket, {
+      sourceClientId,
+      targetClientId: discovery.handledByClientId,
+      version: 1,
+      method: 'thread-follower-start-turn',
+      params: {
+        conversationId: threadId,
+        turnStartParams: { input: [{ type: 'text', text: objective }] },
+        mcpAppModelContextAttachments: [],
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+    socket.destroy();
+  }
+}
+
+async function requestDesktopIpc(
+  reader: AsyncIterator<unknown>,
+  socket: Socket,
+  input: {
+    readonly sourceClientId: string;
+    readonly targetClientId?: string;
+    readonly version: number;
+    readonly method: string;
+    readonly params: Record<string, unknown>;
+  },
+): Promise<DesktopIpcResponse> {
+  const requestId = randomUUID();
+  const body = Buffer.from(
+    JSON.stringify({
+      type: 'request',
+      requestId,
+      ...input,
+    }),
+  );
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length, 0);
+  socket.write(Buffer.concat([header, body]));
+
+  while (true) {
+    const next = await reader.next();
+    if (next.done) throw new Error(`ChatGPT Desktop IPC ended before responding to ${input.method}`);
+    const message = asRecord(next.value);
+    if (message?.type !== 'response' || message.requestId !== requestId) continue;
+    if (message.resultType !== 'success') {
+      throw new Error(`${input.method} failed: ${JSON.stringify(message.error ?? message)}`);
+    }
+    return message as unknown as DesktopIpcResponse;
+  }
+}
+
+async function* readDesktopIpcFrames(socket: Socket): AsyncGenerator<unknown> {
+  let buffered = Buffer.alloc(0);
+  for await (const chunk of socket) {
+    buffered = Buffer.concat([buffered, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    while (buffered.length >= 4) {
+      const frameBytes = buffered.readUInt32LE(0);
+      if (frameBytes > MAX_DESKTOP_IPC_FRAME_BYTES) {
+        throw new Error(`ChatGPT Desktop IPC frame is too large: ${frameBytes} bytes`);
+      }
+      if (buffered.length < frameBytes + 4) break;
+      const body = buffered.subarray(4, frameBytes + 4).toString('utf8');
+      buffered = buffered.subarray(frameBytes + 4);
+      yield JSON.parse(body) as unknown;
     }
   }
 }
@@ -490,7 +617,7 @@ export function buildReviewCompletionObjective(input: {
     `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
     '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
     '若需要修复，先在这个原窗口取得递增的新 attempt，再完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
-    '本消息由原窗口的 active goal 恢复；禁止创建替代窗口，禁止由 Cat Café 调用 thread/resume 或 turn/start。',
+    '本消息由 Cat Café 通过 ChatGPT Desktop 窗口 IPC 投递到原绑定窗口；禁止创建替代窗口或启动第二个 app-server。',
   ].join('\n');
 }
 

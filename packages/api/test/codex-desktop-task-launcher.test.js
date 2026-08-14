@@ -1,6 +1,10 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 class FakeNativeSession {
@@ -142,22 +146,22 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
-test('Review completion sets an active goal on the bound thread without resuming or starting a turn', async () => {
+test('Review completion forwards one visible turn to the current Desktop owner', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   let session;
-  let goalSessionOptions;
   const opened = [];
+  const delivered = [];
   const launcher = new CodexDesktopTaskLauncher(undefined, {
     sessionFactory: async () => {
       throw new Error('Review wake must not use the pooled daemon session');
     },
-    goalSessionFactory: async (options) => {
-      goalSessionOptions = options;
+    goalSessionFactory: async () => {
       session = new FakeNativeSession();
       return session;
     },
+    sendDesktopTurn: async (threadId, objective) => delivered.push({ threadId, objective }),
     openThread: async (threadId) => opened.push(threadId),
   });
 
@@ -175,7 +179,9 @@ test('Review completion sets an active goal on the bound thread without resuming
   assert.equal(goal.params.threadId, 'bound-thread-f006');
   assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
   assert.equal(goal.params.status, 'active');
-  assert.deepEqual(goalSessionOptions.args, ['app-server', '--stdio']);
+  assert.deepEqual(delivered, [
+    { threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' },
+  ]);
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
@@ -231,11 +237,13 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   };
   let fail = true;
   const opened = [];
+  const delivered = [];
   const launcher = new CodexDesktopTaskLauncher(redis, {
     recoveryIntervalMs: 0,
-    goalSessionFactory: async () => {
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async (threadId, objective) => {
       if (fail) throw new Error('Desktop unavailable');
-      return new FakeNativeSession();
+      delivered.push({ threadId, objective });
     },
     openThread: async (threadId) => opened.push(threadId),
   });
@@ -254,9 +262,67 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
 
   fail = false;
   await launcher.recoverPendingActivations();
+  assert.deepEqual(delivered, [
+    { threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' },
+  ]);
   assert.deepEqual(opened, ['bound-thread-f006']);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
   assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
+});
+
+test('Desktop IPC discovers the owning window and asks it to start the turn', async (t) => {
+  const { sendChatGptDesktopTurn } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const directory = await mkdtemp(join(tmpdir(), 'cat-cafe-desktop-ipc-'));
+  const socketPath = join(directory, 'ipc.sock');
+  const requests = [];
+  const server = createServer((socket) => {
+    let buffered = Buffer.alloc(0);
+    socket.on('data', (chunk) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      while (buffered.length >= 4) {
+        const frameBytes = buffered.readUInt32LE(0);
+        if (buffered.length < frameBytes + 4) return;
+        const request = JSON.parse(buffered.subarray(4, frameBytes + 4).toString('utf8'));
+        buffered = buffered.subarray(frameBytes + 4);
+        requests.push(request);
+
+        const response = {
+          type: 'response',
+          requestId: request.requestId,
+          resultType: 'success',
+          method: request.method,
+          handledByClientId: request.method === 'thread-owner-discovery' ? 'desktop-owner' : 'router',
+          result: request.method === 'initialize' ? { clientId: 'cat-cafe-client' } : {},
+        };
+        const body = Buffer.from(JSON.stringify(response));
+        const header = Buffer.alloc(4);
+        header.writeUInt32LE(body.length, 0);
+        socket.write(Buffer.concat([header, body]));
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(socketPath, resolve);
+  });
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  await sendChatGptDesktopTurn(socketPath, 'bound-thread-f006', '[Review 系统消息] Traqen · F006');
+
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ['initialize', 'thread-owner-discovery', 'thread-follower-start-turn'],
+  );
+  assert.equal(requests[0].version, 0);
+  assert.equal(requests[1].params.conversationId, 'bound-thread-f006');
+  assert.equal(requests[2].targetClientId, 'desktop-owner');
+  assert.equal(requests[2].params.conversationId, 'bound-thread-f006');
+  assert.equal(requests[2].params.turnStartParams.input[0].text, '[Review 系统消息] Traqen · F006');
 });
 
 test('Desktop task launcher reopens an existing task without writing a new turn', async () => {

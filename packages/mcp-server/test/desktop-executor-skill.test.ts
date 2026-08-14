@@ -49,8 +49,11 @@ describe('F289 Desktop executor skill contract', () => {
     assert.match(skill, /不得短轮询/);
     assert.match(skill, /active goal/);
     assert.match(skill, /持久化 outbox/);
-    assert.match(skill, /thread\/resume.*turn\/start/s);
-    assert.match(skill, /第二个 app-server/);
+    assert.match(skill, /ChatGPT Desktop 本地 IPC/);
+    assert.match(skill, /thread-follower-start-turn/);
+    assert.match(skill, /真正的 `turn\/start` 由 owner 窗口自己的 app-server 执行/);
+    assert.match(skill, /不得用 daemon 抢写该 thread/);
+    assert.match(skill, /第二个\s+app-server/);
     assert.match(skill, /不得创建替代窗口/);
   });
 
