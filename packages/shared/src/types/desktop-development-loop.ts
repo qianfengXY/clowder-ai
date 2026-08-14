@@ -151,6 +151,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly workLifecycle: 'active' | 'accepted' | 'rejected';
   readonly managedWorkVersion: number;
   readonly bindingEpoch: number;
+  /** Opaque ChatGPT Desktop window/thread reference for the current binding. */
+  readonly chatRef?: string;
   readonly sessionStatus: DesktopSessionBindingStatus;
   readonly sessionVersion: number;
   readonly branch: string;

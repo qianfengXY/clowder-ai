@@ -258,6 +258,7 @@ describe(
         now: 2_000,
       });
       assert.equal(first.bindingEpoch, 1);
+      assert.equal(first.chatRef, 'chat-1');
       assert.equal(first.attemptNumber, 1);
       assert.equal(first.phase, 'implementing');
       assert.equal(first.managedWorkVersion, 2);
@@ -299,6 +300,7 @@ describe(
         now: 3_000,
       });
       assert.equal(second.bindingEpoch, 2);
+      assert.equal(second.chatRef, 'chat-2');
 
       await assert.rejects(
         () =>

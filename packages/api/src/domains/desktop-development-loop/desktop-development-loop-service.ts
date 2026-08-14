@@ -863,6 +863,7 @@ export class DesktopDevelopmentLoopService {
       workLifecycle: managed.state.lifecycle,
       managedWorkVersion: knownManagedVersion ?? managed.state.version,
       bindingEpoch: session.bindingEpoch,
+      ...(session.chatRef ? { chatRef: session.chatRef } : {}),
       sessionStatus: session.status,
       sessionVersion: session.version,
       branch: session.workspace.branch,

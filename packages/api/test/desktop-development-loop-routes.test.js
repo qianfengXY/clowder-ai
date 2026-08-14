@@ -126,6 +126,7 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     workLifecycle: 'active',
     managedWorkVersion: 2,
     bindingEpoch: 1,
+    chatRef: 'chat-window-1',
     sessionStatus: 'active',
     sessionVersion: 1,
     branch: 'feat/example',

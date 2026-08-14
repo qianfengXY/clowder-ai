@@ -313,6 +313,20 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 </span>
               )}
             </div>
+            <div
+              className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
+              data-testid={`desktop-window-binding-${work.workId}`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-micro text-cafe-secondary">绑定的 ChatGPT Desktop 窗口</span>
+                <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
+                  {describeSessionStatus(work.sessionStatus)} · 绑定代次 {work.bindingEpoch}
+                </span>
+              </div>
+              <div className="mt-1 break-all font-mono text-xs text-cafe" title={work.chatRef}>
+                {work.chatRef ?? '未记录窗口 ID；请从目标窗口重新绑定'}
+              </div>
+            </div>
             {work.openFindings.length > 0 && (
               <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
             )}
@@ -389,6 +403,17 @@ function describeWorkState(work: DesktopDevelopmentResumePacket): string {
       return '等待提交 Review';
     case 'implementing':
       return '实现中';
+  }
+}
+
+function describeSessionStatus(status: DesktopDevelopmentResumePacket['sessionStatus']): string {
+  switch (status) {
+    case 'active':
+      return '已绑定';
+    case 'detached':
+      return '等待重绑';
+    case 'superseded':
+      return '已被替代';
   }
 }
 
