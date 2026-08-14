@@ -151,6 +151,17 @@ export interface DesktopDevelopmentLaunchState {
   readonly featureId: string;
   readonly title: string;
   readonly status: DesktopDevelopmentLaunchStatus;
+  readonly managedWork?: {
+    readonly workId: string;
+    readonly attemptId: string;
+    readonly attemptNumber: number;
+    readonly lifecycle: ManagedWorkLifecycle;
+  };
+  readonly desktopBinding?: {
+    readonly chatRef?: string;
+    readonly bindingEpoch: number;
+    readonly status: DesktopSessionBinding['status'];
+  };
   readonly desktopTask?:
     | { readonly status: 'created'; readonly threadId: string }
     | { readonly status: 'failed'; readonly error: string };
@@ -169,12 +180,6 @@ function featureIdForItem(item: BacklogItem): string | null {
     .trim()
     .toUpperCase();
   return featureId || null;
-}
-
-function launchStatusWithoutSop(status: BacklogStatus): DesktopDevelopmentLaunchStatus {
-  if (status === 'done') return 'completed';
-  if (status === 'open') return 'available';
-  return 'managed_by_catcafe';
 }
 
 export class DesktopDevelopmentLoopService {
@@ -335,14 +340,19 @@ export class DesktopDevelopmentLoopService {
 
     const base = { backlogItemId: item.id, featureId, title: item.title } as const;
     const sop = await this.workflowSopStore.get(item.id);
-    if (!sop) return { ...base, status: launchStatusWithoutSop(item.status) };
+    // Imported Backlog/document status is historical planning metadata. A
+    // Desktop feature has not started until it owns a Workflow SOP, and it is
+    // not complete until its managed work reaches user-accepted lifecycle.
+    if (!sop) {
+      return {
+        ...base,
+        status: item.status === 'open' || item.status === 'done' ? 'available' : 'managed_by_catcafe',
+      };
+    }
 
     const bundle = await this.workflowSopStore.getManagedWorkAdmission(ownerUserId, item.id);
     if (!bundle) {
-      return {
-        ...base,
-        status: item.status === 'done' || sop.stage === 'completion' ? 'completed' : 'managed_by_catcafe',
-      };
+      return { ...base, status: 'managed_by_catcafe' };
     }
     let snapshot = await this.managedWork.read({
       consumerId: CONSUMER_ID,
@@ -358,27 +368,44 @@ export class DesktopDevelopmentLoopService {
         attemptId: snapshot.state.currentAttemptId,
       });
     }
+    const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
+    const sessionMatchesAttempt = session?.attemptId === snapshot.attempt.attemptId;
+    const workContext = {
+      managedWork: {
+        workId: snapshot.state.workId,
+        attemptId: snapshot.attempt.attemptId,
+        attemptNumber: snapshot.attempt.attemptNumber,
+        lifecycle: snapshot.state.lifecycle,
+      },
+      ...(sessionMatchesAttempt && session
+        ? {
+            desktopBinding: {
+              ...(session.chatRef ? { chatRef: session.chatRef } : {}),
+              bindingEpoch: session.bindingEpoch,
+              status: session.status,
+            },
+          }
+        : {}),
+    } as const;
     const terminalStatus = terminalLaunchStatus(snapshot.state.lifecycle);
-    if (terminalStatus) return { ...base, status: terminalStatus };
+    if (terminalStatus) return { ...base, ...workContext, status: terminalStatus };
 
     const executor = snapshot.attempt.executorActor;
     if (executor?.kind === 'external_actor' && executor.actorId === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR) {
-      const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
       const desktopTask = await this.desktopTaskLauncher?.get(projectId, item.id);
       return {
         ...base,
-        status:
-          session?.attemptId === snapshot.attempt.attemptId && session.status === 'active'
-            ? 'connected_to_desktop'
-            : 'ready_for_desktop',
+        ...workContext,
+        status: sessionMatchesAttempt && session.status === 'active' ? 'connected_to_desktop' : 'ready_for_desktop',
         ...(desktopTask ? { desktopTask } : {}),
       };
     }
     if (executor?.kind === 'cat' || snapshot.attempt.executorCatId) {
-      return { ...base, status: 'managed_by_catcafe' };
+      return { ...base, ...workContext, status: 'managed_by_catcafe' };
     }
     return {
       ...base,
+      ...workContext,
       status: sop.batonHolder === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR ? 'ready_for_desktop' : 'managed_by_catcafe',
       ...(sop.batonHolder === CHATGPT_DESKTOP_DEVELOPMENT_ACTOR && this.desktopTaskLauncher
         ? { desktopTask: (await this.desktopTaskLauncher.get(projectId, item.id)) ?? undefined }

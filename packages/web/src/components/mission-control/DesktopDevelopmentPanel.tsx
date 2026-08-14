@@ -7,11 +7,41 @@ import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { buildDesktopAcceptanceRequest } from './desktop-development-form';
 
+type DevelopmentLaunchStatus =
+  | 'available'
+  | 'ready_for_desktop'
+  | 'connected_to_desktop'
+  | 'managed_by_catcafe'
+  | 'rejected'
+  | 'completed';
+
+interface ProjectDevelopmentLaunchState {
+  readonly backlogItemId: string;
+  readonly featureId: string;
+  readonly title: string;
+  readonly status: DevelopmentLaunchStatus;
+  readonly managedWork?: {
+    readonly workId: string;
+    readonly attemptId: string;
+    readonly attemptNumber: number;
+    readonly lifecycle: 'active' | 'accepted' | 'rejected';
+  };
+  readonly desktopBinding?: {
+    readonly chatRef?: string;
+    readonly bindingEpoch: number;
+    readonly status: DesktopDevelopmentResumePacket['sessionStatus'];
+  };
+  readonly desktopTask?:
+    | { readonly status: 'created'; readonly threadId: string }
+    | { readonly status: 'failed'; readonly error: string };
+}
+
 export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
   const { projects, setProjects } = useExternalProjectStore();
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
+  const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [editingReviewCats, setEditingReviewCats] = useState(false);
@@ -38,18 +68,33 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const loadWorks = useCallback(async () => {
     if (!project.desktopDevelopment) {
       setWorks([]);
+      setLaunchStates([]);
       return;
     }
     setWorksLoading(true);
     try {
-      const response = await apiFetch(
-        `/api/external-projects/${project.id}/development-loop/works?protocolVersion=${project.desktopDevelopment.protocolVersion}`,
-      );
-      const body = (await response.json()) as { works?: DesktopDevelopmentResumePacket[]; error?: string };
-      if (!response.ok || !body.works) throw new Error(body.error ?? '无法读取开发轮次');
-      setWorks(body.works);
+      const protocolVersion = project.desktopDevelopment.protocolVersion;
+      const [worksResponse, statesResponse] = await Promise.all([
+        apiFetch(`/api/external-projects/${project.id}/development-loop/works?protocolVersion=${protocolVersion}`),
+        apiFetch(
+          `/api/external-projects/${project.id}/development-loop/launch-states?protocolVersion=${protocolVersion}`,
+        ),
+      ]);
+      const worksBody = (await worksResponse.json()) as {
+        works?: DesktopDevelopmentResumePacket[];
+        error?: string;
+      };
+      const statesBody = (await statesResponse.json()) as {
+        states?: ProjectDevelopmentLaunchState[];
+        error?: string;
+      };
+      if (!worksResponse.ok || !worksBody.works) throw new Error(worksBody.error ?? '无法读取开发轮次');
+      if (!statesResponse.ok || !statesBody.states) throw new Error(statesBody.error ?? '无法读取功能绑定');
+      setWorks(worksBody.works);
+      setLaunchStates(statesBody.states);
     } catch (error) {
       setWorks([]);
+      setLaunchStates([]);
       setStatus(error instanceof Error ? error.message : '无法读取开发轮次');
     } finally {
       setWorksLoading(false);
@@ -167,6 +212,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   }
 
   const pilotCount = binding.successfulManualPilotCount;
+  const worksById = new Map(works.map((work) => [work.workId, work]));
   return (
     <section className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-5">
       <div>
@@ -293,65 +339,83 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
             {worksLoading ? '刷新中...' : '刷新状态'}
           </button>
         </div>
-        {!worksLoading && works.length === 0 && (
+        <p className="text-micro leading-relaxed text-cafe-secondary">
+          每个功能独立对应一个 ChatGPT Desktop 窗口；“已完成”只以你在本页做出的最终验收为准。
+        </p>
+        {!worksLoading && launchStates.length === 0 && (
           <p className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-3 text-xs text-cafe-secondary">
-            尚无已连接的 ChatGPT Desktop 工作。Desktop 可用上方项目 ID，或仅用 GitHub 仓库地址识别此项目。
+            此项目尚无可展示的功能。请先在“功能列表”导入 Backlog。
           </p>
         )}
-        {works.map((work) => (
-          <article key={work.workId} className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="text-xs font-medium text-cafe">{work.branch}</div>
-                <div className="mt-1 text-micro text-cafe-secondary">
-                  {work.workId} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
+        {launchStates.map((launchState) => {
+          const work = launchState.managedWork ? worksById.get(launchState.managedWork.workId) : undefined;
+          const windowRef =
+            launchState.desktopBinding?.chatRef ??
+            (launchState.desktopTask?.status === 'created' ? launchState.desktopTask.threadId : undefined);
+          return (
+            <article key={launchState.backlogItemId} className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs font-medium text-cafe">
+                    {launchState.featureId} · {featureDisplayTitle(launchState.featureId, launchState.title)}
+                  </div>
+                  <div className="mt-1 text-micro text-cafe-secondary">{describeLaunchStatus(launchState.status)}</div>
+                </div>
+                {launchState.desktopBinding?.status === 'detached' && (
+                  <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
+                    等待新 ChatGPT 会话重新绑定
+                  </span>
+                )}
+              </div>
+              <div
+                className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
+                data-testid={`desktop-window-binding-${launchState.backlogItemId}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-micro text-cafe-secondary">绑定的 ChatGPT Desktop 窗口</span>
+                  <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
+                    {launchState.desktopBinding
+                      ? `${describeSessionStatus(launchState.desktopBinding.status)} · 绑定代次 ${launchState.desktopBinding.bindingEpoch}`
+                      : launchState.desktopTask?.status === 'created'
+                        ? '窗口已创建 · 等待绑定'
+                        : '未绑定'}
+                  </span>
+                </div>
+                <div className="mt-1 break-all font-mono text-xs text-cafe" title={windowRef}>
+                  {windowRef ?? '启动该功能后，将创建或绑定它自己的 Desktop 窗口'}
                 </div>
               </div>
-              {work.sessionStatus === 'detached' && (
-                <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
-                  等待新 ChatGPT 会话重新绑定
-                </span>
+              {work && (
+                <div className="mt-2 text-micro text-cafe-secondary">
+                  {work.branch} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
+                </div>
               )}
-            </div>
-            <div
-              className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
-              data-testid={`desktop-window-binding-${work.workId}`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-micro text-cafe-secondary">绑定的 ChatGPT Desktop 窗口</span>
-                <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
-                  {describeSessionStatus(work.sessionStatus)} · 绑定代次 {work.bindingEpoch}
-                </span>
-              </div>
-              <div className="mt-1 break-all font-mono text-xs text-cafe" title={work.chatRef}>
-                {work.chatRef ?? '未记录窗口 ID；请从目标窗口重新绑定'}
-              </div>
-            </div>
-            {work.openFindings.length > 0 && (
-              <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
-            )}
-            {work.acceptancePending && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void recordAcceptance(work, true)}
-                  disabled={acceptingWorkId === work.workId}
-                  className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
-                >
-                  验收通过
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void recordAcceptance(work, false)}
-                  disabled={acceptingWorkId === work.workId}
-                  className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
-                >
-                  验收未通过
-                </button>
-              </div>
-            )}
-          </article>
-        ))}
+              {work && work.openFindings.length > 0 && (
+                <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
+              )}
+              {work?.acceptancePending && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void recordAcceptance(work, true)}
+                    disabled={acceptingWorkId === work.workId}
+                    className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                  >
+                    验收通过
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void recordAcceptance(work, false)}
+                    disabled={acceptingWorkId === work.workId}
+                    className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+                  >
+                    验收未通过
+                  </button>
+                </div>
+              )}
+            </article>
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -415,6 +479,31 @@ function describeSessionStatus(status: DesktopDevelopmentResumePacket['sessionSt
     case 'superseded':
       return '已被替代';
   }
+}
+
+function describeLaunchStatus(status: DevelopmentLaunchStatus): string {
+  switch (status) {
+    case 'available':
+      return '尚未启动';
+    case 'ready_for_desktop':
+      return '已启动，等待 Desktop 连接';
+    case 'connected_to_desktop':
+      return 'Desktop 开发中';
+    case 'managed_by_catcafe':
+      return 'CatCafe 流程处理中';
+    case 'rejected':
+      return '验收未通过';
+    case 'completed':
+      return '已由你验收完成';
+  }
+}
+
+function featureDisplayTitle(featureId: string, title: string): string {
+  const escapedFeatureId = featureId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return title
+    .replace(new RegExp(`^\\[${escapedFeatureId}\\]\\s*`, 'i'), '')
+    .replace(new RegExp(`^${escapedFeatureId}\\s*[-—:：·]?\\s*`, 'i'), '')
+    .trim();
 }
 
 function Info({ label, value }: { label: string; value: string }) {

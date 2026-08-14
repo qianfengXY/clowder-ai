@@ -54,6 +54,18 @@ function launchButtonLabel(status: LaunchStatus, desktopBound: boolean, featureI
   return '启动开发闭环';
 }
 
+function launchStatusLabel(status: LaunchStatus): string {
+  if (status === 'checking') return '读取状态';
+  if (status === 'starting') return '启动中';
+  if (status === 'available') return '未启动';
+  if (status === 'ready_for_desktop') return '等待 Desktop';
+  if (status === 'connected_to_desktop') return '开发中';
+  if (status === 'managed_by_catcafe') return 'CatCafe 流程中';
+  if (status === 'rejected') return '验收未通过';
+  if (status === 'completed') return '已验收完成';
+  return '状态异常';
+}
+
 function ExternalProjectFeatureRow({
   item,
   status,
@@ -84,7 +96,7 @@ function ExternalProjectFeatureRow({
           </span>
           <span className="min-w-0 text-sm font-medium text-cafe">{item.title}</span>
           <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-medium text-cafe-secondary">
-            {item.status}
+            {launchStatusLabel(status)}
           </span>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -434,7 +446,9 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
                       ))}
                     </select>
                     {bindingEditor.data.locked && (
-                      <p className="text-xs text-cafe-secondary">开发闭环正在进行，结束当前流程后才能更换 Review 绑定。</p>
+                      <p className="text-xs text-cafe-secondary">
+                        开发闭环正在进行，结束当前流程后才能更换 Review 绑定。
+                      </p>
                     )}
                     <button
                       type="button"

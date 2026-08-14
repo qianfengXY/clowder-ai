@@ -170,6 +170,22 @@ describe('F289 project-scoped Desktop launch', () => {
     });
   });
 
+  test('does not treat imported done metadata as Desktop completion before the feature starts', async () => {
+    projectItem.status = 'done';
+    try {
+      const [state] = await service.listProjectLaunchStates({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: 'project-1',
+      });
+      assert.equal(state.status, 'available');
+      assert.equal(state.managedWork, undefined);
+      assert.equal(state.desktopBinding, undefined);
+    } finally {
+      projectItem.status = 'open';
+    }
+  });
+
   test('returns the native Desktop task created for the exact feature', async () => {
     let launchInput;
     service.desktopTaskLauncher = {
@@ -285,6 +301,8 @@ describe('F289 project-scoped Desktop launch', () => {
     sessions.set(bundle.admission.workId, {
       attemptId: bundle.attempt.attemptId,
       status: 'active',
+      chatRef: 'chat-f006',
+      bindingEpoch: 3,
     });
 
     let [state] = await service.listProjectLaunchStates({
@@ -293,10 +311,23 @@ describe('F289 project-scoped Desktop launch', () => {
       projectId: 'project-1',
     });
     assert.equal(state.status, 'connected_to_desktop');
+    assert.deepEqual(state.desktopBinding, {
+      chatRef: 'chat-f006',
+      bindingEpoch: 3,
+      status: 'active',
+    });
+    assert.deepEqual(state.managedWork, {
+      workId: 'work-backlog-1',
+      attemptId: 'attempt-backlog-1',
+      attemptNumber: 1,
+      lifecycle: 'active',
+    });
 
     sessions.set(bundle.admission.workId, {
       attemptId: bundle.attempt.attemptId,
       status: 'detached',
+      chatRef: 'chat-f006',
+      bindingEpoch: 3,
     });
     [state] = await service.listProjectLaunchStates({
       protocolVersion: 1,
