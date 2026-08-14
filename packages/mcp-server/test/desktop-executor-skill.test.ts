@@ -42,13 +42,16 @@ describe('F289 Desktop executor skill contract', () => {
     assert.doesNotMatch(skill, /GITHUB_TOKEN|github_issues_bilingual|TraqenGitHubIssuePublisher/);
   });
 
-  test('keeps Review providers separate and waits inside the bound Desktop turn', () => {
-    assert.match(skill, /cat_cafe_development_review_wait/);
+  test('keeps Review providers separate and ends the Desktop turn instead of polling', () => {
     assert.match(skill, /Cat Café 自己的 provider\/app-server/);
-    assert.match(skill, /thread\/resume/);
-    assert.match(skill, /不得结束当前\s+Desktop turn/s);
-    assert.match(skill, /单次长等待/);
-    assert.match(skill, /60 分钟/);
+    assert.match(skill, /不得调用 `cat_cafe_development_review_wait`/);
+    assert.match(skill, /当前 Desktop turn 必须结束/);
+    assert.match(skill, /不得短轮询/);
+    assert.match(skill, /active goal/);
+    assert.match(skill, /持久化 outbox/);
+    assert.match(skill, /thread\/resume.*turn\/start/s);
+    assert.match(skill, /第二个 app-server/);
+    assert.match(skill, /不得创建替代窗口/);
   });
 
   test('is registered in the canonical manifest', () => {

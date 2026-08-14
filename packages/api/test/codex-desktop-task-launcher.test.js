@@ -142,6 +142,89 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
+test('Review completion sets an active goal on the bound thread without resuming or starting a turn', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  let session;
+  const opened = [];
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    sessionFactory: async () => {
+      session = new FakeNativeSession();
+      return session;
+    },
+    openThread: async (threadId) => opened.push(threadId),
+  });
+
+  await launcher.activate({
+    threadId: 'bound-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  });
+
+  assert.deepEqual(
+    session.writes.map((message) => message.method),
+    ['initialize', 'initialized', 'thread/goal/set'],
+  );
+  const goal = session.writes.find((message) => message.method === 'thread/goal/set');
+  assert.equal(goal.params.threadId, 'bound-thread-f006');
+  assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
+  assert.equal(goal.params.status, 'active');
+  assert.deepEqual(opened, ['bound-thread-f006']);
+});
+
+test('failed Review goal delivery remains in the durable outbox and recovery reuses the same thread', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map();
+  const sets = new Map();
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  let fail = true;
+  const opened = [];
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    sessionFactory: async () => {
+      if (fail) throw new Error('Desktop unavailable');
+      return new FakeNativeSession();
+    },
+    openThread: async (threadId) => opened.push(threadId),
+  });
+  const activation = {
+    threadId: 'bound-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  };
+
+  await launcher.activate(activation);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
+  assert.equal(
+    values.get('desktop-development:native-wake:bound-thread-f006'),
+    JSON.stringify(activation),
+  );
+
+  fail = false;
+  await launcher.recoverPendingActivations();
+  assert.deepEqual(opened, ['bound-thread-f006']);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+  assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
+});
+
 test('Desktop task launcher reopens an existing task without writing a new turn', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'

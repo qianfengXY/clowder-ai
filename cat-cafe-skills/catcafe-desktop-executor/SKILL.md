@@ -80,16 +80,20 @@ workspace 的 committed SHA 或 worktree 状态变化时，用 `cat_cafe_develop
 绑定不会因时间或应用休眠而过期；Heartbeat 失败时先重新读取 Resume Packet，epoch 已被显式重绑替换就停止
 写入，不能抢回旧会话所有权。
 
-## 4. 等待 Review 与修复
+## 4. 异步 Review 与下一轮恢复
 
 implementation report 会在当前 backlog 功能的独立 Review 会话中启动精确 SHA 的多猫 ReviewRound。Review 猫猫始终
-使用 Cat Café 自己的 provider/app-server；不得复用或写入 ChatGPT Desktop 的 app-server。Desktop 原窗口在同一个 turn
-内通过 `cat_cafe_development_review_wait` 的单次长等待取得 barrier-safe Resume Packet。默认等待 60 分钟，足以覆盖
-正常完整 ReviewRound，避免短轮询结束 turn 后无人消费共识结果：
+使用 Cat Café 自己的 provider/app-server；不得复用或写入 ChatGPT Desktop 的 app-server。implementation report 成功后，
+当前 Desktop turn 必须结束，不得调用 `cat_cafe_development_review_wait`、不得短轮询，也不得为了等待共识持续刷新。
+Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 保持不变。
 
-- `review_in_progress`：调用一次 `cat_cafe_development_review_wait` 并保持该工具调用；只有达到完整 60 分钟上限仍未完成时
-  才会返回 `reviewWait=pending`，此时必须立即再次长等待，不得结束当前 Desktop turn 或让 Cat Café daemon 对该 chat
-  执行 `thread/resume` / `turn/start`。
+- `review_in_progress`：向用户说明本轮 committed SHA 已交给 Cat Café Review，然后结束当前 turn；不得在 Desktop 内等待。
+- Cat Café 共识完成后，只向原绑定 `chatRef` 写入带项目、功能、attempt、ReviewRound 和精确 SHA 的 active goal，
+  再打开该 thread 的原生 deep link。ChatGPT Desktop 负责把 goal 转成下一轮可见消息；Cat Café 不得调用
+  `thread/resume` / `turn/start`，不得启动第二个 app-server 抢写该 thread，也不得创建替代窗口。
+- goal 唤醒暂时失败时由 Cat Café 的持久化 outbox 重试；Desktop 不需要为此保持 turn 或轮询。
+- 原 chat 收到继续指令或被用户重新打开后，先调用 `cat_cafe_development_work_read` 读取最新 Resume Packet；禁止沿用
+  implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
@@ -117,7 +121,7 @@ Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/a
 - **Cat Café 功能 Review 会话软删除**：按 projectId + backlogItemId 恢复同一个会话 identity；Desktop 不创建新窗口。
 - **永久 worktree 丢失**：只从 Resume Packet 的 `lastCommittedSha` 重建；明确声明未提交内容无法保证恢复。
 - **临时 MCP/网络失败**：保留同一 idempotency key 重试读/写；空 poll 不是终态。
-- **Desktop 在 Review 等待期间关闭**：Review 继续由 Cat Café 完成；重开原 chat 后先调用
+- **Desktop 在 Review 期间关闭**：Review 继续由 Cat Café 完成；重开原 chat 后先调用
   `cat_cafe_development_work_read`，再从最新 Resume Packet 恢复，不创建替代窗口。
 - **项目绑定消失或变得歧义**：停止写入，请用户在 Cat Café 修复绑定；不得用目录名猜项目。
 
