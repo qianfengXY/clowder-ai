@@ -139,7 +139,7 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   ]);
   const goal = sessions[0].writes.find((message) => message.method === 'thread/goal/set');
   assert.equal(goal.params.threadId, 'native-thread-f006');
-  assert.equal(goal.params.status, 'active');
+  assert.equal(goal.params.status, 'paused');
   assert.match(goal.params.objective, /runtimeSessionId/);
   const turn = sessions[0].writes.find((message) => message.method === 'turn/start');
   assert.equal(turn.params.threadId, 'native-thread-f006');
@@ -178,19 +178,20 @@ test('Review completion forwards one visible turn to the current Desktop owner',
   const goal = session.writes.find((message) => message.method === 'thread/goal/set');
   assert.equal(goal.params.threadId, 'bound-thread-f006');
   assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
-  assert.equal(goal.params.status, 'active');
+  assert.equal(goal.params.status, 'paused');
   assert.deepEqual(delivered, [
     { threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' },
   ]);
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
-test('implementation report pauses the bound goal without opening or starting the thread', async () => {
+test('implementation report parks the goal and tells the owner turn to complete it', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   let session;
   const opened = [];
+  const stopped = [];
   const launcher = new CodexDesktopTaskLauncher(undefined, {
     sessionFactory: async () => {
       throw new Error('Review pause must not use the pooled daemon session');
@@ -199,6 +200,7 @@ test('implementation report pauses the bound goal without opening or starting th
       session = new FakeNativeSession();
       return session;
     },
+    stopDesktopTurn: async (threadId, sourcePath) => stopped.push({ threadId, sourcePath }),
     openThread: async (threadId) => opened.push(threadId),
   });
 
@@ -210,6 +212,7 @@ test('implementation report pauses the bound goal without opening or starting th
   );
   const goal = session.writes.find((message) => message.method === 'thread/goal/set');
   assert.deepEqual(goal.params, { threadId: 'bound-thread-f006', status: 'paused' });
+  assert.deepEqual(stopped, [{ threadId: 'bound-thread-f006', sourcePath: '/work/traqen' }]);
   assert.deepEqual(opened, []);
 });
 
@@ -270,8 +273,54 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
 });
 
+test('failed implementation stop steering remains in the outbox until the owner turn accepts it', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map();
+  const sets = new Map();
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  let fail = true;
+  const stops = [];
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    stopDesktopTurn: async (threadId, sourcePath) => {
+      if (fail) throw new Error('Owner turn unavailable');
+      stops.push({ threadId, sourcePath });
+    },
+  });
+
+  await launcher.pause({ threadId: 'bound-thread-f006', sourcePath: '/work/traqen' });
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
+  assert.equal(
+    values.get('desktop-development:native-wake:bound-thread-f006'),
+    JSON.stringify({ kind: 'pause', threadId: 'bound-thread-f006', sourcePath: '/work/traqen' }),
+  );
+
+  fail = false;
+  await launcher.recoverPendingActivations();
+  assert.deepEqual(stops, [{ threadId: 'bound-thread-f006', sourcePath: '/work/traqen' }]);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+});
+
 test('Desktop IPC discovers the owning window and asks it to start the turn', async (t) => {
-  const { sendChatGptDesktopTurn } = await import(
+  const { sendChatGptDesktopTurn, steerChatGptDesktopTurnToStop } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   const directory = await mkdtemp(join(tmpdir(), 'cat-cafe-desktop-ipc-'));
@@ -313,16 +362,28 @@ test('Desktop IPC discovers the owning window and asks it to start the turn', as
   });
 
   await sendChatGptDesktopTurn(socketPath, 'bound-thread-f006', '[Review 系统消息] Traqen · F006');
+  await steerChatGptDesktopTurnToStop(socketPath, 'bound-thread-f006', '/work/traqen');
 
   assert.deepEqual(
     requests.map((request) => request.method),
-    ['initialize', 'thread-owner-discovery', 'thread-follower-start-turn'],
+    [
+      'initialize',
+      'thread-owner-discovery',
+      'thread-follower-start-turn',
+      'initialize',
+      'thread-owner-discovery',
+      'thread-follower-steer-turn',
+    ],
   );
   assert.equal(requests[0].version, 0);
   assert.equal(requests[1].params.conversationId, 'bound-thread-f006');
   assert.equal(requests[2].targetClientId, 'desktop-owner');
   assert.equal(requests[2].params.conversationId, 'bound-thread-f006');
   assert.equal(requests[2].params.turnStartParams.input[0].text, '[Review 系统消息] Traqen · F006');
+  assert.equal(requests[5].targetClientId, 'desktop-owner');
+  assert.equal(requests[5].params.restoreMessage.cwd, '/work/traqen');
+  assert.match(requests[5].params.input[0].text, /update_goal/);
+  assert.match(requests[5].params.input[0].text, /不得读取或轮询 Resume Packet/);
 });
 
 test('Desktop task launcher reopens an existing task without writing a new turn', async () => {

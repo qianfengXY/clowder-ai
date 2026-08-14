@@ -70,6 +70,7 @@ interface DesktopTaskLauncherOptions {
   readonly goalSessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
   readonly sendDesktopTurn?: (threadId: string, objective: string) => Promise<void>;
+  readonly stopDesktopTurn?: (threadId: string, sourcePath: string) => Promise<void>;
   readonly daemonSocketPath?: string;
   readonly desktopIpcSocketPath?: string;
   readonly recoveryIntervalMs?: number;
@@ -107,6 +108,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly goalSessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
   private readonly sendDesktopTurn: (threadId: string, objective: string) => Promise<void>;
+  private readonly stopDesktopTurn: (threadId: string, sourcePath: string) => Promise<void>;
   private readonly daemonSocketPath: string;
   private readonly command: string;
 
@@ -122,6 +124,9 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     this.sendDesktopTurn =
       options.sendDesktopTurn ??
       (async (threadId, objective) => sendChatGptDesktopTurn(desktopIpcSocketPath, threadId, objective));
+    this.stopDesktopTurn =
+      options.stopDesktopTurn ??
+      (async (threadId, sourcePath) => steerChatGptDesktopTurnToStop(desktopIpcSocketPath, threadId, sourcePath));
     this.command = options.command ?? resolveChatGptCodexCommand();
     if (redis && options.recoveryIntervalMs !== 0) {
       const interval = setInterval(
@@ -250,7 +255,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         await rpc.request('thread/goal/set', {
           threadId: thread.id,
           objective: buildInitialObjective(input, runtimeSessionId),
-          status: 'active',
+          status: 'paused',
           tokenBudget: null,
         });
         await rpc.request('turn/start', {
@@ -295,7 +300,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
         objective: input.objective,
-        status: 'active',
+        status: 'paused',
         tokenBudget: null,
       });
     });
@@ -313,6 +318,10 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         status: 'paused',
       });
     });
+    // The short-lived goal writer does not update the owner window's in-memory
+    // Goal. Steer the still-running implementation turn so that Desktop itself
+    // completes the Goal before returning to the user.
+    await this.stopDesktopTurn(input.threadId, input.sourcePath);
   }
 
   private storageKey(projectId: string, backlogItemId: string): string {
@@ -456,6 +465,36 @@ export async function sendChatGptDesktopTurn(
   threadId: string,
   objective: string,
 ): Promise<void> {
+  await sendChatGptDesktopOwnerRequest(socketPath, threadId, 'thread-follower-start-turn', {
+    conversationId: threadId,
+    turnStartParams: { input: [{ type: 'text', text: objective }] },
+    mcpAppModelContextAttachments: [],
+  });
+}
+
+export async function steerChatGptDesktopTurnToStop(
+  socketPath: string,
+  threadId: string,
+  sourcePath: string,
+): Promise<void> {
+  await sendChatGptDesktopOwnerRequest(socketPath, threadId, 'thread-follower-steer-turn', {
+    conversationId: threadId,
+    input: [{ type: 'text', text: buildDesktopStopInstruction() }],
+    restoreMessage: {
+      cwd: sourcePath,
+      context: { workspaceRoots: [sourcePath], collaborationMode: null },
+      responsesapiClientMetadata: {},
+    },
+    attachments: [],
+  });
+}
+
+async function sendChatGptDesktopOwnerRequest(
+  socketPath: string,
+  threadId: string,
+  method: 'thread-follower-start-turn' | 'thread-follower-steer-turn',
+  params: Record<string, unknown>,
+): Promise<void> {
   const socket = createConnection(socketPath);
   const timeout = setTimeout(
     () => socket.destroy(new Error('Timed out while delivering the Review result to ChatGPT Desktop')),
@@ -491,17 +530,21 @@ export async function sendChatGptDesktopTurn(
       sourceClientId,
       targetClientId: discovery.handledByClientId,
       version: 1,
-      method: 'thread-follower-start-turn',
-      params: {
-        conversationId: threadId,
-        turnStartParams: { input: [{ type: 'text', text: objective }] },
-        mcpAppModelContextAttachments: [],
-      },
+      method,
+      params,
     });
   } finally {
     clearTimeout(timeout);
     socket.destroy();
   }
+}
+
+function buildDesktopStopInstruction(): string {
+  return [
+    '[Review 系统消息] 本轮 implementation report 已被 Cat Café 接收，独立 Review 已在后台开始。',
+    '立即停止当前执行，不得读取或轮询 Resume Packet。',
+    '调用 update_goal 将当前 Goal 标记为 complete，然后结束本轮；Review 完成后 Cat Café 会另行投递下一条消息。',
+  ].join('\n');
 }
 
 async function requestDesktopIpc(
@@ -590,6 +633,7 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
     `本任务的 runtimeSessionId：${runtimeSessionId}。连接与后续 heartbeat/report 必须复用这个值。`,
     '先从当前 Git workspace 验证仓库，再通过 Cat Café development-loop MCP 读取并连接唯一匹配的活跃工作。',
     '读取最新 Resume Packet，只执行本轮 nextLegalActions。提交 implementation report 后立即结束当前 turn；Cat Café Review 在后台独立完成，不要等待或轮询。',
+    '收到 implementation report 的 Review 系统停止消息后，调用 update_goal 将当前 Goal 标为 complete；不得让 Goal 自动续跑。',
     '后续从原绑定窗口继续时重新读取最新 Resume Packet，再处理修复或合入确认；不要创建替代窗口。',
   ].join('\n');
 }
@@ -617,6 +661,7 @@ export function buildReviewCompletionObjective(input: {
     `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
     '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
     '若需要修复，先在这个原窗口取得递增的新 attempt，再完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
+    '这是一个单次通知 turn，durable Goal 保持非 active；本轮结束前将 Goal 标为 complete，禁止自动等待或续跑。',
     '本消息由 Cat Café 通过 ChatGPT Desktop 窗口 IPC 投递到原绑定窗口；禁止创建替代窗口或启动第二个 app-server。',
   ].join('\n');
 }
