@@ -5,8 +5,6 @@ import type {
   IReviewRoundStore,
   ReviewDraftFindingInput,
 } from '../review-coordination/ReviewRoundStore.js';
-import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
-import type { DesktopSessionStore } from './desktop-session-store.js';
 import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
@@ -53,8 +51,6 @@ export class ReviewRoundCoordinatorService {
     private readonly managedWork: IManagedWorkConsumerPort,
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
     private readonly reviewDisplayContexts?: IReviewRoundDisplayContextResolver,
-    private readonly desktopSessions?: Pick<DesktopSessionStore, 'getCurrent'>,
-    private readonly desktopTasks?: DesktopTaskActivator,
   ) {}
 
   async readSafe(input: ReviewPrincipalInput): Promise<ReviewRoundSafeView> {
@@ -183,14 +179,6 @@ export class ReviewRoundCoordinatorService {
       },
       ...(input.now === undefined ? {} : { now: input.now }),
     });
-    await this.wakeBoundDesktopTask({
-      ownerUserId: input.ownerUserId,
-      projectId: before.round.projectId,
-      workId: before.round.workId,
-      attemptId: before.round.attemptId,
-      reviewRoundId: before.round.roundId,
-      exactSha: before.round.exactSha,
-    });
     return completed;
   }
 
@@ -262,30 +250,5 @@ export class ReviewRoundCoordinatorService {
       workId: round.workId,
       attemptId: round.attemptId,
     });
-  }
-
-  private async wakeBoundDesktopTask(input: {
-    readonly ownerUserId: string;
-    readonly projectId: string;
-    readonly workId: string;
-    readonly attemptId: string;
-    readonly reviewRoundId: string;
-    readonly exactSha: string;
-  }): Promise<void> {
-    if (!this.desktopSessions || !this.desktopTasks) return;
-    const binding = await this.desktopSessions.getCurrent(input.projectId, input.workId);
-    if (!binding?.chatRef || binding.attemptId !== input.attemptId) return;
-    const displayContext = await this.resolveDisplayContext(input);
-    await this.desktopTasks
-      .activate({
-        threadId: binding.chatRef,
-        sourcePath: binding.workspace.worktreePath,
-        objective: buildReviewCompletionObjective({
-          ...input,
-          ...displayContext,
-          runtimeSessionId: binding.runtimeSessionId,
-        }),
-      })
-      .catch(() => undefined);
   }
 }

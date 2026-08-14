@@ -4398,8 +4398,6 @@ async function main(): Promise<void> {
       managedWorkConsumerPort,
       reviewRoundDispatcher,
       reviewDisplayContexts,
-      desktopSessionStore,
-      desktopTaskLauncher,
     );
   }
   const intentCardStore = new IntentCardStore();

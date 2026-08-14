@@ -25,17 +25,7 @@ export interface DesktopTaskLaunchResult {
   readonly threadId: string;
 }
 
-export interface DesktopTaskActivationInput {
-  readonly threadId: string;
-  readonly sourcePath: string;
-  readonly objective: string;
-}
-
-export interface DesktopTaskActivator {
-  activate(input: DesktopTaskActivationInput): Promise<void>;
-}
-
-export interface DesktopTaskLauncher extends DesktopTaskActivator {
+export interface DesktopTaskLauncher {
   launch(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult>;
   get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null>;
 }
@@ -72,7 +62,6 @@ export function buildDesktopTaskName(featureId: string, title: string): string {
  */
 export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly active = new Map<string, Promise<DesktopTaskLaunchResult>>();
-  private readonly activeWakes = new Map<string, Promise<void>>();
   private readonly completed = new Map<string, DesktopTaskLaunchResult>();
   private readonly sessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
@@ -105,18 +94,6 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     const launch = this.launchOrReuse(input).finally(() => this.active.delete(key));
     this.active.set(key, launch);
     return launch;
-  }
-
-  activate(input: DesktopTaskActivationInput): Promise<void> {
-    const previous = this.activeWakes.get(input.threadId) ?? Promise.resolve();
-    const wake = previous
-      .catch(() => undefined)
-      .then(() => this.wake(input))
-      .finally(() => {
-        if (this.activeWakes.get(input.threadId) === wake) this.activeWakes.delete(input.threadId);
-      });
-    this.activeWakes.set(input.threadId, wake);
-    return wake;
   }
 
   private async launchOrReuse(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult> {
@@ -189,34 +166,6 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       },
     );
     return { status: 'created', threadId };
-  }
-
-  private async wake(input: DesktopTaskActivationInput): Promise<void> {
-    await this.withProtocol(input.sourcePath, `desktop-review-wake-${input.threadId}`, async (rpc) => {
-      try {
-        await rpc.request('thread/resume', {
-          threadId: input.threadId,
-          cwd: input.sourcePath,
-          sandbox: 'danger-full-access',
-          approvalPolicy: 'on-request',
-        });
-      } catch (error) {
-        if (!/already has an active writer/i.test(String(error))) throw error;
-      }
-      await rpc.request('thread/goal/set', {
-        threadId: input.threadId,
-        objective: input.objective,
-        status: 'active',
-        tokenBudget: null,
-      });
-      await rpc.request('turn/start', {
-        threadId: input.threadId,
-        input: [{ type: 'text', text: input.objective }],
-        cwd: input.sourcePath,
-        approvalPolicy: 'on-request',
-      });
-      await this.openThread(input.threadId);
-    });
   }
 
   private storageKey(projectId: string, backlogItemId: string): string {
@@ -332,33 +281,6 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
     `本任务的 runtimeSessionId：${runtimeSessionId}。连接与后续 heartbeat/report 必须复用这个值。`,
     '先从当前 Git workspace 验证仓库，再通过 Cat Café development-loop MCP 读取并连接唯一匹配的活跃工作。',
     '持续读取最新 Resume Packet，只执行 nextLegalActions；Review 完成后处理修复或合入确认，直到进入需要用户验收或明确阻断的状态。',
-  ].join('\n');
-}
-
-export function buildReviewCompletionObjective(input: {
-  readonly projectName: string;
-  readonly featureId: string;
-  readonly featureTitle: string;
-  readonly attemptNumber: number;
-  readonly projectId: string;
-  readonly workId: string;
-  readonly attemptId: string;
-  readonly reviewRoundId: string;
-  readonly exactSha: string;
-  readonly runtimeSessionId: string;
-}): string {
-  return [
-    `[Review 系统消息] ${input.projectName} · ${input.featureId} · ${input.featureTitle}`,
-    `第 ${input.attemptNumber} 轮实现的 Review 已完成。`,
-    `Cat Café projectId：${input.projectId}`,
-    `workId：${input.workId}`,
-    `attemptId：${input.attemptId}`,
-    `reviewRoundId：${input.reviewRoundId}`,
-    `被检视的精确 SHA：${input.exactSha}`,
-    `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
-    '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
-    '若需要修复，先在这个原窗口取得递增的新 attempt，再完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
-    'Review 猫使用 Cat Café 自己的 provider/app-server；本消息只恢复已绑定的 ChatGPT Desktop 开发窗口。',
   ].join('\n');
 }
 

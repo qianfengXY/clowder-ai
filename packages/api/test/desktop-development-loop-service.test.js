@@ -21,7 +21,6 @@ describe(
     let reviewCoordinator;
     let reviewHubEnsureCount;
     let reviewDispatches;
-    let desktopWakes;
     let backlogItems;
     let connected = false;
 
@@ -99,23 +98,16 @@ describe(
         undefined,
         async () => {},
       );
-      reviewCoordinator = new ReviewRoundCoordinatorService(
-        reviewRounds,
-        managedWork,
-        reviewDispatcher,
-        {
-          resolve: async () => ({
-            projectName: 'Example',
-            repository: 'owner/repo',
-            backlogItemId: 'backlog-1',
-            featureId: 'F289',
-            featureTitle: 'Implement the Desktop loop',
-            attemptNumber: 1,
-          }),
-        },
-        sessions,
-        { activate: async (input) => desktopWakes.push(input) },
-      );
+      reviewCoordinator = new ReviewRoundCoordinatorService(reviewRounds, managedWork, reviewDispatcher, {
+        resolve: async () => ({
+          projectName: 'Example',
+          repository: 'owner/repo',
+          backlogItemId: 'backlog-1',
+          featureId: 'F289',
+          featureTitle: 'Implement the Desktop loop',
+          attemptNumber: 1,
+        }),
+      });
     });
 
     after(async () => {
@@ -134,7 +126,6 @@ describe(
       if (!connected) return t.skip('Redis not connected');
       reviewHubEnsureCount = 0;
       reviewDispatches = [];
-      desktopWakes = [];
       backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
         'external-project:*',
@@ -793,11 +784,6 @@ describe(
       assert.equal(reviewEvidence.length, 1);
       assert.equal(reviewEvidence[0].reviewRoundId, roundId);
       assert.equal(reviewEvidence[0].checksPassed, true);
-      assert.equal(desktopWakes.length, 1);
-      assert.equal(desktopWakes[0].threadId, 'chatgpt-thread-f006');
-      assert.equal(desktopWakes[0].sourcePath, '/Volumes/WorkSSD/example-worktree');
-      assert.match(desktopWakes[0].objective, /\[Review 系统消息\]/);
-      assert.match(desktopWakes[0].objective, /Example · F289 · Implement the Desktop loop/);
     });
 
     test('requires current-chat merge confirmation, records merge, and counts acceptance once', async () => {

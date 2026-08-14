@@ -142,36 +142,6 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
-test('Desktop task activation resumes the bound thread and starts one Review system turn', async () => {
-  const { CodexDesktopTaskLauncher } = await import(
-    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
-  );
-  let session;
-  const opened = [];
-  const launcher = new CodexDesktopTaskLauncher(undefined, {
-    sessionFactory: async () => {
-      session = new FakeNativeSession();
-      return session;
-    },
-    openThread: async (threadId) => opened.push(threadId),
-  });
-
-  await launcher.activate({
-    threadId: 'bound-thread-f006',
-    sourcePath: '/work/traqen',
-    objective: '[Review 系统消息] Traqen · F006',
-  });
-
-  assert.deepEqual(
-    session.writes.map((message) => message.method),
-    ['initialize', 'initialized', 'thread/resume', 'thread/goal/set', 'turn/start'],
-  );
-  const turn = session.writes.find((message) => message.method === 'turn/start');
-  assert.equal(turn.params.threadId, 'bound-thread-f006');
-  assert.equal(turn.params.input[0].text, '[Review 系统消息] Traqen · F006');
-  assert.deepEqual(opened, ['bound-thread-f006']);
-});
-
 test('Desktop task launcher reopens an existing task without writing a new turn', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
