@@ -627,6 +627,44 @@ export class QueueProcessor {
     }
   }
 
+  /**
+   * Retire queued carriers that a newer authoritative workflow message has
+   * superseded. The queue row, durable custody and browser message are one
+   * responsibility: either all three are withdrawn, or the in-memory row is
+   * restored so startup recovery can still find it.
+   */
+  async withdrawSupersededQueuedEntries(
+    threadId: string,
+    userId: string,
+    entryIds: readonly string[],
+  ): Promise<QueueEntry[]> {
+    const removedEntries: QueueEntry[] = [];
+    for (const entryId of new Set(entryIds)) {
+      const orderedEntries = this.deps.queue.list(threadId, userId);
+      const index = orderedEntries.findIndex((entry) => entry.id === entryId);
+      const snapshot = index >= 0 ? orderedEntries[index] : undefined;
+      if (!snapshot || snapshot.status !== 'queued') continue;
+      const nextEntryId = orderedEntries[index + 1]?.id;
+      const removed = this.deps.queue.remove(threadId, userId, entryId);
+      if (!removed) continue;
+
+      if (this.deps.queueCustodyCoordinator) {
+        try {
+          await this.deps.queueCustodyCoordinator.withdrawEntry(removed);
+        } catch (error) {
+          this.deps.queue.restoreDurableEntry(removed, { beforeEntryId: nextEntryId });
+          throw error;
+        }
+      }
+
+      this.unregisterEntryCompleteHook(entryId);
+      await this.finalizeSupersededCarrier(removed);
+      for (const catId of removed.targetCats) this.clearPause(threadId, catId);
+      removedEntries.push(removed);
+    }
+    return removedEntries;
+  }
+
   /** A superseded carrier owns both its queue row and every durable message projection. */
   private async finalizeSupersededCarrier(entry: QueueEntry): Promise<void> {
     const supplementCompletion = this.finalizeRemovedEntry(entry, 'user_cancel');

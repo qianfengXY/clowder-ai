@@ -145,7 +145,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
           attempts += 1;
           if (attempts === 1) return { statusCode: 503, body: 'temporarily unavailable' };
           delivered.push(request);
-          return { statusCode: 202, body: '{}' };
+          return { statusCode: 200, body: '{"status":"processing"}' };
         },
         resolveMentionHandle: () => '@kimi',
       },
@@ -180,5 +180,128 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.match(delivered[0].payload.content, /独立检视进度：1 \/ 2/);
     assert.doesNotMatch(delivered[0].payload.content, /^@kimi\n@gpt/m);
     assert.deepEqual(await redis.smembers('desktop-development:pending-review-stage-dispatches'), []);
+  });
+
+  test('keeps a queued stage durable and performs a bounded automatic recovery start', async () => {
+    const { ReviewRoundStageDispatcher } = await import(
+      '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'
+    );
+    const values = new Map();
+    const sets = new Map();
+    const redis = {
+      get: async (key) => values.get(key) ?? null,
+      set: async (key, value) => {
+        values.set(key, value);
+        return 'OK';
+      },
+      del: async (key) => (values.delete(key) ? 1 : 0),
+      sadd: async (key, value) => {
+        const members = sets.get(key) ?? new Set();
+        members.add(value);
+        sets.set(key, members);
+        return 1;
+      },
+      srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+      smembers: async (key) => [...(sets.get(key) ?? [])],
+    };
+    const requests = [];
+    const responses = [
+      { statusCode: 202, body: '{"status":"queued"}' },
+      { statusCode: 202, body: '{"status":"recovery_started"}' },
+      { statusCode: 200, body: '{"status":"duplicate"}' },
+    ];
+    const dispatcher = new ReviewRoundStageDispatcher(
+      {
+        sendMessage: async (request) => {
+          requests.push(request);
+          return responses.shift();
+        },
+        resolveMentionHandle: () => '@gpt',
+      },
+      { redis, recoveryIntervalMs: 0 },
+    );
+    const input = {
+      stage: 'independent',
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      reviewHubThreadId: 'project-feature-review:project-1:backlog-1',
+      roundId: 'round-queued-recovery',
+      exactSha: 'c'.repeat(40),
+      reviewerCatIds: ['cat-codex'],
+      recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 10,
+      },
+    };
+
+    await dispatcher.dispatch(input);
+    assert.equal((await redis.smembers('desktop-development:pending-review-stage-dispatches')).length, 1);
+    await dispatcher.recoverPendingDispatches();
+    assert.equal(requests[1].headers['x-cat-cafe-review-recovery-attempt'], '1');
+    assert.equal((await redis.smembers('desktop-development:pending-review-stage-dispatches')).length, 1);
+    await dispatcher.recoverPendingDispatches();
+    assert.equal(requests[2].headers['x-cat-cafe-review-recovery-attempt'], '2');
+    assert.deepEqual(await redis.smembers('desktop-development:pending-review-stage-dispatches'), []);
+  });
+
+  test('supersedes an older pending stage in the same feature Review thread', async () => {
+    const { ReviewRoundStageDispatcher } = await import(
+      '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'
+    );
+    const values = new Map();
+    const sets = new Map();
+    const redis = {
+      get: async (key) => values.get(key) ?? null,
+      set: async (key, value) => {
+        values.set(key, value);
+        return 'OK';
+      },
+      del: async (key) => (values.delete(key) ? 1 : 0),
+      sadd: async (key, value) => {
+        const members = sets.get(key) ?? new Set();
+        members.add(value);
+        sets.set(key, members);
+        return 1;
+      },
+      srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+      smembers: async (key) => [...(sets.get(key) ?? [])],
+    };
+    const dispatcher = new ReviewRoundStageDispatcher(
+      {
+        sendMessage: async () => ({ statusCode: 202, body: '{"status":"queued"}' }),
+        resolveMentionHandle: () => '@gpt',
+      },
+      { redis, recoveryIntervalMs: 0 },
+    );
+    const base = {
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      reviewHubThreadId: 'project-feature-review:project-1:backlog-1',
+      exactSha: 'd'.repeat(40),
+      reviewerCatIds: ['cat-codex'],
+      recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 10,
+      },
+    };
+
+    await dispatcher.dispatch({ ...base, roundId: 'round-old', stage: 'independent' });
+    const oldPending = await redis.smembers('desktop-development:pending-review-stage-dispatches');
+    assert.equal(oldPending.length, 1);
+    await dispatcher.dispatch({ ...base, roundId: 'round-current', stage: 'independent' });
+    const currentPending = await redis.smembers('desktop-development:pending-review-stage-dispatches');
+    assert.equal(currentPending.length, 1);
+    assert.notEqual(currentPending[0], oldPending[0]);
+    assert.equal(await redis.get(`desktop-development:review-stage-dispatch:${oldPending[0]}`), null);
   });
 });

@@ -53,8 +53,17 @@ interface ReviewRoundStageDispatcherOptions {
   readonly recoveryIntervalMs?: number;
 }
 
+interface PendingReviewStageDispatch {
+  readonly version: 1;
+  readonly input: ReviewRoundDispatchInput;
+  readonly recoveryAttempts: number;
+}
+
+type DeliveryOutcome = 'delivered' | 'queued' | 'recovery_started';
+
 const PENDING_SET_KEY = 'desktop-development:pending-review-stage-dispatches';
 const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
+const MAX_AUTOMATIC_RECOVERY_ATTEMPTS = 3;
 
 /**
  * Sends server-authored review work through canonical message ingress while
@@ -63,6 +72,7 @@ const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
 export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
   private readonly redis?: RedisClient;
   private readonly active = new Map<string, Promise<void>>();
+  private readonly latestDispatchByThread = new Map<string, string>();
 
   constructor(
     private readonly deps: ReviewRoundStageDispatcherDeps,
@@ -85,7 +95,10 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
     const previous = this.active.get(dispatchId) ?? Promise.resolve();
     const delivery = previous
       .catch(() => undefined)
-      .then(() => this.persistAndDeliver(dispatchId, input))
+      .then(async () => {
+        await this.activateLatestDispatch(dispatchId, input);
+        await this.persistAndDeliver(dispatchId, input);
+      })
       .finally(() => {
         if (this.active.get(dispatchId) === delivery) this.active.delete(dispatchId);
       });
@@ -98,36 +111,53 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
     const dispatchIds = await this.redis.smembers(PENDING_SET_KEY);
     for (const dispatchId of dispatchIds) {
       if (this.active.has(dispatchId)) continue;
-      const raw = await this.redis.get(this.pendingKey(dispatchId));
-      if (!raw) {
-        await this.redis.srem(PENDING_SET_KEY, dispatchId);
-        continue;
-      }
       try {
-        const input = JSON.parse(raw) as ReviewRoundDispatchInput;
-        assertDispatchInput(input);
-        await this.deliver(dispatchId, input);
-        await this.clearPending(dispatchId);
+        await this.recoverPendingDispatch(dispatchId);
       } catch {
         // The record remains durable for the next bounded recovery pass.
       }
     }
   }
 
+  private async recoverPendingDispatch(dispatchId: string): Promise<void> {
+    if (!this.redis) return;
+    const raw = await this.redis.get(this.pendingKey(dispatchId));
+    if (!raw) {
+      await this.redis.srem(PENDING_SET_KEY, dispatchId);
+      return;
+    }
+    const pending = parsePendingDispatch(raw);
+    if (!(await this.isLatestDispatch(dispatchId, pending.input))) {
+      await this.clearPending(dispatchId);
+      return;
+    }
+    const recoveryAttempt =
+      pending.recoveryAttempts < MAX_AUTOMATIC_RECOVERY_ATTEMPTS ? pending.recoveryAttempts + 1 : undefined;
+    const outcome = await this.deliver(dispatchId, pending.input, recoveryAttempt);
+    if (outcome === 'delivered') {
+      await this.clearPending(dispatchId);
+    } else if (outcome === 'recovery_started' && recoveryAttempt !== undefined) {
+      await this.persistPending(dispatchId, { ...pending, recoveryAttempts: recoveryAttempt });
+    }
+  }
+
   private async persistAndDeliver(dispatchId: string, input: ReviewRoundDispatchInput): Promise<void> {
     if (this.redis) {
-      await this.redis.set(this.pendingKey(dispatchId), JSON.stringify(input));
-      await this.redis.sadd(PENDING_SET_KEY, dispatchId);
+      await this.persistPending(dispatchId, { version: 1, input, recoveryAttempts: 0 });
     }
     try {
-      await this.deliver(dispatchId, input);
-      await this.clearPending(dispatchId);
+      const outcome = await this.deliver(dispatchId, input);
+      if (outcome === 'delivered') await this.clearPending(dispatchId);
     } catch (error) {
       if (!this.redis) throw error;
     }
   }
 
-  private async deliver(dispatchId: string, input: ReviewRoundDispatchInput): Promise<void> {
+  private async deliver(
+    dispatchId: string,
+    input: ReviewRoundDispatchInput,
+    recoveryAttempt?: number,
+  ): Promise<DeliveryOutcome> {
     const targetCatIds = input.stage === 'consensus' ? [input.recorderCatId] : input.reviewerCatIds;
     const handles = new Map<string, string>();
     for (const catId of new Set([...(input.allReviewerCatIds ?? input.reviewerCatIds), ...targetCatIds])) {
@@ -137,7 +167,10 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
     }
     const routing = targetCatIds.map((catId) => handles.get(catId) as string);
     const response = await this.deps.sendMessage({
-      headers: { 'x-cat-cafe-user': input.ownerUserId },
+      headers: {
+        'x-cat-cafe-user': input.ownerUserId,
+        ...(recoveryAttempt !== undefined ? { 'x-cat-cafe-review-recovery-attempt': String(recoveryAttempt) } : {}),
+      },
       payload: {
         content: buildStageMessage(input, routing, handles),
         threadId: input.reviewHubThreadId,
@@ -149,10 +182,55 @@ export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw new Error(`Review dispatcher message ingress failed (${response.statusCode}): ${response.body}`);
     }
+    const responseStatus = parseIngressStatus(response.body);
+    if (response.statusCode === 202 || responseStatus === 'queued' || responseStatus === 'recovery_started') {
+      return responseStatus === 'recovery_started' ? 'recovery_started' : 'queued';
+    }
+    return 'delivered';
+  }
+
+  private async activateLatestDispatch(dispatchId: string, input: ReviewRoundDispatchInput): Promise<void> {
+    this.latestDispatchByThread.set(input.reviewHubThreadId, dispatchId);
+    if (!this.redis) return;
+    await this.redis.set(this.latestKey(input.reviewHubThreadId), dispatchId);
+
+    const pendingIds = await this.redis.smembers(PENDING_SET_KEY);
+    for (const pendingId of pendingIds) {
+      if (pendingId === dispatchId) continue;
+      const raw = await this.redis.get(this.pendingKey(pendingId));
+      if (!raw) {
+        await this.redis.srem(PENDING_SET_KEY, pendingId);
+        continue;
+      }
+      try {
+        const pending = parsePendingDispatch(raw);
+        if (pending.input.reviewHubThreadId === input.reviewHubThreadId) await this.clearPending(pendingId);
+      } catch {
+        // Preserve an unparseable record for the normal recovery path to diagnose/retry.
+      }
+    }
+  }
+
+  private async isLatestDispatch(dispatchId: string, input: ReviewRoundDispatchInput): Promise<boolean> {
+    const latest = this.redis
+      ? await this.redis.get(this.latestKey(input.reviewHubThreadId))
+      : this.latestDispatchByThread.get(input.reviewHubThreadId);
+    return latest === undefined || latest === null || latest === dispatchId;
+  }
+
+  private async persistPending(dispatchId: string, pending: PendingReviewStageDispatch): Promise<void> {
+    if (!this.redis) return;
+    await this.redis.set(this.pendingKey(dispatchId), JSON.stringify(pending));
+    await this.redis.sadd(PENDING_SET_KEY, dispatchId);
   }
 
   private pendingKey(dispatchId: string): string {
     return `desktop-development:review-stage-dispatch:${dispatchId}`;
+  }
+
+  private latestKey(reviewHubThreadId: string): string {
+    const digest = createHash('sha256').update(reviewHubThreadId).digest('hex');
+    return `desktop-development:review-stage-latest:${digest}`;
   }
 
   private async clearPending(dispatchId: string): Promise<void> {
@@ -264,6 +342,33 @@ function deterministicMessageId(roundId: string, stage: ReviewRoundDispatchStage
   hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16] ?? '0', 16) % 4] ?? '8';
   const value = hex.join('');
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function parseIngressStatus(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { status?: unknown };
+    return typeof parsed.status === 'string' ? parsed.status : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parsePendingDispatch(raw: string): PendingReviewStageDispatch {
+  const parsed = JSON.parse(raw) as PendingReviewStageDispatch | ReviewRoundDispatchInput;
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'version' in parsed &&
+    parsed.version === 1 &&
+    'input' in parsed
+  ) {
+    assertDispatchInput(parsed.input);
+    const recoveryAttempts =
+      Number.isInteger(parsed.recoveryAttempts) && parsed.recoveryAttempts >= 0 ? parsed.recoveryAttempts : 0;
+    return { version: 1, input: parsed.input, recoveryAttempts };
+  }
+  assertDispatchInput(parsed as ReviewRoundDispatchInput);
+  return { version: 1, input: parsed as ReviewRoundDispatchInput, recoveryAttempts: 0 };
 }
 
 function assertDisplayContext(

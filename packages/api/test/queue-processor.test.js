@@ -127,6 +127,66 @@ describe('QueueProcessor', () => {
     processor = new QueueProcessor(deps);
   });
 
+  it('withdraws superseded queued carriers across memory, durable custody, and message projection', async () => {
+    const queue = new InvocationQueue();
+    const oldEntry = enqueueEntry(queue, { idempotencyKey: 'old-review' });
+    const currentEntry = enqueueEntry(queue, { idempotencyKey: 'current-review', content: 'current' });
+    queue.backfillMessageId('t1', 'u1', oldEntry.id, 'msg-old-review');
+    queue.backfillMessageId('t1', 'u1', currentEntry.id, 'msg-current-review');
+    const withdrawEntry = mock.fn(async () => {});
+    const markCanceled = mock.fn(async (id) => ({
+      id,
+      threadId: 't1',
+      userId: 'u1',
+      deliveryTransitioned: true,
+    }));
+    const customDeps = stubDeps({
+      queue,
+      queueCustodyCoordinator: { withdrawEntry },
+      messageStore: { ...stubDeps().messageStore, markCanceled },
+    });
+    const customProcessor = new QueueProcessor(customDeps);
+
+    const removed = await customProcessor.withdrawSupersededQueuedEntries('t1', 'u1', [oldEntry.id]);
+
+    assert.deepEqual(
+      removed.map((entry) => entry.id),
+      [oldEntry.id],
+    );
+    assert.deepEqual(
+      queue.list('t1', 'u1').map((entry) => entry.id),
+      [currentEntry.id],
+    );
+    assert.equal(withdrawEntry.mock.callCount(), 1);
+    assert.equal(withdrawEntry.mock.calls[0].arguments[0].id, oldEntry.id);
+    assert.deepEqual(markCanceled.mock.calls[0].arguments, ['msg-old-review']);
+  });
+
+  it('restores a superseded queue row when durable custody withdrawal fails', async () => {
+    const queue = new InvocationQueue();
+    const oldEntry = enqueueEntry(queue, { idempotencyKey: 'old-review' });
+    const currentEntry = enqueueEntry(queue, { idempotencyKey: 'current-review', content: 'current' });
+    const customDeps = stubDeps({
+      queue,
+      queueCustodyCoordinator: {
+        withdrawEntry: mock.fn(async () => {
+          throw new Error('redis unavailable');
+        }),
+      },
+      messageStore: { ...stubDeps().messageStore, markCanceled: mock.fn(async () => null) },
+    });
+    const customProcessor = new QueueProcessor(customDeps);
+
+    await assert.rejects(
+      () => customProcessor.withdrawSupersededQueuedEntries('t1', 'u1', [oldEntry.id]),
+      /redis unavailable/,
+    );
+    assert.deepEqual(
+      queue.list('t1', 'u1').map((entry) => entry.id),
+      [oldEntry.id, currentEntry.id],
+    );
+  });
+
   it('ADR-042 claims an exact supplement, rebuilds its prompt, and enforces read-only routing', async () => {
     const closureStore = new InMemoryFreshnessClosureStore();
     const offered = await closureStore.offerSupplement({

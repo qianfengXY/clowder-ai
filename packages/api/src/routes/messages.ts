@@ -25,7 +25,7 @@ import {
 } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import multipart from '@fastify/multipart';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
@@ -424,6 +424,47 @@ function isReviewOrchestrationMessage(message: StoredMessage): boolean {
   return message.extra?.systemKind === 'review_orchestration';
 }
 
+async function withdrawOlderQueuedReviewOrchestration(
+  opts: Pick<MessagesRoutesOptions, 'invocationQueue' | 'queueProcessor' | 'messageStore' | 'socketManager'>,
+  input: { threadId: string; userId: string; currentIdempotencyKey: string },
+): Promise<number> {
+  if (!opts.invocationQueue || !opts.queueProcessor?.withdrawSupersededQueuedEntries) return 0;
+  const staleEntryIds: string[] = [];
+  for (const entry of opts.invocationQueue.list(input.threadId, input.userId)) {
+    if (entry.status !== 'queued' || entry.idempotencyKey === input.currentIdempotencyKey || !entry.messageId) {
+      continue;
+    }
+    const message = await opts.messageStore.getById(entry.messageId);
+    if (message && isReviewOrchestrationMessage(message)) staleEntryIds.push(entry.id);
+  }
+  if (staleEntryIds.length === 0) return 0;
+
+  const removed = await opts.queueProcessor.withdrawSupersededQueuedEntries(
+    input.threadId,
+    input.userId,
+    staleEntryIds,
+  );
+  if (removed.length > 0) {
+    await emitQueueUpdated(
+      opts.socketManager,
+      input.userId,
+      input.threadId,
+      opts.invocationQueue.list(input.threadId, input.userId),
+      opts.messageStore,
+      'review_orchestration_superseded',
+    );
+  }
+  return removed.length;
+}
+
+function parseReviewRecoveryAttempt(request: FastifyRequest): number | undefined {
+  const raw = request.headers['x-cat-cafe-review-recovery-attempt'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return parsed >= 1 && parsed <= 3 ? parsed : undefined;
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
@@ -775,12 +816,32 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
     if (serverAuthoredKind) {
+      try {
+        await withdrawOlderQueuedReviewOrchestration(opts, {
+          threadId: resolvedThreadId,
+          userId,
+          currentIdempotencyKey: resolvedIdempotencyKey,
+        });
+      } catch (error) {
+        log.error(
+          { error, threadId: resolvedThreadId, idempotencyKey: resolvedIdempotencyKey },
+          'Failed to withdraw superseded Review orchestration queue entries',
+        );
+        reply.status(503);
+        return {
+          error: 'Review orchestration queue supersede is still pending',
+          code: 'REVIEW_QUEUE_SUPERSEDE_PENDING',
+        };
+      }
       const existing = await opts.messageStore.getByIdempotencyKey(userId, resolvedThreadId, resolvedIdempotencyKey);
       if (existing) {
-        if (existing.deliveryStatus === 'queued') {
-          const durableQueueEntry = opts.invocationQueue
-            ?.list(resolvedThreadId, userId)
-            .find((entry) => entry.messageId === existing.id || entry.idempotencyKey === resolvedIdempotencyKey);
+        const durableQueueEntry = opts.invocationQueue
+          ?.list(resolvedThreadId, userId)
+          .find((entry) => entry.messageId === existing.id || entry.idempotencyKey === resolvedIdempotencyKey);
+        // A failed Queue attempt can already have marked the message delivered
+        // before returning its still-owned carrier to `queued`. The Queue row is
+        // therefore the stronger recovery truth than deliveryStatus.
+        if (durableQueueEntry || existing.deliveryStatus === 'queued') {
           if (!durableQueueEntry) {
             reply.status(503);
             return {
@@ -788,6 +849,30 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               code: 'REVIEW_QUEUE_RECOVERY_PENDING',
             };
           }
+          let recoveryStarted = false;
+          const recoveryAttempt = parseReviewRecoveryAttempt(request);
+          if (
+            recoveryAttempt !== undefined &&
+            durableQueueEntry.status === 'queued' &&
+            opts.invocationQueue &&
+            opts.queueProcessor?.processNext &&
+            !(
+              opts.queueProcessor.hasActiveExecution?.(resolvedThreadId) ??
+              opts.invocationTracker?.has(resolvedThreadId) ??
+              false
+            )
+          ) {
+            opts.invocationQueue.promote(resolvedThreadId, userId, durableQueueEntry.id);
+            const recovery = await opts.queueProcessor.processNext(resolvedThreadId, userId);
+            recoveryStarted = recovery.started && recovery.entry?.id === durableQueueEntry.id;
+          }
+          reply.status(202);
+          return {
+            status: recoveryStarted ? 'recovery_started' : 'queued',
+            userMessageId: existing.id,
+            entryId: durableQueueEntry.id,
+            ...(recoveryAttempt !== undefined ? { recoveryAttempt } : {}),
+          };
         }
         reply.status(200);
         return { status: 'duplicate', userMessageId: existing.id };

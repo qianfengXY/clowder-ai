@@ -354,4 +354,186 @@ describe('POST /api/messages internal Review Hub orchestration', () => {
     assert.equal(deps.messageStore.append.mock.callCount(), 0);
     assert.equal(deps.invocationRecordStore.create.mock.callCount(), 0);
   });
+
+  it('reports a durable queued orchestration as queued instead of falsely acknowledging delivery', async () => {
+    const idempotencyKey = '66666666-6666-4666-8666-666666666666';
+    const invocationQueue = new InvocationQueue();
+    const admitted = invocationQueue.enqueue({
+      threadId: 'thread-1',
+      userId: 'test-user',
+      ownerAuthProvenance: 'strict',
+      idempotencyKey,
+      content: '@opus review this',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    invocationQueue.backfillMessageId('thread-1', 'test-user', admitted.entry.id, 'queued-review-message');
+    const deps = buildDeps({
+      internalMessageIngressToken: 'internal-secret',
+      invocationQueue,
+      messageStore: {
+        append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+        getByThread: mock.fn(async () => []),
+        getByThreadBefore: mock.fn(async () => []),
+        getById: mock.fn(async () => null),
+        getByIdempotencyKey: mock.fn(async () => ({
+          id: 'queued-review-message',
+          deliveryStatus: 'queued',
+        })),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+      },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        idempotencyKey,
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 202);
+    assert.deepEqual(JSON.parse(res.body), {
+      status: 'queued',
+      userMessageId: 'queued-review-message',
+      entryId: admitted.entry.id,
+    });
+    assert.equal(deps.invocationRecordStore.create.mock.callCount(), 0);
+  });
+
+  it('starts one bounded recovery attempt for an idle queued Review orchestration', async () => {
+    const idempotencyKey = '77777777-7777-4777-8777-777777777777';
+    const invocationQueue = new InvocationQueue();
+    const admitted = invocationQueue.enqueue({
+      threadId: 'thread-1',
+      userId: 'test-user',
+      ownerAuthProvenance: 'strict',
+      idempotencyKey,
+      content: '@opus review this',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    invocationQueue.backfillMessageId('thread-1', 'test-user', admitted.entry.id, 'recover-review-message');
+    const processNext = mock.fn(async () => ({ started: true, entry: admitted.entry }));
+    const deps = buildDeps({
+      internalMessageIngressToken: 'internal-secret',
+      invocationQueue,
+      queueProcessor: {
+        clearPause: mock.fn(),
+        onInvocationComplete: mock.fn(async () => {}),
+        enqueueContinuation: mock.fn(async () => ({ outcome: 'enqueued' })),
+        hasActiveExecution: mock.fn(() => false),
+        processNext,
+      },
+      messageStore: {
+        append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+        getByThread: mock.fn(async () => []),
+        getByThreadBefore: mock.fn(async () => []),
+        getById: mock.fn(async () => null),
+        getByIdempotencyKey: mock.fn(async () => ({
+          id: 'recover-review-message',
+          deliveryStatus: 'delivered',
+        })),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+        'x-cat-cafe-review-recovery-attempt': '1',
+      },
+      payload: {
+        content: '@opus review this',
+        threadId: 'thread-1',
+        idempotencyKey,
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 202);
+    assert.equal(JSON.parse(res.body).status, 'recovery_started');
+    assert.equal(JSON.parse(res.body).recoveryAttempt, 1);
+    assert.equal(processNext.mock.callCount(), 1);
+  });
+
+  it('withdraws an older queued Review stage before admitting the current one', async () => {
+    const invocationQueue = new InvocationQueue();
+    const stale = invocationQueue.enqueue({
+      threadId: 'thread-1',
+      userId: 'test-user',
+      ownerAuthProvenance: 'strict',
+      idempotencyKey: '88888888-8888-4888-8888-888888888888',
+      content: '@opus old review stage',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    invocationQueue.backfillMessageId('thread-1', 'test-user', stale.entry.id, 'stale-review-message');
+    const withdrawSupersededQueuedEntries = mock.fn(async () => [stale.entry]);
+    const deps = buildDeps({
+      internalMessageIngressToken: 'internal-secret',
+      invocationQueue,
+      queueProcessor: {
+        clearPause: mock.fn(),
+        onInvocationComplete: mock.fn(async () => {}),
+        enqueueContinuation: mock.fn(async () => ({ outcome: 'enqueued' })),
+        withdrawSupersededQueuedEntries,
+      },
+      messageStore: {
+        append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+        getByThread: mock.fn(async () => []),
+        getByThreadBefore: mock.fn(async () => []),
+        getByIdempotencyKey: mock.fn(async () => null),
+        getById: mock.fn(async (id) =>
+          id === 'stale-review-message' ? { id, extra: { systemKind: 'review_orchestration' } } : null,
+        ),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'test-user',
+        'x-cat-cafe-internal-message-token': 'internal-secret',
+      },
+      payload: {
+        content: '@opus current review stage',
+        threadId: 'thread-1',
+        idempotencyKey: '99999999-9999-4999-8999-999999999999',
+        serverAuthoredKind: 'review_orchestration',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(withdrawSupersededQueuedEntries.mock.callCount(), 1);
+    assert.deepEqual(withdrawSupersededQueuedEntries.mock.calls[0].arguments, [
+      'thread-1',
+      'test-user',
+      [stale.entry.id],
+    ]);
+  });
 });
