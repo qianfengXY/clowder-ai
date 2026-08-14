@@ -147,9 +147,14 @@ test('Review completion sets an active goal on the bound thread without resuming
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   let session;
+  let goalSessionOptions;
   const opened = [];
   const launcher = new CodexDesktopTaskLauncher(undefined, {
     sessionFactory: async () => {
+      throw new Error('Review wake must not use the pooled daemon session');
+    },
+    goalSessionFactory: async (options) => {
+      goalSessionOptions = options;
       session = new FakeNativeSession();
       return session;
     },
@@ -170,6 +175,7 @@ test('Review completion sets an active goal on the bound thread without resuming
   assert.equal(goal.params.threadId, 'bound-thread-f006');
   assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
   assert.equal(goal.params.status, 'active');
+  assert.deepEqual(goalSessionOptions.args, ['app-server', '--stdio']);
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
@@ -181,6 +187,9 @@ test('implementation report pauses the bound goal without opening or starting th
   const opened = [];
   const launcher = new CodexDesktopTaskLauncher(undefined, {
     sessionFactory: async () => {
+      throw new Error('Review pause must not use the pooled daemon session');
+    },
+    goalSessionFactory: async () => {
       session = new FakeNativeSession();
       return session;
     },
@@ -224,7 +233,7 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   const opened = [];
   const launcher = new CodexDesktopTaskLauncher(redis, {
     recoveryIntervalMs: 0,
-    sessionFactory: async () => {
+    goalSessionFactory: async () => {
       if (fail) throw new Error('Desktop unavailable');
       return new FakeNativeSession();
     },

@@ -1,16 +1,19 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { connectCodexAppServerSocket } from '../cats/services/agents/providers/CodexUnixWebSocketSession.js';
+import { createDirectAgentCarrierSession } from '../cats/services/agents/providers/DirectAgentCarrierSession.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory } from '../cats/services/types.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_DAEMON_SOCKET = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock');
 const PENDING_WAKE_SET = 'desktop-development:pending-native-wakes';
 const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
+const CHATGPT_CODEX_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex';
 
 export interface DesktopTaskLaunchInput {
   readonly projectId: string;
@@ -59,9 +62,11 @@ interface DesktopTaskRecord {
 
 interface DesktopTaskLauncherOptions {
   readonly sessionFactory?: AgentCarrierSessionFactory;
+  readonly goalSessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
   readonly daemonSocketPath?: string;
   readonly recoveryIntervalMs?: number;
+  readonly command?: string;
 }
 
 type DesktopTaskGoalSignal =
@@ -92,16 +97,20 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly activeWakes = new Map<string, Promise<void>>();
   private readonly completed = new Map<string, DesktopTaskLaunchResult>();
   private readonly sessionFactory: AgentCarrierSessionFactory;
+  private readonly goalSessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
   private readonly daemonSocketPath: string;
+  private readonly command: string;
 
   constructor(
     private readonly redis?: RedisClient,
     options: DesktopTaskLauncherOptions = {},
   ) {
     this.sessionFactory = options.sessionFactory ?? (async () => connectCodexAppServerSocket(this.daemonSocketPath));
+    this.goalSessionFactory = options.goalSessionFactory ?? options.sessionFactory ?? createDirectAgentCarrierSession;
     this.openThread = options.openThread ?? openChatGptThread;
     this.daemonSocketPath = options.daemonSocketPath ?? process.env.CODEX_APP_SERVER_SOCKET ?? DEFAULT_DAEMON_SOCKET;
+    this.command = options.command ?? resolveChatGptCodexCommand();
     if (redis && options.recoveryIntervalMs !== 0) {
       const interval = setInterval(
         () => void this.recoverPendingActivations().catch(() => undefined),
@@ -274,7 +283,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
    * either would compete with ChatGPT Desktop's active writer.
    */
   private async wake(input: DesktopTaskActivationInput): Promise<void> {
-    await this.withProtocol(input.sourcePath, `desktop-review-goal-${input.threadId}`, async (rpc) => {
+    await this.withGoalProtocol(input.sourcePath, `desktop-review-goal-${input.threadId}`, async (rpc) => {
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
         objective: input.objective,
@@ -287,7 +296,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
 
   /** Stop the durable goal from creating another turn while Cat Cafe reviews. */
   private async pauseGoal(input: DesktopTaskPauseInput): Promise<void> {
-    await this.withProtocol(input.sourcePath, `desktop-review-pause-${input.threadId}`, async (rpc) => {
+    await this.withGoalProtocol(input.sourcePath, `desktop-review-pause-${input.threadId}`, async (rpc) => {
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
         status: 'paused',
@@ -382,6 +391,42 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       await session.close();
     }
   }
+
+  /**
+   * Goal metadata must be written through the Desktop-native short-lived
+   * app-server. The pooled daemon persists the value but its notification is
+   * not observed by the running ChatGPT Desktop client.
+   */
+  private async withGoalProtocol<T>(
+    cwd: string,
+    invocationPrefix: string,
+    operation: (rpc: SequentialRpcClient) => Promise<T>,
+  ): Promise<T> {
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 15_000);
+    const session = await this.goalSessionFactory({
+      command: this.command,
+      args: ['app-server', '--stdio'],
+      cwd,
+      invocationId: `${invocationPrefix}-${Date.now()}`,
+      signal: abortController.signal,
+    });
+    const rpc = new SequentialRpcClient(session);
+    try {
+      await rpc.request('initialize', {
+        clientInfo: { name: 'cat-cafe', title: 'Clowder AI', version: '1' },
+        capabilities: { experimentalApi: true },
+      });
+      await session.write({ method: 'initialized' });
+      return await operation(rpc);
+    } catch (error) {
+      if (abortController.signal.aborted) throw new Error('Timed out while updating the ChatGPT Desktop goal');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      await session.close();
+    }
+  }
 }
 
 class SequentialRpcClient {
@@ -452,6 +497,13 @@ export function buildReviewCompletionObjective(input: {
 async function openChatGptThread(threadId: string): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('Native ChatGPT task wake currently requires macOS');
   await execFileAsync('/usr/bin/open', [`codex://threads/${encodeURIComponent(threadId)}`]);
+}
+
+function resolveChatGptCodexCommand(): string {
+  const configured = process.env.CHATGPT_APP_CODEX_BIN?.trim() || process.env.CODEX_BIN?.trim();
+  if (configured) return configured;
+  if (process.platform === 'darwin' && existsSync(CHATGPT_CODEX_BIN)) return CHATGPT_CODEX_BIN;
+  return 'codex';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
