@@ -5,7 +5,10 @@ import { markReminderAttemptMissed, markReminderAttemptSeen } from '../../stores
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
-import { createCrossThreadQueueEntryFromCustody } from './QueuedMessageCustodyCoordinator.js';
+import {
+  createCrossThreadQueueEntryFromCustody,
+  QueuedMessageCustodyCoordinator,
+} from './QueuedMessageCustodyCoordinator.js';
 import { resolveQueueSourceResponseEvidence } from './queue-source-response-evidence.js';
 
 interface StartupCustodyLog {
@@ -48,6 +51,46 @@ interface ReconciledMessage {
 
 function uniqueCatIds(values: readonly string[]): CatId[] {
   return [...new Set(values.filter(Boolean))] as CatId[];
+}
+
+function isReviewOrchestrationGroup(messages: readonly StoredMessage[]): boolean {
+  return messages.length > 0 && messages.every((message) => message.extra?.systemKind === 'review_orchestration');
+}
+
+function newestMessage(messages: readonly StoredMessage[]): StoredMessage {
+  const newest = [...messages].sort(
+    (left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id),
+  )[0];
+  if (!newest) throw new Error('review orchestration carrier has no message');
+  return newest;
+}
+
+function reviewScope(message: StoredMessage): string {
+  return JSON.stringify([message.userId, message.threadId]);
+}
+
+function isNewerReviewCarrier(candidate: StoredMessage, current: { timestamp: number; messageId: string }): boolean {
+  return (
+    candidate.timestamp > current.timestamp ||
+    (candidate.timestamp === current.timestamp && candidate.id.localeCompare(current.messageId) > 0)
+  );
+}
+
+function supersededReviewEntryIds(groups: ReadonlyMap<string, StoredMessage[]>): string[] {
+  const latestByScope = new Map<string, { entryId: string; timestamp: number; messageId: string }>();
+  for (const [entryId, messages] of groups) {
+    if (!isReviewOrchestrationGroup(messages)) continue;
+    const newest = newestMessage(messages);
+    const scope = reviewScope(newest);
+    const current = latestByScope.get(scope);
+    if (!current || isNewerReviewCarrier(newest, current)) {
+      latestByScope.set(scope, { entryId, timestamp: newest.timestamp, messageId: newest.id });
+    }
+  }
+  return [...groups]
+    .filter(([, messages]) => isReviewOrchestrationGroup(messages))
+    .filter(([entryId, messages]) => latestByScope.get(reviewScope(newestMessage(messages)))?.entryId !== entryId)
+    .map(([entryId]) => entryId);
 }
 
 function activeProjection(custody: QueuedMessageCustody): Omit<QueuedMessageCustody, 'revision' | 'updatedAt'> {
@@ -260,6 +303,7 @@ export class QueuedMessageCustodyStartupReconciler {
     }
 
     const groups = this.groupActiveMessages(activeMessages);
+    messagesTerminalized += await this.withdrawSupersededReviewOrchestrationGroups(groups);
     const resumeScopes: QueueCustodyResumeScope[] = [];
     let entriesRestored = 0;
     for (const [entryId, messages] of groups) {
@@ -286,6 +330,59 @@ export class QueuedMessageCustodyStartupReconciler {
       resumeScopes,
       legacyVisibilityFallbackMessageIds,
     };
+  }
+
+  /**
+   * A review thread has exactly one authoritative stage carrier. A process can
+   * die after the next stage is durably queued but before the previous failed
+   * carrier is withdrawn. Restoring every carrier and immediately resuming the
+   * scope would then execute the oldest Review system message first.
+   *
+   * Resolve that restart-only race before any Queue row becomes actionable:
+   * keep the newest Review orchestration carrier per owner/thread and retire
+   * older carriers through the same durable custody transition used by normal
+   * Queue withdrawal.
+   */
+  private async withdrawSupersededReviewOrchestrationGroups(groups: Map<string, StoredMessage[]>): Promise<number> {
+    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: this.deps.messageStore, now: this.now });
+    let terminalized = 0;
+    for (const entryId of supersededReviewEntryIds(groups)) {
+      const messages = groups.get(entryId);
+      if (!messages) continue;
+      try {
+        terminalized += await this.withdrawReviewOrchestrationGroup(coordinator, entryId, messages);
+      } catch (error) {
+        // A partially applied withdrawal is terminal custody and must never be
+        // restored in this pass. The next startup reconciliation can finish the
+        // idempotent transition if markCanceled itself was unavailable.
+        groups.delete(entryId);
+        this.deps.log.warn(
+          `[queue-custody-startup] failed to withdraw superseded Review carrier ${entryId}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      groups.delete(entryId);
+    }
+    return terminalized;
+  }
+
+  private async withdrawReviewOrchestrationGroup(
+    coordinator: QueuedMessageCustodyCoordinator,
+    entryId: string,
+    messages: StoredMessage[],
+  ): Promise<number> {
+    const entry = this.buildQueueEntry(messages, entryId);
+    await coordinator.withdrawEntry(entry);
+    let terminalized = 0;
+    for (const message of messages) {
+      const result = await this.deps.messageStore.markCanceled(message.id);
+      if (result?.deliveryTransitioned) terminalized += 1;
+    }
+    this.deps.log.info(
+      `[queue-custody-startup] withdrew superseded Review orchestration carrier ${entryId} ` +
+        `for ${newestMessage(messages).threadId}`,
+    );
+    return terminalized;
   }
 
   private emptyResult(): QueueCustodyStartupResult {

@@ -114,6 +114,63 @@ function createReconciler({ messageStore, invocationQueue, records = [], turnExe
 }
 
 describe('F254 Queue restart custody', () => {
+  test('restores only the newest Review orchestration carrier per thread', async () => {
+    const messageStore = createMessageStore();
+    const oldMessage = appendQueued(
+      messageStore,
+      custody({ entryId: 'review-old', createdAt: 1_000, updatedAt: 1_000 }),
+      {
+        content: 'Attempt #9 consensus',
+        timestamp: 1_000,
+        extra: { systemKind: 'review_orchestration' },
+      },
+    );
+    const currentMessage = appendQueued(
+      messageStore,
+      custody({ entryId: 'review-current', createdAt: 1_100, updatedAt: 1_100 }),
+      {
+        content: 'Attempt #10 independent review',
+        timestamp: 1_100,
+        extra: { systemKind: 'review_orchestration' },
+      },
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 1);
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(messageStore.getById(oldMessage.id).deliveryStatus, 'canceled');
+    assert.equal(messageStore.getById(oldMessage.id).queueCustody, undefined);
+    assert.equal(messageStore.getById(currentMessage.id).deliveryStatus, 'queued');
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'review-current').messageId, currentMessage.id);
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'review-old'), null);
+    assert.deepEqual(result.resumeScopes, [{ threadId: 'thread-1', userId: 'user-1' }]);
+  });
+
+  test('does not collapse Review orchestration carriers across owners or threads', async () => {
+    const messageStore = createMessageStore();
+    appendQueued(messageStore, custody({ entryId: 'review-thread-1', createdAt: 1_000, updatedAt: 1_000 }), {
+      timestamp: 1_000,
+      extra: { systemKind: 'review_orchestration' },
+    });
+    appendQueued(messageStore, custody({ entryId: 'review-thread-2', createdAt: 1_100, updatedAt: 1_100 }), {
+      threadId: 'thread-2',
+      timestamp: 1_100,
+      extra: { systemKind: 'review_orchestration' },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 2);
+    assert.equal(result.messagesTerminalized, 0);
+    assert.ok(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'review-thread-1'));
+    assert.ok(invocationQueue.getEntrySnapshot('thread-2', 'user-1', 'review-thread-2'));
+  });
+
   test('restores an unread message as the exact same Queue owner and is idempotent', async () => {
     const messageStore = createMessageStore();
     const message = appendQueued(messageStore);
