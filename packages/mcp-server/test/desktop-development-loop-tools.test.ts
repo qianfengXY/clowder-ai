@@ -5,6 +5,7 @@ import {
   handleDevelopmentMergeConfirmationRecord,
   handleDevelopmentMergeReport,
   handleDevelopmentProjectRead,
+  handleDevelopmentReviewWait,
   handleDevelopmentWorkConnect,
   handleDevelopmentWorkRead,
 } from '../src/tools/desktop-development-loop-tools.js';
@@ -36,12 +37,13 @@ describe('F289 ChatGPT Desktop development-loop tools', () => {
     else process.env.CAT_CAFE_API_URL = originalApiUrl;
   });
 
-  it('has exactly seven lifecycle tools with no merge primitive, deploy, shell, Git, or credential input', () => {
+  it('has exactly eight lifecycle tools with no merge primitive, deploy, shell, Git, or credential input', () => {
     assert.deepEqual(desktopDevelopmentLoopTools.map((tool) => tool.name).sort(), [
       'cat_cafe_development_implementation_report',
       'cat_cafe_development_merge_confirmation_record',
       'cat_cafe_development_merge_report',
       'cat_cafe_development_project_read',
+      'cat_cafe_development_review_wait',
       'cat_cafe_development_work_connect',
       'cat_cafe_development_work_heartbeat',
       'cat_cafe_development_work_read',
@@ -56,6 +58,35 @@ describe('F289 ChatGPT Desktop development-loop tools', () => {
       desktopDevelopmentLoopTools.some((tool) => tool.annotations.destructiveHint),
       false,
     );
+  });
+
+  it('waits in the current Desktop turn until Review leaves its in-progress phases', async () => {
+    let reads = 0;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      reads += 1;
+      return new Response(
+        JSON.stringify(
+          reads === 1
+            ? { phase: 'independent_review', nextLegalActions: ['wait_for_independent_review'] }
+            : { phase: 'fix_required', nextLegalActions: ['start_fix_attempt'] },
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const result = await handleDevelopmentReviewWait({
+      protocolVersion: 1,
+      projectId: 'project-1',
+      workId: 'work-1',
+      attemptId: 'attempt-1',
+      timeoutMs: 2_000,
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal(reads, 2);
+    const output = JSON.parse(result.content[0].text);
+    assert.equal(output.reviewWait, 'complete');
+    assert.equal(output.resumePacket.phase, 'fix_required');
   });
 
   it('documents routing, exclusions, output, and every top-level input parameter', () => {

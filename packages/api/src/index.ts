@@ -4397,8 +4397,6 @@ async function main(): Promise<void> {
       reviewRoundStore,
       managedWorkConsumerPort,
       reviewRoundDispatcher,
-      desktopSessionStore,
-      desktopTaskLauncher,
       reviewDisplayContexts,
     );
   }

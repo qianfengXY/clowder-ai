@@ -111,7 +111,6 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
       return session;
     },
     openThread: async (threadId) => opened.push(threadId),
-    recoveryIntervalMs: 0,
   });
   const result = await launcher.launch({
     projectId: 'project-1',
@@ -143,82 +142,11 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
 });
 
-test('Desktop task activation starts the daemon-owned turn before opening the task', async () => {
-  const { CodexDesktopTaskLauncher } = await import(
-    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
-  );
-  const order = [];
-  let session;
-  const launcher = new CodexDesktopTaskLauncher(undefined, {
-    sessionFactory: async () => {
-      session = new FakeNativeSession();
-      const originalWrite = session.write.bind(session);
-      session.write = async (message) => {
-        if (message.method === 'thread/resume') order.push('resume');
-        if (message.method === 'thread/goal/set') order.push('goal');
-        if (message.method === 'turn/start') order.push('turn');
-        await originalWrite(message);
-      };
-      return session;
-    },
-    openThread: async () => order.push('open'),
-    recoveryIntervalMs: 0,
-  });
-
-  await launcher.activate({
-    threadId: 'existing-thread',
-    sourcePath: '/work/traqen',
-    objective: 'Continue from the latest Resume Packet',
-  });
-
-  assert.deepEqual(order, ['resume', 'goal', 'turn', 'open']);
-  const turn = session.writes.find((message) => message.method === 'turn/start');
-  assert.equal(turn.params.threadId, 'existing-thread');
-  assert.equal(turn.params.input[0].text, 'Continue from the latest Resume Packet');
-});
-
-test('Desktop task activation reuses a thread already loaded by the durable daemon', async () => {
-  const { CodexDesktopTaskLauncher } = await import(
-    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
-  );
-  let session;
-  const launcher = new CodexDesktopTaskLauncher(undefined, {
-    sessionFactory: async () => {
-      session = new FakeNativeSession();
-      const originalWrite = session.write.bind(session);
-      session.write = async (message) => {
-        if (message.method === 'thread/resume') {
-          session.writes.push(message);
-          session.push({
-            id: message.id,
-            error: { code: -32600, message: 'thread already has an active writer' },
-          });
-          return;
-        }
-        await originalWrite(message);
-      };
-      return session;
-    },
-    openThread: async () => {},
-    recoveryIntervalMs: 0,
-  });
-
-  await launcher.activate({
-    threadId: 'loaded-thread',
-    sourcePath: '/work/traqen',
-    objective: 'Continue after Review',
-  });
-
-  assert.equal(session.writes.some((message) => message.method === 'thread/goal/set'), true);
-  assert.equal(session.writes.some((message) => message.method === 'turn/start'), true);
-});
-
-test('Desktop task activation survives a temporary ChatGPT open failure and recovers from Redis', async () => {
+test('Desktop task launcher reopens an existing task without writing a new turn', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
   const values = new Map();
-  const sets = new Map();
   const redis = {
     get: async (key) => values.get(key) ?? null,
     set: async (key, value) => {
@@ -226,33 +154,31 @@ test('Desktop task activation survives a temporary ChatGPT open failure and reco
       return 'OK';
     },
     del: async (key) => (values.delete(key) ? 1 : 0),
-    sadd: async (key, value) => {
-      const members = sets.get(key) ?? new Set();
-      members.add(value);
-      sets.set(key, members);
-      return 1;
-    },
-    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
-    smembers: async (key) => [...(sets.get(key) ?? [])],
   };
-  let opens = 0;
+  values.set(
+    'desktop-development:feature-task:project-1:backlog-1',
+    JSON.stringify({ status: 'created', threadId: 'existing-thread', runtimeSessionId: 'runtime-1' }),
+  );
+  const opened = [];
+  let sessionCreated = false;
   const launcher = new CodexDesktopTaskLauncher(redis, {
-    sessionFactory: async () => new FakeNativeSession(),
-    openThread: async () => {
-      opens += 1;
-      if (opens === 1) throw new Error('ChatGPT is restarting');
+    sessionFactory: async () => {
+      sessionCreated = true;
+      return new FakeNativeSession();
     },
-    recoveryIntervalMs: 0,
+    openThread: async (threadId) => opened.push(threadId),
   });
+  launcher.threadExists = async () => true;
 
-  await launcher.activate({
-    threadId: 'recoverable-thread',
+  await launcher.launch({
+    projectId: 'project-1',
+    projectName: 'Traqen',
+    repository: 'owner/traqen',
     sourcePath: '/work/traqen',
-    objective: 'Continue after Review',
+    backlogItemId: 'backlog-1',
+    featureId: 'F006',
+    title: 'Workspace settings',
   });
-  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['recoverable-thread']);
-
-  await launcher.recoverPendingActivations();
-  assert.equal(opens, 2);
-  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+  assert.deepEqual(opened, ['existing-thread']);
+  assert.equal(sessionCreated, false);
 });

@@ -8,8 +8,6 @@ import { connectCodexAppServerSocket } from '../cats/services/agents/providers/C
 import type { AgentCarrierSession, AgentCarrierSessionFactory } from '../cats/services/types.js';
 
 const execFileAsync = promisify(execFile);
-const PENDING_WAKE_SET = 'desktop-development:pending-native-wakes';
-const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
 const DEFAULT_DAEMON_SOCKET = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock');
 
 export interface DesktopTaskLaunchInput {
@@ -27,17 +25,7 @@ export interface DesktopTaskLaunchResult {
   readonly threadId: string;
 }
 
-export interface DesktopTaskActivationInput {
-  readonly threadId: string;
-  readonly sourcePath: string;
-  readonly objective: string;
-}
-
-export interface DesktopTaskActivator {
-  activate(input: DesktopTaskActivationInput): Promise<void>;
-}
-
-export interface DesktopTaskLauncher extends DesktopTaskActivator {
+export interface DesktopTaskLauncher {
   launch(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult>;
   get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null>;
 }
@@ -51,7 +39,6 @@ interface DesktopTaskRecord {
 interface DesktopTaskLauncherOptions {
   readonly sessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
-  readonly recoveryIntervalMs?: number;
   readonly daemonSocketPath?: string;
 }
 
@@ -75,7 +62,6 @@ export function buildDesktopTaskName(featureId: string, title: string): string {
  */
 export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly active = new Map<string, Promise<DesktopTaskLaunchResult>>();
-  private readonly activeWakes = new Map<string, Promise<void>>();
   private readonly completed = new Map<string, DesktopTaskLaunchResult>();
   private readonly sessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
@@ -85,18 +71,9 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     private readonly redis?: RedisClient,
     options: DesktopTaskLauncherOptions = {},
   ) {
-    this.sessionFactory =
-      options.sessionFactory ?? (async () => connectCodexAppServerSocket(this.daemonSocketPath));
+    this.sessionFactory = options.sessionFactory ?? (async () => connectCodexAppServerSocket(this.daemonSocketPath));
     this.openThread = options.openThread ?? openChatGptThread;
     this.daemonSocketPath = options.daemonSocketPath ?? process.env.CODEX_APP_SERVER_SOCKET ?? DEFAULT_DAEMON_SOCKET;
-    if (redis && options.recoveryIntervalMs !== 0) {
-      const interval = setInterval(
-        () => void this.recoverPendingActivations().catch(() => undefined),
-        options.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS,
-      );
-      interval.unref();
-      queueMicrotask(() => void this.recoverPendingActivations().catch(() => undefined));
-    }
   }
 
   async get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null> {
@@ -119,50 +96,13 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     return launch;
   }
 
-  activate(input: DesktopTaskActivationInput): Promise<void> {
-    const previous = this.activeWakes.get(input.threadId) ?? Promise.resolve();
-    const wake = previous
-      .catch(() => undefined)
-      .then(() => this.persistAndWake(input))
-      .finally(() => {
-        if (this.activeWakes.get(input.threadId) === wake) this.activeWakes.delete(input.threadId);
-      });
-    this.activeWakes.set(input.threadId, wake);
-    return wake;
-  }
-
-  async recoverPendingActivations(): Promise<void> {
-    if (!this.redis) return;
-    const threadIds = await this.redis.smembers(PENDING_WAKE_SET);
-    for (const threadId of threadIds) {
-      if (this.activeWakes.has(threadId)) continue;
-      const raw = await this.redis.get(this.pendingWakeKey(threadId));
-      if (!raw) {
-        await this.redis.srem(PENDING_WAKE_SET, threadId);
-        continue;
-      }
-      try {
-        const input = JSON.parse(raw) as DesktopTaskActivationInput;
-        if (!isActivationInput(input)) throw new Error('Invalid pending ChatGPT Desktop wake record');
-        await this.wake(input);
-        await this.clearPendingWake(threadId);
-      } catch {
-        // Keep the record. The next bounded recovery pass retries the same wake.
-      }
-    }
-  }
-
   private async launchOrReuse(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult> {
     let record = await this.readRecord(input.projectId, input.backlogItemId);
     if (record) {
       const exists = await this.threadExists(input, record.threadId);
       if (exists) {
         const runtimeSessionId = record.runtimeSessionId ?? randomUUID();
-        await this.activate({
-          threadId: record.threadId,
-          sourcePath: input.sourcePath,
-          objective: buildInitialObjective(input, runtimeSessionId),
-        });
+        await this.openThread(record.threadId);
         const existing = { status: 'created', threadId: record.threadId } as const;
         this.completed.set(`${input.projectId}:${input.backlogItemId}`, existing);
         await this.writeRecord(input.projectId, input.backlogItemId, { ...existing, runtimeSessionId });
@@ -228,58 +168,8 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     return { status: 'created', threadId };
   }
 
-  private async persistAndWake(input: DesktopTaskActivationInput): Promise<void> {
-    if (this.redis) {
-      await this.redis.set(this.pendingWakeKey(input.threadId), JSON.stringify(input));
-      await this.redis.sadd(PENDING_WAKE_SET, input.threadId);
-    }
-    try {
-      await this.wake(input);
-      await this.clearPendingWake(input.threadId);
-    } catch (error) {
-      // Once Redis owns the wake request, Review completion must not be rolled
-      // back just because ChatGPT was temporarily closed or unavailable.
-      if (!this.redis) throw error;
-    }
-  }
-
-  private async wake(input: DesktopTaskActivationInput): Promise<void> {
-    await this.withProtocol(input.sourcePath, `desktop-wake-${input.threadId}`, async (rpc) => {
-      try {
-        await rpc.request('thread/resume', {
-          threadId: input.threadId,
-          cwd: input.sourcePath,
-          sandbox: 'danger-full-access',
-          approvalPolicy: 'on-request',
-        });
-      } catch (error) {
-        // A durable daemon keeps the resumed thread loaded after the websocket
-        // client disconnects. In that case it already owns the writer and the
-        // following goal/turn requests must continue on that loaded thread.
-        if (!/already has an active writer/i.test(String(error))) throw error;
-      }
-      await rpc.request('thread/goal/set', {
-        threadId: input.threadId,
-        objective: input.objective,
-        status: 'active',
-        tokenBudget: null,
-      });
-      await rpc.request('turn/start', {
-        threadId: input.threadId,
-        input: [{ type: 'text', text: input.objective }],
-        cwd: input.sourcePath,
-        approvalPolicy: 'on-request',
-      });
-      await this.openThread(input.threadId);
-    });
-  }
-
   private storageKey(projectId: string, backlogItemId: string): string {
     return `desktop-development:feature-task:${projectId}:${backlogItemId}`;
-  }
-
-  private pendingWakeKey(threadId: string): string {
-    return `desktop-development:native-wake:${encodeURIComponent(threadId)}`;
   }
 
   private async readRecord(projectId: string, backlogItemId: string): Promise<DesktopTaskRecord | null> {
@@ -305,12 +195,6 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private async clearRecord(projectId: string, backlogItemId: string): Promise<void> {
     this.completed.delete(`${projectId}:${backlogItemId}`);
     await this.redis?.del(this.storageKey(projectId, backlogItemId));
-  }
-
-  private async clearPendingWake(threadId: string): Promise<void> {
-    if (!this.redis) return;
-    await this.redis.del(this.pendingWakeKey(threadId));
-    await this.redis.srem(PENDING_WAKE_SET, threadId);
   }
 
   /** App-server read is used only on an explicit retry, not on the polling status path. */
@@ -400,27 +284,6 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
   ].join('\n');
 }
 
-export function buildReviewCompletionObjective(input: {
-  readonly projectId: string;
-  readonly workId: string;
-  readonly attemptId: string;
-  readonly reviewRoundId: string;
-  readonly exactSha: string;
-  readonly runtimeSessionId: string;
-}): string {
-  return [
-    '继续执行当前 Cat Café managed work。该功能的 Review 已完成。',
-    `Cat Café projectId：${input.projectId}`,
-    `workId：${input.workId}`,
-    `attemptId：${input.attemptId}`,
-    `reviewRoundId：${input.reviewRoundId}`,
-    `被检视的精确 SHA：${input.exactSha}`,
-    `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
-    '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
-    '若需要修复，先按 Resume Packet 重连并取得新的 attempt，再在这个可见任务中完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
-  ].join('\n');
-}
-
 async function openChatGptThread(threadId: string): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('Native ChatGPT task wake currently requires macOS');
   await execFileAsync('/usr/bin/open', [`codex://threads/${encodeURIComponent(threadId)}`]);
@@ -428,11 +291,4 @@ async function openChatGptThread(threadId: string): Promise<void> {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function isActivationInput(value: unknown): value is DesktopTaskActivationInput {
-  const input = asRecord(value);
-  return (
-    typeof input?.threadId === 'string' && typeof input.sourcePath === 'string' && typeof input.objective === 'string'
-  );
 }

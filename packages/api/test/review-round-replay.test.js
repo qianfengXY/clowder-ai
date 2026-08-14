@@ -58,8 +58,6 @@ describe('ReviewRoundCoordinatorService replay', () => {
       f.reviewRounds,
       f.managedWork,
       f.dispatcher,
-      undefined,
-      undefined,
       f.displayContexts,
     );
     const result = await coordinator.replayIndependent({
@@ -101,8 +99,6 @@ describe('ReviewRoundCoordinatorService replay', () => {
         f.reviewRounds,
         f.managedWork,
         f.dispatcher,
-        undefined,
-        undefined,
         f.displayContexts,
       );
       await assert.rejects(
@@ -127,8 +123,6 @@ describe('ReviewRoundCoordinatorService replay', () => {
       f.reviewRounds,
       f.managedWork,
       f.dispatcher,
-      undefined,
-      undefined,
       f.displayContexts,
     );
     await coordinator.replayIndependent({

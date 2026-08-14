@@ -66,6 +66,17 @@ export const developmentWorkReadInputSchema = {
   attemptId: idSchema.describe('Current canonical F275 attempt id for this work.'),
 };
 
+export const developmentReviewWaitInputSchema = {
+  ...developmentWorkReadInputSchema,
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(30_000)
+    .optional()
+    .describe('Maximum time to wait in this call before returning the latest Resume Packet; defaults to 20 seconds.'),
+};
+
 export const developmentWorkConnectInputSchema = {
   ...developmentWorkReadInputSchema,
   runtimeSessionId: idSchema.describe('Stable ChatGPT Desktop runtime session id.'),
@@ -139,6 +150,8 @@ type WorkReadInput = {
   attemptId: string;
 };
 
+type ReviewWaitInput = WorkReadInput & { timeoutMs?: number };
+
 type WorkspaceInput = {
   repository: { host: 'github.com'; owner: string; name: string; fullName: string };
   branch: string;
@@ -207,6 +220,38 @@ export async function handleDevelopmentWorkRead(input: WorkReadInput): Promise<T
   return requestDesktopLoop(`/api/desktop-development-loop/v1/works/${encodeURIComponent(input.workId)}?${query}`);
 }
 
+export async function handleDevelopmentReviewWait(input: ReviewWaitInput): Promise<ToolResult> {
+  const timeoutMs = input.timeoutMs ?? 20_000;
+  const deadline = Date.now() + timeoutMs;
+  const query = new URLSearchParams({
+    protocolVersion: String(input.protocolVersion),
+    projectId: input.projectId,
+    attemptId: input.attemptId,
+  });
+  const path = `/api/desktop-development-loop/v1/works/${encodeURIComponent(input.workId)}?${query}`;
+  try {
+    let packet = await fetchDesktopLoop(path);
+    while (isReviewPending(packet) && Date.now() < deadline) {
+      await delay(Math.min(1_000, Math.max(0, deadline - Date.now())));
+      packet = await fetchDesktopLoop(path);
+    }
+    return successResult(
+      JSON.stringify(
+        {
+          reviewWait: isReviewPending(packet) ? 'pending' : 'complete',
+          resumePacket: packet,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (error) {
+    return errorResult(
+      `Desktop development-loop request failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function handleDevelopmentWorkConnect(input: WorkConnectInput): Promise<ToolResult> {
   return requestDesktopLoop('/api/desktop-development-loop/v1/connect', input);
 }
@@ -228,26 +273,40 @@ export async function handleDevelopmentMergeReport(input: MergeReportInput): Pro
 }
 
 async function requestDesktopLoop(path: string, body?: object): Promise<ToolResult> {
-  const token = process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN?.trim();
-  if (!token) return errorResult('ChatGPT Desktop development-loop credential is not configured.');
-  const apiUrl = (process.env.CAT_CAFE_API_URL ?? 'http://localhost:3004').replace(/\/$/, '');
   try {
-    const response = await fetch(`${apiUrl}${path}`, {
-      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body ? { 'content-type': 'application/json' } : {}),
-      },
-    });
-    const text = await response.text();
-    if (!response.ok) return errorResult(`Desktop development-loop request failed (${response.status}): ${text}`);
-    const value = text ? JSON.parse(text) : null;
+    const value = await fetchDesktopLoop(path, body);
     return successResult(JSON.stringify(value, null, 2));
   } catch (error) {
     return errorResult(
       `Desktop development-loop request failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+async function fetchDesktopLoop(path: string, body?: object): Promise<unknown> {
+  const token = process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN?.trim();
+  if (!token) throw new Error('ChatGPT Desktop development-loop credential is not configured.');
+  const apiUrl = (process.env.CAT_CAFE_API_URL ?? 'http://localhost:3004').replace(/\/$/, '');
+  const response = await fetch(`${apiUrl}${path}`, {
+    ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`request failed (${response.status}): ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+function isReviewPending(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const phase = (value as { phase?: unknown }).phase;
+  return phase === 'independent_review' || phase === 'cross_review';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const runtimeProfiles = ['full', 'desktop:development-loop'] as const;
@@ -282,6 +341,23 @@ export const desktopDevelopmentLoopTools = [
     governance: {
       implementationExport: 'handleDevelopmentWorkRead',
       action: 'read-work',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles,
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_development_review_wait',
+    description:
+      'Wait briefly for the current Cat Café multi-cat ReviewRound while keeping execution in the same ChatGPT Desktop turn. ' +
+      'Use when: implementation was reported and the Resume Packet says Review is in progress; call again when reviewWait is pending. ' +
+      'NOT for: running reviewers in the Desktop app-server, starting a new Desktop turn, mutating Git, or replacing the permanent binding. ' +
+      'Output: the latest barrier-safe Resume Packet plus reviewWait=complete or pending.',
+    inputSchema: developmentReviewWaitInputSchema,
+    handler: handleDevelopmentReviewWait,
+    governance: {
+      implementationExport: 'handleDevelopmentReviewWait',
+      action: 'wait-review',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles,
       targetExposure: 'profile-gated',

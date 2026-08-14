@@ -42,6 +42,13 @@ describe('F289 Desktop executor skill contract', () => {
     assert.doesNotMatch(skill, /GITHUB_TOKEN|github_issues_bilingual|TraqenGitHubIssuePublisher/);
   });
 
+  test('keeps Review providers separate and waits inside the bound Desktop turn', () => {
+    assert.match(skill, /cat_cafe_development_review_wait/);
+    assert.match(skill, /Cat Café 自己的 provider\/app-server/);
+    assert.match(skill, /thread\/resume/);
+    assert.match(skill, /不得结束当前\s+Desktop turn/s);
+  });
+
   test('is registered in the canonical manifest', () => {
     assert.match(manifest, /^ {2}catcafe-desktop-executor:/m);
     assert.match(manifest, /Recoverable Desktop binding \+ exact commit SHA/);

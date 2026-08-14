@@ -5,8 +5,6 @@ import type {
   IReviewRoundStore,
   ReviewDraftFindingInput,
 } from '../review-coordination/ReviewRoundStore.js';
-import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
-import type { DesktopSessionStore } from './desktop-session-store.js';
 import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
@@ -52,8 +50,6 @@ export class ReviewRoundCoordinatorService {
     private readonly reviewRounds: IReviewRoundStore,
     private readonly managedWork: IManagedWorkConsumerPort,
     private readonly reviewDispatcher: IReviewRoundStageDispatcher,
-    private readonly desktopSessions?: Pick<DesktopSessionStore, 'getCurrent'>,
-    private readonly desktopTasks?: DesktopTaskActivator,
     private readonly reviewDisplayContexts?: IReviewRoundDisplayContextResolver,
   ) {}
 
@@ -183,13 +179,6 @@ export class ReviewRoundCoordinatorService {
       },
       ...(input.now === undefined ? {} : { now: input.now }),
     });
-    await this.wakeBoundDesktopTask({
-      projectId: before.round.projectId,
-      workId: before.round.workId,
-      attemptId: before.round.attemptId,
-      reviewRoundId: before.round.roundId,
-      exactSha: before.round.exactSha,
-    });
     return completed;
   }
 
@@ -260,26 +249,6 @@ export class ReviewRoundCoordinatorService {
       projectId: round.projectId,
       workId: round.workId,
       attemptId: round.attemptId,
-    });
-  }
-
-  private async wakeBoundDesktopTask(input: {
-    readonly projectId: string;
-    readonly workId: string;
-    readonly attemptId: string;
-    readonly reviewRoundId: string;
-    readonly exactSha: string;
-  }): Promise<void> {
-    if (!this.desktopSessions || !this.desktopTasks) return;
-    const binding = await this.desktopSessions.getCurrent(input.projectId, input.workId);
-    if (!binding?.chatRef) return;
-    await this.desktopTasks.activate({
-      threadId: binding.chatRef,
-      sourcePath: binding.workspace.worktreePath,
-      objective: buildReviewCompletionObjective({
-        ...input,
-        runtimeSessionId: binding.runtimeSessionId,
-      }),
     });
   }
 }

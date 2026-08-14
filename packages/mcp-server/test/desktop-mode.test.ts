@@ -52,6 +52,7 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_shell_exec',
   'cat_cafe_development_project_read',
   'cat_cafe_development_work_read',
+  'cat_cafe_development_review_wait',
   'cat_cafe_development_work_connect',
   'cat_cafe_development_work_heartbeat',
   'cat_cafe_development_implementation_report',
@@ -184,7 +185,7 @@ describe('applyReadonlyFilter — env modes', () => {
     assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
   });
 
-  it('desktopMode=development-loop exposes only the seven F289 lifecycle tools', () => {
+  it('desktopMode=development-loop exposes only the eight F289 lifecycle tools', () => {
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, { desktopMode: 'development-loop' });
     assert.deepEqual(out.map((tool) => tool.name).sort(), [...DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS].sort());
     assert.equal(
