@@ -88,6 +88,8 @@ implementation report 会在当前 backlog 功能的独立 Review 会话中启�
 Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 保持不变。
 
 - `review_in_progress`：向用户说明本轮 committed SHA 已交给 Cat Café Review，然后结束当前 turn；不得在 Desktop 内等待。
+- implementation report 成功后，Cat Café 会把当前窗口的 durable goal 设为 `paused`，防止 turn 结束后被 Goal
+  自动再次拉起；Desktop 不得自行把它恢复为 active。只有对应 ReviewRound 真正完成时才由 Cat Café 恢复。
 - Cat Café 共识完成后，只向原绑定 `chatRef` 写入带项目、功能、attempt、ReviewRound 和精确 SHA 的 active goal，
   再打开该 thread 的原生 deep link。ChatGPT Desktop 负责把 goal 转成下一轮可见消息；Cat Café 不得调用
   `thread/resume` / `turn/start`，不得启动第二个 app-server 抢写该 thread，也不得创建替代窗口。

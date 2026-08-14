@@ -687,6 +687,13 @@ export class DesktopDevelopmentLoopService {
       },
     });
 
+    if (session.chatRef) {
+      await this.desktopTaskLauncher?.pause({
+        threadId: session.chatRef,
+        sourcePath: session.workspace.worktreePath,
+      });
+    }
+
     return this.readWork(
       {
         protocolVersion: input.protocolVersion,

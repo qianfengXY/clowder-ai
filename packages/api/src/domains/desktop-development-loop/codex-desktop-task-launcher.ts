@@ -33,11 +33,20 @@ export interface DesktopTaskActivationInput {
   readonly objective: string;
 }
 
+export interface DesktopTaskPauseInput {
+  readonly threadId: string;
+  readonly sourcePath: string;
+}
+
 export interface DesktopTaskActivator {
   activate(input: DesktopTaskActivationInput): Promise<void>;
 }
 
-export interface DesktopTaskLauncher extends DesktopTaskActivator {
+export interface DesktopTaskGoalController extends DesktopTaskActivator {
+  pause(input: DesktopTaskPauseInput): Promise<void>;
+}
+
+export interface DesktopTaskLauncher extends DesktopTaskGoalController {
   launch(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult>;
   get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null>;
 }
@@ -54,6 +63,10 @@ interface DesktopTaskLauncherOptions {
   readonly daemonSocketPath?: string;
   readonly recoveryIntervalMs?: number;
 }
+
+type DesktopTaskGoalSignal =
+  | ({ readonly kind: 'activate' } & DesktopTaskActivationInput)
+  | ({ readonly kind: 'pause' } & DesktopTaskPauseInput);
 
 export function buildDesktopTaskName(featureId: string, title: string): string {
   const normalizedFeatureId = featureId.trim().toUpperCase();
@@ -120,10 +133,18 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   }
 
   activate(input: DesktopTaskActivationInput): Promise<void> {
+    return this.enqueueGoalSignal({ kind: 'activate', ...input });
+  }
+
+  pause(input: DesktopTaskPauseInput): Promise<void> {
+    return this.enqueueGoalSignal({ kind: 'pause', ...input });
+  }
+
+  private enqueueGoalSignal(input: DesktopTaskGoalSignal): Promise<void> {
     const previous = this.activeWakes.get(input.threadId) ?? Promise.resolve();
     const wake = previous
       .catch(() => undefined)
-      .then(() => this.persistAndWake(input))
+      .then(() => this.persistAndDeliver(input))
       .finally(() => {
         if (this.activeWakes.get(input.threadId) === wake) this.activeWakes.delete(input.threadId);
       });
@@ -142,9 +163,9 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         continue;
       }
       try {
-        const input = JSON.parse(raw) as DesktopTaskActivationInput;
-        if (!isActivationInput(input)) throw new Error('Invalid pending ChatGPT Desktop wake record');
-        await this.wake(input);
+        const input = parseGoalSignal(JSON.parse(raw));
+        if (!input) throw new Error('Invalid pending ChatGPT Desktop goal signal');
+        await this.deliverGoalSignal(input);
         await this.clearPendingWake(threadId);
       } catch {
         // Keep the durable record for the next bounded recovery pass.
@@ -224,19 +245,27 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     return { status: 'created', threadId };
   }
 
-  private async persistAndWake(input: DesktopTaskActivationInput): Promise<void> {
+  private async persistAndDeliver(input: DesktopTaskGoalSignal): Promise<void> {
     if (this.redis) {
       await this.redis.set(this.pendingWakeKey(input.threadId), JSON.stringify(input));
       await this.redis.sadd(PENDING_WAKE_SET, input.threadId);
     }
     try {
-      await this.wake(input);
+      await this.deliverGoalSignal(input);
       await this.clearPendingWake(input.threadId);
     } catch (error) {
       // Review consensus is already committed. A temporary Desktop/app-server
       // failure must leave a recoverable wake instead of rolling consensus back.
       if (!this.redis) throw error;
     }
+  }
+
+  private async deliverGoalSignal(input: DesktopTaskGoalSignal): Promise<void> {
+    if (input.kind === 'pause') {
+      await this.pauseGoal(input);
+      return;
+    }
+    await this.wake(input);
   }
 
   /**
@@ -254,6 +283,16 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       });
     });
     await this.openThread(input.threadId);
+  }
+
+  /** Stop the durable goal from creating another turn while Cat Cafe reviews. */
+  private async pauseGoal(input: DesktopTaskPauseInput): Promise<void> {
+    await this.withProtocol(input.sourcePath, `desktop-review-pause-${input.threadId}`, async (rpc) => {
+      await rpc.request('thread/goal/set', {
+        threadId: input.threadId,
+        status: 'paused',
+      });
+    });
   }
 
   private storageKey(projectId: string, backlogItemId: string): string {
@@ -419,9 +458,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-function isActivationInput(value: unknown): value is DesktopTaskActivationInput {
+function parseGoalSignal(value: unknown): DesktopTaskGoalSignal | null {
   const input = asRecord(value);
-  return (
-    typeof input?.threadId === 'string' && typeof input.sourcePath === 'string' && typeof input.objective === 'string'
-  );
+  if (typeof input?.threadId !== 'string' || typeof input.sourcePath !== 'string') return null;
+  if (input.kind === 'pause') return { kind: 'pause', threadId: input.threadId, sourcePath: input.sourcePath };
+  // Records written before goal pausing was introduced are activation records.
+  if ((input.kind === undefined || input.kind === 'activate') && typeof input.objective === 'string') {
+    return { kind: 'activate', threadId: input.threadId, sourcePath: input.sourcePath, objective: input.objective };
+  }
+  return null;
 }

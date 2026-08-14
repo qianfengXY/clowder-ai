@@ -22,6 +22,7 @@ describe(
     let reviewHubEnsureCount;
     let reviewDispatches;
     let desktopWakes;
+    let desktopPauses;
     let backlogItems;
     let connected = false;
 
@@ -135,6 +136,8 @@ describe(
       reviewHubEnsureCount = 0;
       reviewDispatches = [];
       desktopWakes = [];
+      desktopPauses = [];
+      service.desktopTaskLauncher = undefined;
       backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
         'external-project:*',
@@ -240,6 +243,9 @@ describe(
 
     test('claims the work for Desktop, fences a replaced chat, and creates one exact-SHA review round', async () => {
       const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        pause: async (input) => desktopPauses.push(input),
+      };
       const first = await service.connect({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -358,6 +364,9 @@ describe(
           },
         },
       ]);
+      assert.deepEqual(desktopPauses, [
+        { threadId: 'chat-2', sourcePath: '/Volumes/WorkSSD/example-worktree' },
+      ]);
 
       const round = await reviewRounds.readCurrentSafe({
         ownerUserId: 'owner-1',
@@ -384,6 +393,7 @@ describe(
       assert.equal(replayed.reviewRoundId, reported.reviewRoundId);
       assert.equal(replayed.managedWorkVersion, reported.managedWorkVersion);
       assert.equal(reviewDispatches.length, 2, 'the dispatcher receives a retry and deduplicates at message ingress');
+      assert.equal(desktopPauses.length, 2, 'an idempotent report keeps the durable goal paused');
     });
 
     test('returns only barrier-safe consensus findings in the Resume Packet', async () => {

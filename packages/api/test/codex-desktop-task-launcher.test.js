@@ -173,6 +173,31 @@ test('Review completion sets an active goal on the bound thread without resuming
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
+test('implementation report pauses the bound goal without opening or starting the thread', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  let session;
+  const opened = [];
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    sessionFactory: async () => {
+      session = new FakeNativeSession();
+      return session;
+    },
+    openThread: async (threadId) => opened.push(threadId),
+  });
+
+  await launcher.pause({ threadId: 'bound-thread-f006', sourcePath: '/work/traqen' });
+
+  assert.deepEqual(
+    session.writes.map((message) => message.method),
+    ['initialize', 'initialized', 'thread/goal/set'],
+  );
+  const goal = session.writes.find((message) => message.method === 'thread/goal/set');
+  assert.deepEqual(goal.params, { threadId: 'bound-thread-f006', status: 'paused' });
+  assert.deepEqual(opened, []);
+});
+
 test('failed Review goal delivery remains in the durable outbox and recovery reuses the same thread', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
@@ -215,7 +240,7 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
   assert.equal(
     values.get('desktop-development:native-wake:bound-thread-f006'),
-    JSON.stringify(activation),
+    JSON.stringify({ kind: 'activate', ...activation }),
   );
 
   fail = false;
