@@ -510,6 +510,12 @@ describe(
         now: 7_000,
       });
 
+      const legacyFindingsKey = `review-round:work-findings:${project.id}:${bundle.admission.workId}`;
+      const [legacyFindingRaw] = await redis.hvals(legacyFindingsKey);
+      const legacyFinding = JSON.parse(legacyFindingRaw);
+      delete legacyFinding.designRefs;
+      await redis.hset(legacyFindingsKey, legacyFinding.findingId, JSON.stringify(legacyFinding));
+
       packet = await service.readWork({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -522,6 +528,7 @@ describe(
         packet.openFindings.map((finding) => finding.summary),
         ['Consensus P1'],
       );
+      assert.deepEqual(packet.openFindings[0].designRefs, [`project-feature-plan:${project.id}:backlog-1`]);
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
       assert.deepEqual(packet.nextLegalActions, ['request_user_architecture_decision']);
       assert.equal(packet.phase, 'awaiting_architecture_decision');

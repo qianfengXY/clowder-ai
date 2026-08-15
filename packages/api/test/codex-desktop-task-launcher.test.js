@@ -299,6 +299,64 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
 });
 
+test('overlapping recovery passes deliver a pending Desktop turn only once', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const activation = {
+    kind: 'activate',
+    threadId: 'bound-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  };
+  const values = new Map([['desktop-development:native-wake:bound-thread-f006', JSON.stringify(activation)]]);
+  const sets = new Map([['desktop-development:pending-native-wakes', new Set(['bound-thread-f006'])]]);
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  let releaseDelivery;
+  const deliveryReleased = new Promise((resolve) => {
+    releaseDelivery = resolve;
+  });
+  let markDeliveryStarted;
+  const deliveryStarted = new Promise((resolve) => {
+    markDeliveryStarted = resolve;
+  });
+  let deliveryCount = 0;
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async () => {
+      deliveryCount += 1;
+      markDeliveryStarted();
+      await deliveryReleased;
+    },
+    openThread: async () => {},
+  });
+
+  const first = launcher.recoverPendingActivations();
+  await deliveryStarted;
+  const second = launcher.recoverPendingActivations();
+  releaseDelivery();
+  await Promise.all([first, second]);
+
+  assert.equal(deliveryCount, 1);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+});
+
 test('an IPC acknowledgement is not final until the Desktop turn is observable', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'

@@ -203,20 +203,34 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     if (!this.redis) return;
     const threadIds = await this.redis.smembers(PENDING_WAKE_SET);
     for (const threadId of threadIds) {
-      if (this.activeWakes.has(threadId)) continue;
-      const raw = await this.redis.get(this.pendingWakeKey(threadId));
-      if (!raw) {
-        await this.redis.srem(PENDING_WAKE_SET, threadId);
-        continue;
-      }
-      try {
-        const input = parseGoalSignal(JSON.parse(raw));
-        if (!input) throw new Error('Invalid pending ChatGPT Desktop goal signal');
-        await this.deliverGoalSignal(input);
-        await this.clearPendingWake(threadId);
-      } catch {
-        // Keep the durable record for the next bounded recovery pass.
-      }
+      await this.recoverPendingGoalSignal(threadId);
+    }
+  }
+
+  private recoverPendingGoalSignal(threadId: string): Promise<void> {
+    const existing = this.activeWakes.get(threadId);
+    if (existing) return existing;
+    const wake = this.deliverPendingGoalSignal(threadId).finally(() => {
+      if (this.activeWakes.get(threadId) === wake) this.activeWakes.delete(threadId);
+    });
+    this.activeWakes.set(threadId, wake);
+    return wake;
+  }
+
+  private async deliverPendingGoalSignal(threadId: string): Promise<void> {
+    if (!this.redis) return;
+    const raw = await this.redis.get(this.pendingWakeKey(threadId));
+    if (!raw) {
+      await this.redis.srem(PENDING_WAKE_SET, threadId);
+      return;
+    }
+    try {
+      const input = parseGoalSignal(JSON.parse(raw));
+      if (!input) throw new Error('Invalid pending ChatGPT Desktop goal signal');
+      await this.deliverGoalSignal(input);
+      await this.clearPendingWake(threadId);
+    } catch {
+      // Keep the durable record for the next bounded recovery pass.
     }
   }
 

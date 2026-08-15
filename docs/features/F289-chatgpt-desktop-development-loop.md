@@ -71,7 +71,7 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 - 每个 finding 必须携带非空 `designRefs`，并标记为 `plan_conformance` 或 `architecture_decision`。Reviewer 只能依据冻结方案判断实现偏差；安全、性能意见也必须引用方案依据，不得借 Review 引入个人偏好、方案外重构或新需求。
 - 严重架构问题只能作为 P1 `architecture_decision` finding 提交。Cat Café 暂停自动投递并要求用户选择“保持原方案”或“批准方案变更”；决定作为 managed-work evidence 持久化后才可继续。
 - 初始允许 attempt 1–15。第 15 次 Review 后仍有 open finding 时，Cat Café 进入 `awaiting_review_continuation`，由用户批准后再开放下一组 15 次；禁止后台无限唤醒 Desktop。
-- 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取，不把旧 P1 追溯解释为架构变更授权。
+- 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取，并把该功能实际绑定的方案会话作为唯一补充 `designRef`；不把旧 P1 追溯解释为架构变更授权，也不从 Review 证据猜测设计。
 
 ## Stateful Object Census
 

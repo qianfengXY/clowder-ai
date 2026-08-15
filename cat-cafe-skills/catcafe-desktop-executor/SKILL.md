@@ -112,6 +112,7 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   findings，补测试，提交新 SHA，再次 report。
 - 只实现 `scope=plan_conformance` 且带权威 `designRefs` 的 finding；经用户裁决的架构 finding 必须严格服从
   Cat Café 记录的决定。禁止把 Review 中新增的个人偏好、方案外重构或需求扩张带入实现。
+- 对启用该约束前已落库、缺少 `designRefs` 的历史 finding，服务端只会补入该功能实际绑定的权威方案会话；执行端仍必须先读取该方案，不能自行猜测设计意图。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
 - 每个新 SHA 都必须开启完整的新 ReviewRound；旧 SHA 的批准不能沿用。
 

@@ -980,6 +980,18 @@ export class DesktopDevelopmentLoopService {
     if (!session || session.attemptId !== input.attemptId) {
       throw new Error('Desktop session binding not found for this work attempt');
     }
+    const legacyPlanThreadId = (review?.findings ?? []).some(
+      (finding) => finding.status === 'open' && finding.designRefs.length === 0,
+    )
+      ? (
+          await this.reviewHubs.ensureForFeature(
+            input.projectId,
+            managed.admission.producerRef,
+            'plan',
+            input.ownerUserId,
+          )
+        ).threadId
+      : null;
     const architectureDecisionIds = new Set(
       managed.evidence.flatMap((evidence) =>
         evidence.kind === 'architecture_decision_recorded' && evidence.exactSha === review?.round.exactSha
@@ -994,7 +1006,10 @@ export class DesktopDevelopmentLoopService {
         severity: finding.severity,
         summary: finding.title,
         evidenceRefs: finding.evidence,
-        designRefs: finding.designRefs,
+        // Findings created before designRefs became mandatory are anchored to
+        // this feature's authoritative plan thread at the projection boundary.
+        // New Review writes remain strict and must supply their own references.
+        designRefs: resumeDesignRefs(finding.designRefs, legacyPlanThreadId),
         scope: finding.scope,
         architectureDecisionRecorded: architectureDecisionIds.has(finding.findingId),
         status: 'open' as const,
@@ -1233,6 +1248,12 @@ export class DesktopDevelopmentLoopService {
       );
     }
   }
+}
+
+function resumeDesignRefs(designRefs: readonly string[], legacyPlanThreadId: string | null): readonly string[] {
+  if (designRefs.length > 0) return designRefs;
+  if (!legacyPlanThreadId) throw new Error('Legacy Review finding is missing its authoritative plan thread');
+  return [legacyPlanThreadId];
 }
 
 interface DesktopDevelopmentStateInput {
