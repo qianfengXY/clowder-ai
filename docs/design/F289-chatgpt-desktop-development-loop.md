@@ -134,7 +134,9 @@ by 15 attempts. Both decisions are append-only managed-work evidence and therefo
 
 Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
 the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible
-inside an actual turn; goal metadata alone cannot satisfy confirmation. Retry reuses the same message ID.
+inside an actual turn; goal metadata alone cannot satisfy confirmation. If the bound task is dormant and has no IPC
+owner, Cat Café opens that same task and performs bounded owner-discovery retries. It never creates a replacement task,
+and every retry reuses the same message ID.
 
 ## Merge rollout state machine
 

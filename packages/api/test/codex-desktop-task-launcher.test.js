@@ -185,6 +185,34 @@ test('Review completion forwards one visible turn to the current Desktop owner',
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
+test('Review completion opens a dormant bound task and retries owner discovery', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const opened = [];
+  const messageIds = [];
+  let sends = 0;
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async (_threadId, _objective, clientUserMessageId) => {
+      sends += 1;
+      messageIds.push(clientUserMessageId);
+      if (sends === 1) throw new Error('thread-owner-discovery failed: "no-client-found"');
+    },
+    openThread: async (threadId) => opened.push(threadId),
+  });
+
+  await launcher.activate({
+    threadId: 'dormant-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  });
+
+  assert.equal(sends, 2);
+  assert.equal(messageIds[0], messageIds[1]);
+  assert.deepEqual(opened, ['dormant-thread-f006', 'dormant-thread-f006']);
+});
+
 test('implementation report parks the goal and tells the owner turn to complete it', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'

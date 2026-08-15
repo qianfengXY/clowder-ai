@@ -19,6 +19,8 @@ const DEFAULT_RECOVERY_INTERVAL_MS = 30_000;
 const CHATGPT_CODEX_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex';
 const DESKTOP_IPC_TIMEOUT_MS = 15_000;
 const MAX_DESKTOP_IPC_FRAME_BYTES = 16 * 1024 * 1024;
+const DESKTOP_OWNER_DISCOVERY_RETRIES = 12;
+const DESKTOP_OWNER_DISCOVERY_RETRY_MS = 250;
 
 export interface DesktopTaskLaunchInput {
   readonly projectId: string;
@@ -324,13 +326,43 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         tokenBudget: null,
       });
     });
-    await this.sendDesktopTurn(input.threadId, input.objective, clientUserMessageId);
+    await this.sendDesktopTurnToOwner(input.threadId, input.objective, clientUserMessageId);
     if (!(await this.verifyDesktopTurn(input.threadId, input.sourcePath, input.objective, clientUserMessageId))) {
       throw new Error('ChatGPT Desktop acknowledged the Review notification but the turn was not persisted');
     }
     // Delivery already succeeded. A focus failure must not retain the outbox and
     // duplicate the turn on recovery.
     await this.openThread(input.threadId).catch(() => undefined);
+  }
+
+  private async sendDesktopTurnToOwner(
+    threadId: string,
+    objective: string,
+    clientUserMessageId: string,
+  ): Promise<void> {
+    try {
+      await this.sendDesktopTurn(threadId, objective, clientUserMessageId);
+      return;
+    } catch (error) {
+      if (!isDesktopOwnerUnavailable(error)) throw error;
+    }
+
+    // A dormant task has no IPC owner until ChatGPT loads it. Open the same
+    // bound task (never a replacement), then give its window a bounded period
+    // to register before retrying the deterministic message id.
+    await this.openThread(threadId);
+    let lastError: unknown = new Error(`No ChatGPT Desktop window owns bound thread ${threadId}`);
+    for (let retry = 0; retry < DESKTOP_OWNER_DISCOVERY_RETRIES; retry += 1) {
+      await wait(DESKTOP_OWNER_DISCOVERY_RETRY_MS);
+      try {
+        await this.sendDesktopTurn(threadId, objective, clientUserMessageId);
+        return;
+      } catch (error) {
+        if (!isDesktopOwnerUnavailable(error)) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   /** Stop the durable goal from creating another turn while Cat Cafe reviews. */
@@ -735,6 +767,14 @@ function resolveChatGptCodexCommand(): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function isDesktopOwnerUnavailable(error: unknown): boolean {
+  return /no-client-found|no chatgpt desktop window owns bound thread/i.test(String(error));
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function parseGoalSignal(value: unknown): DesktopTaskGoalSignal | null {

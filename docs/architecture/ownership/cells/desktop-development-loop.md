@@ -50,7 +50,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 6. Chat disappearance never expires the binding and never deletes work, ReviewRound, evidence or pilot state.
 7. Missing F275/F253/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers, and never falls through to F211 by impersonating a Cat session.
 8. A changes-requested round cannot start attempt 16/31/... without the matching user continuation evidence, and cannot pass an unresolved architecture-decision finding without a persisted user decision.
-9. A Desktop wake remains in the durable outbox until the deterministic delivery ID or objective is observable in an actual bound-task turn; IPC acknowledgement or goal metadata alone is insufficient.
+9. A Desktop wake remains in the durable outbox until the deterministic delivery ID or objective is observable in an actual bound-task turn; IPC acknowledgement or goal metadata alone is insufficient. A dormant binding is opened in place with bounded owner-discovery retry and is never replaced.
 
 ## Extend By
 
