@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
@@ -69,7 +69,13 @@ interface DesktopTaskLauncherOptions {
   readonly sessionFactory?: AgentCarrierSessionFactory;
   readonly goalSessionFactory?: AgentCarrierSessionFactory;
   readonly openThread?: (threadId: string) => Promise<void>;
-  readonly sendDesktopTurn?: (threadId: string, objective: string) => Promise<void>;
+  readonly sendDesktopTurn?: (threadId: string, objective: string, clientUserMessageId: string) => Promise<void>;
+  readonly verifyDesktopTurn?: (
+    threadId: string,
+    sourcePath: string,
+    objective: string,
+    clientUserMessageId: string,
+  ) => Promise<boolean>;
   readonly stopDesktopTurn?: (threadId: string, sourcePath: string) => Promise<void>;
   readonly daemonSocketPath?: string;
   readonly desktopIpcSocketPath?: string;
@@ -107,7 +113,13 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
   private readonly sessionFactory: AgentCarrierSessionFactory;
   private readonly goalSessionFactory: AgentCarrierSessionFactory;
   private readonly openThread: (threadId: string) => Promise<void>;
-  private readonly sendDesktopTurn: (threadId: string, objective: string) => Promise<void>;
+  private readonly sendDesktopTurn: (threadId: string, objective: string, clientUserMessageId: string) => Promise<void>;
+  private readonly verifyDesktopTurn: (
+    threadId: string,
+    sourcePath: string,
+    objective: string,
+    clientUserMessageId: string,
+  ) => Promise<boolean>;
   private readonly stopDesktopTurn: (threadId: string, sourcePath: string) => Promise<void>;
   private readonly daemonSocketPath: string;
   private readonly command: string;
@@ -123,7 +135,14 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     const desktopIpcSocketPath = options.desktopIpcSocketPath ?? DEFAULT_DESKTOP_IPC_SOCKET;
     this.sendDesktopTurn =
       options.sendDesktopTurn ??
-      (async (threadId, objective) => sendChatGptDesktopTurn(desktopIpcSocketPath, threadId, objective));
+      (async (threadId, objective, clientUserMessageId) =>
+        sendChatGptDesktopTurn(desktopIpcSocketPath, threadId, objective, clientUserMessageId));
+    this.verifyDesktopTurn =
+      options.verifyDesktopTurn ??
+      (options.sendDesktopTurn
+        ? async () => true
+        : async (threadId, sourcePath, objective, clientUserMessageId) =>
+            this.desktopTurnExists(threadId, sourcePath, objective, clientUserMessageId));
     this.stopDesktopTurn =
       options.stopDesktopTurn ??
       (async (threadId, sourcePath) => steerChatGptDesktopTurnToStop(desktopIpcSocketPath, threadId, sourcePath));
@@ -296,6 +315,7 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
 
   /** Ask the current Desktop owner to start one turn in the bound thread. */
   private async wake(input: DesktopTaskActivationInput): Promise<void> {
+    const clientUserMessageId = deterministicDesktopTurnMessageId(input.threadId, input.objective);
     await this.withGoalProtocol(input.sourcePath, `desktop-review-goal-${input.threadId}`, async (rpc) => {
       await rpc.request('thread/goal/set', {
         threadId: input.threadId,
@@ -304,7 +324,10 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
         tokenBudget: null,
       });
     });
-    await this.sendDesktopTurn(input.threadId, input.objective);
+    await this.sendDesktopTurn(input.threadId, input.objective, clientUserMessageId);
+    if (!(await this.verifyDesktopTurn(input.threadId, input.sourcePath, input.objective, clientUserMessageId))) {
+      throw new Error('ChatGPT Desktop acknowledged the Review notification but the turn was not persisted');
+    }
     // Delivery already succeeded. A focus failure must not retain the outbox and
     // duplicate the turn on recovery.
     await this.openThread(input.threadId).catch(() => undefined);
@@ -379,6 +402,21 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     } catch (error) {
       throw new Error(`Unable to validate the existing ChatGPT Desktop task: ${String(error)}`);
     }
+  }
+
+  private async desktopTurnExists(
+    threadId: string,
+    sourcePath: string,
+    objective: string,
+    clientUserMessageId: string,
+  ): Promise<boolean> {
+    return this.withProtocol(sourcePath, `desktop-review-verify-${threadId}`, async (rpc) => {
+      const result = await rpc.request('thread/read', { threadId, includeTurns: true });
+      const thread = asRecord(asRecord(result)?.thread);
+      const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+      const serialized = JSON.stringify(turns);
+      return serialized.includes(clientUserMessageId) || serialized.includes(objective);
+    });
   }
 
   private async withProtocol<T>(
@@ -464,12 +502,25 @@ export async function sendChatGptDesktopTurn(
   socketPath: string,
   threadId: string,
   objective: string,
+  clientUserMessageId = deterministicDesktopTurnMessageId(threadId, objective),
 ): Promise<void> {
   await sendChatGptDesktopOwnerRequest(socketPath, threadId, 'thread-follower-start-turn', {
     conversationId: threadId,
-    turnStartParams: { input: [{ type: 'text', text: objective }] },
+    turnStartParams: { input: [{ type: 'text', text: objective }], clientUserMessageId },
     mcpAppModelContextAttachments: [],
   });
+}
+
+export function deterministicDesktopTurnMessageId(threadId: string, objective: string): string {
+  const hex = createHash('sha256')
+    .update(`cat-cafe-desktop-turn:${threadId}:${objective}`)
+    .digest('hex')
+    .slice(0, 32)
+    .split('');
+  hex[12] = '5';
+  hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16] ?? '0', 16) % 4] ?? '8';
+  const value = hex.join('');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
 }
 
 export async function steerChatGptDesktopTurnToStop(
@@ -649,6 +700,7 @@ export function buildReviewCompletionObjective(input: {
   readonly reviewRoundId: string;
   readonly exactSha: string;
   readonly runtimeSessionId: string;
+  readonly operatorDecisions?: readonly string[];
 }): string {
   return [
     `[Review 系统消息] ${input.projectName} · ${input.featureId} · ${input.featureTitle}`,
@@ -659,6 +711,9 @@ export function buildReviewCompletionObjective(input: {
     `reviewRoundId：${input.reviewRoundId}`,
     `被检视的精确 SHA：${input.exactSha}`,
     `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
+    ...(input.operatorDecisions?.length
+      ? ['用户已在 Cat Café 作出的架构决策：', ...input.operatorDecisions.map((decision) => `- ${decision}`)]
+      : []),
     '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
     '若需要修复，先在这个原窗口取得递增的新 attempt，再完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
     '这是一个单次通知 turn，durable Goal 保持非 active；本轮结束前将 Goal 标为 complete，禁止自动等待或续跑。',

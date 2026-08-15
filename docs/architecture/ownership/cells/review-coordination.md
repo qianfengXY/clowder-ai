@@ -40,6 +40,7 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 5. Only the designated recorder can publish consensus, and only after every reviewer finishes cross-review.
 6. Approval requires green checks and zero open findings across the work. A new exact-SHA round makes older approval non-current without deleting history.
 7. Round, draft, receipt, index and finding records default to TTL=0. A visible thread/chat deletion never deletes them.
+8. Every consensus finding carries non-empty frozen-design references and an explicit `plan_conformance` or `architecture_decision` scope. Review cannot silently introduce out-of-plan work; serious architecture conflicts are escalated to the F289 user-decision gate.
 
 ## Extend By
 
@@ -56,4 +57,4 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 
 ## Static Scan Hints
 
-Watch for `ReviewRound`, `ReviewPrivateDraft`, `ReviewConsensusFinding`, `review-round:`, exact-SHA normalization, reviewer/author identity checks, barrier reads, and any alternative round/finding ledger under F289.
+Watch for `ReviewRound`, `ReviewPrivateDraft`, `ReviewConsensusFinding`, `designRefs`, `architecture_decision`, `review-round:`, exact-SHA normalization, reviewer/author identity checks, barrier reads, and any alternative round/finding ledger under F289.

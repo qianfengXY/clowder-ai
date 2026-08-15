@@ -70,6 +70,19 @@ export type ManagedWorkEvidenceInput =
       readonly bindingEpoch: number;
       readonly confirmedByUserId: string;
     }
+  | {
+      readonly kind: 'review_continuation_approved';
+      readonly exactSha: string;
+      readonly approvedThroughAttemptNumber: number;
+      readonly approvedByUserId: string;
+    }
+  | {
+      readonly kind: 'architecture_decision_recorded';
+      readonly exactSha: string;
+      readonly findingId: string;
+      readonly decision: 'keep_original_plan' | 'approve_plan_change';
+      readonly decidedByUserId: string;
+    }
   | { readonly kind: 'merged'; readonly exactSha: string; readonly mergeCommitSha: string }
   | { readonly kind: 'acceptance_recorded'; readonly exactSha: string; readonly accepted: boolean }
   | { readonly kind: 'work_rejected'; readonly exactSha: string; readonly reason: string };

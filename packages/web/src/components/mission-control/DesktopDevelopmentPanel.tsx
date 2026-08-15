@@ -40,6 +40,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const { projects, setProjects } = useExternalProjectStore();
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
+  const [reviewDecisionKey, setReviewDecisionKey] = useState<string | null>(null);
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
@@ -197,6 +198,68 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       setStatus(error instanceof Error ? error.message : '无法记录最终验收');
     } finally {
       setAcceptingWorkId(null);
+    }
+  };
+
+  const approveReviewContinuation = async (work: DesktopDevelopmentResumePacket) => {
+    setReviewDecisionKey(`${work.workId}:continue`);
+    setStatus(null);
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${project.id}/development-loop/works/${work.workId}/review-continuation`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            protocolVersion: work.protocolVersion,
+            attemptId: work.attemptId,
+            expectedManagedWorkVersion: work.managedWorkVersion,
+            idempotencyKey: `review-continuation-${work.attemptId}`,
+          }),
+        },
+      );
+      const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
+      if (!response.ok || body.error) throw new Error(body.error ?? '无法批准继续 Review');
+      setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
+      setStatus(`已批准继续 Review，新的上限为 Attempt #${body.reviewContinuationApprovedThroughAttempt}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法批准继续 Review');
+    } finally {
+      setReviewDecisionKey(null);
+    }
+  };
+
+  const recordArchitectureDecision = async (
+    work: DesktopDevelopmentResumePacket,
+    findingId: string,
+    decision: 'keep_original_plan' | 'approve_plan_change',
+  ) => {
+    setReviewDecisionKey(`${work.workId}:${findingId}`);
+    setStatus(null);
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${project.id}/development-loop/works/${work.workId}/architecture-decision`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            protocolVersion: work.protocolVersion,
+            attemptId: work.attemptId,
+            expectedManagedWorkVersion: work.managedWorkVersion,
+            findingId,
+            decision,
+            idempotencyKey: `architecture-decision-${work.attemptId}-${findingId}`,
+          }),
+        },
+      );
+      const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
+      if (!response.ok || body.error) throw new Error(body.error ?? '无法记录架构决策');
+      setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
+      setStatus(decision === 'keep_original_plan' ? '已决定保持原方案' : '已批准本项方案变更');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法记录架构决策');
+    } finally {
+      setReviewDecisionKey(null);
     }
   };
 
@@ -393,6 +456,59 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               {work && work.openFindings.length > 0 && (
                 <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
               )}
+              {work?.architectureDecisionPending && (
+                <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
+                  <p className="text-xs font-medium text-cafe">重大架构问题需要你的决策</p>
+                  {work.openFindings
+                    .filter(
+                      (finding) => finding.scope === 'architecture_decision' && !finding.architectureDecisionRecorded,
+                    )
+                    .map((finding) => (
+                      <div key={finding.findingId} className="space-y-2 border-t border-[var(--console-hover-bg)] pt-2">
+                        <p className="text-xs text-cafe-secondary">
+                          {finding.severity} · {finding.summary}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void recordArchitectureDecision(work, finding.findingId, 'keep_original_plan')
+                            }
+                            disabled={reviewDecisionKey !== null}
+                            className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+                          >
+                            保持原方案
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void recordArchitectureDecision(work, finding.findingId, 'approve_plan_change')
+                            }
+                            disabled={reviewDecisionKey !== null}
+                            className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                          >
+                            批准方案变更
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+              {work?.reviewContinuationPending && (
+                <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3">
+                  <p className="text-xs text-cafe-secondary">
+                    已达到本组 {work.reviewAttemptLimit} 次 Review 上限。只有你批准后，才会继续下一组 Review。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void approveReviewContinuation(work)}
+                    disabled={reviewDecisionKey !== null}
+                    className="mt-2 rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                  >
+                    批准继续 Review
+                  </button>
+                </div>
+              )}
               {work?.acceptancePending && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -457,6 +573,10 @@ function describeWorkState(work: DesktopDevelopmentResumePacket): string {
       return '可以合入';
     case 'fix_required':
       return '等待修复';
+    case 'awaiting_review_continuation':
+      return '已达 15 轮上限，等待你批准继续';
+    case 'awaiting_architecture_decision':
+      return '重大架构问题，等待你决策';
     case 'cross_review':
       return work.reviewPhase === 'consensus_ready' ? '等待共识' : '交叉检视中';
     case 'independent_review':

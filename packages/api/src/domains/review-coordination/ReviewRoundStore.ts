@@ -4,6 +4,7 @@ import type {
   ReviewConsensusFinding,
   ReviewConsensusVerdict,
   ReviewDraftVerdict,
+  ReviewFindingScope,
   ReviewPrivateDraft,
   ReviewRound,
   ReviewRoundSafeView,
@@ -49,6 +50,8 @@ export interface ReviewDraftFindingInput {
   readonly title: string;
   readonly details: string;
   readonly evidence?: readonly string[];
+  readonly designRefs: readonly string[];
+  readonly scope: ReviewFindingScope;
 }
 
 export interface SubmitIndependentDraftInput extends ReviewRoundIdentityInput {
@@ -72,6 +75,8 @@ export interface ConsensusFindingInput {
   readonly title: string;
   readonly details: string;
   readonly evidence?: readonly string[];
+  readonly designRefs: readonly string[];
+  readonly scope: ReviewFindingScope;
 }
 
 export interface PublishReviewConsensusInput extends ReviewRoundIdentityInput {

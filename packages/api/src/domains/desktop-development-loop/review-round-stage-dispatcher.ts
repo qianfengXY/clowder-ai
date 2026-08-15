@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import { buildFeatureWorkspaceThreadId, type CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { ReviewRoundDisplayContext } from './review-round-display-context.js';
 
@@ -246,6 +246,8 @@ function buildStageMessage(
   allHandles: ReadonlyMap<string, string>,
 ): string {
   const context = input.displayContext as ReviewRoundDisplayContext;
+  const planThreadId =
+    context.planThreadId || buildFeatureWorkspaceThreadId(input.projectId, context.backlogItemId, 'plan');
   const routing = routingHandles.join('\n');
   const roster = input.allReviewerCatIds ?? input.reviewerCatIds;
   const completed = new Set(input.completedReviewerCatIds ?? []);
@@ -264,6 +266,7 @@ function buildStageMessage(
     `阶段：${stageTitle(input.stage)}`,
     `检视对象：${context.projectName} 项目的 ${context.featureId}「${context.featureTitle}」`,
     `仓库：${context.repository}`,
+    `权威方案会话：${planThreadId}`,
     `实现尝试：Attempt #${context.attemptNumber}`,
     `精确提交：${input.exactSha}`,
     progressLine(input.stage, completedCount, roster.length),
@@ -305,8 +308,17 @@ function progressLine(stage: ReviewRoundDispatchStage, completed: number, total:
 }
 
 function stageInstructions(stage: ReviewRoundDispatchStage): string {
+  const planBoundary = [
+    '方案边界（强制）：',
+    '1. 先读取上方“权威方案会话”的已确认设计与验收条件；所有 finding 必须服务于该方案的正确实现。',
+    '2. 禁止把个人偏好、超出方案的重构或新增需求包装成 finding；安全与性能问题也必须引用方案中的约束、承诺或不变量。',
+    '3. 每条 finding 必须填写非空 designRefs，并标记 scope=plan_conformance。',
+    '4. 只有会迫使已确认方案发生重大架构变化的 P1 问题，才标记 scope=architecture_decision；不得给出越权改造结论，系统会暂停并申请用户决策。',
+  ].join('\n');
   if (stage === 'independent') {
     return [
+      planBoundary,
+      '',
       '请仅针对以上精确提交检视该项目功能：',
       '1. 独立检查实现、测试及该功能的验收条件。',
       '2. Barrier 开启前，不读取或推测其他 reviewer 的意见。',
@@ -317,6 +329,8 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
   }
   if (stage === 'cross_review') {
     return [
+      planBoundary,
+      '',
       '独立检视 Barrier 已开启。请读取本轮全部独立 Review 意见并交叉核验：',
       '1. 验证每条 finding 的事实和代码证据。',
       '2. 合并重复问题，指出不成立或证据不足的问题。',
@@ -326,6 +340,8 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
     ].join('\n');
   }
   return [
+    planBoundary,
+    '',
     '你是系统指定的共识记录者。请读取 barrier-safe Review 结果：',
     '1. 核验并合并仍然成立的 findings。',
     '2. 使用 cat_cafe_review_consensus_publish 发布该精确提交的最终 verdict。',
@@ -380,6 +396,7 @@ function assertDisplayContext(
     !value.repository.trim() ||
     !value.featureId.trim() ||
     !value.featureTitle.trim() ||
+    (value.planThreadId !== undefined && !value.planThreadId.trim()) ||
     !Number.isInteger(value.attemptNumber) ||
     value.attemptNumber < 1
   ) {

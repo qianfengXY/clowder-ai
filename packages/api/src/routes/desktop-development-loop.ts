@@ -105,6 +105,20 @@ const acceptanceSchema = z
     idempotencyKey: idSchema,
   })
   .strict();
+const reviewContinuationSchema = z
+  .object({
+    protocolVersion: protocolSchema,
+    attemptId: idSchema,
+    expectedManagedWorkVersion: z.number().int().positive(),
+    idempotencyKey: idSchema,
+  })
+  .strict();
+const architectureDecisionSchema = reviewContinuationSchema
+  .extend({
+    findingId: idSchema,
+    decision: z.enum(['keep_original_plan', 'approve_plan_change']),
+  })
+  .strict();
 
 export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopmentLoopRoutesOptions> = async (
   app,
@@ -398,6 +412,56 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
           ownerUserId,
         });
         return reply.send({ reviewRound, replayed: true });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/works/:workId/review-continuation',
+    async (request, reply) => {
+      const ownerUserId = requireUserId(request, reply);
+      if (!ownerUserId) return;
+      if (!desktopDevelopmentLoopService) {
+        return reply.status(503).send({ error: 'Desktop development loop is unavailable' });
+      }
+      const params = z.object({ projectId: idSchema, workId: idSchema }).strict().safeParse(request.params);
+      const body = reviewContinuationSchema.safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        return reply.send(
+          await desktopDevelopmentLoopService.approveReviewContinuation({
+            ...params.data,
+            ...body.data,
+            ownerUserId,
+          }),
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/works/:workId/architecture-decision',
+    async (request, reply) => {
+      const ownerUserId = requireUserId(request, reply);
+      if (!ownerUserId) return;
+      if (!desktopDevelopmentLoopService) {
+        return reply.status(503).send({ error: 'Desktop development loop is unavailable' });
+      }
+      const params = z.object({ projectId: idSchema, workId: idSchema }).strict().safeParse(request.params);
+      const body = architectureDecisionSchema.safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        return reply.send(
+          await desktopDevelopmentLoopService.recordArchitectureDecision({
+            ...params.data,
+            ...body.data,
+            ownerUserId,
+          }),
+        );
       } catch (error) {
         return sendError(reply, error);
       }

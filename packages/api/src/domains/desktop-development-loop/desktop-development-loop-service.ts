@@ -6,6 +6,7 @@ import {
   CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
   DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
   DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
+  DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
   type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
   type DesktopSessionBinding,
@@ -24,8 +25,9 @@ import { VersionConflictError } from '../cats/services/stores/ports/WorkflowSopS
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
-import type { DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
+import { buildReviewCompletionObjective, type DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import { featureTitleForReview } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 import { verifyWorkspacePath, type WorkspacePathVerifier } from './workspace-path-verifier.js';
@@ -105,6 +107,22 @@ export interface RecordDesktopAcceptanceInput {
   readonly accepted: boolean;
   readonly idempotencyKey: string;
   readonly now?: number;
+}
+
+export interface ApproveReviewContinuationInput {
+  readonly protocolVersion: number;
+  readonly ownerUserId: string;
+  readonly projectId: string;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly expectedManagedWorkVersion: number;
+  readonly idempotencyKey: string;
+  readonly now?: number;
+}
+
+export interface RecordArchitectureDecisionInput extends ApproveReviewContinuationInput {
+  readonly findingId: string;
+  readonly decision: 'keep_original_plan' | 'approve_plan_change';
 }
 
 export interface ReadDesktopWorkInput {
@@ -522,6 +540,19 @@ export class DesktopDevelopmentLoopService {
       review.currentForWork &&
       review.consensus?.verdict === 'changes_requested';
     if (startsFixAttempt) {
+      const gate = deriveReviewLoopGate({
+        attemptNumber: snapshot.attempt.attemptNumber,
+        exactSha: review.round.exactSha,
+        findings: review.findings,
+        evidence: snapshot.evidence,
+      });
+      if (!canContinueReviewLoop(gate)) {
+        throw new Error(
+          gate.architectureDecisionPending
+            ? 'Review is awaiting a user architecture decision in Cat Cafe'
+            : 'Review reached its 15-attempt limit and is awaiting user continuation approval in Cat Cafe',
+        );
+      }
       snapshot = await this.managedWork.createNextAttempt({
         consumerId: CONSUMER_ID,
         ownerUserId: input.ownerUserId,
@@ -647,12 +678,10 @@ export class DesktopDevelopmentLoopService {
     if (!backlogItem) throw new Error('Review display context backlog item is unavailable');
     const featureId = featureIdForItem(backlogItem);
     if (!featureId) throw new Error('Review display context feature id is unavailable');
-    const reviewHub = await this.reviewHubs.ensureForFeature(
-      input.projectId,
-      managed.admission.producerRef,
-      'review',
-      input.ownerUserId,
-    );
+    const [planHub, reviewHub] = await Promise.all([
+      this.reviewHubs.ensureForFeature(input.projectId, managed.admission.producerRef, 'plan', input.ownerUserId),
+      this.reviewHubs.ensureForFeature(input.projectId, managed.admission.producerRef, 'review', input.ownerUserId),
+    ]);
     const round = await this.reviewRounds.createRound({
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
@@ -684,6 +713,7 @@ export class DesktopDevelopmentLoopService {
         featureId,
         featureTitle: featureTitleForReview(featureId, backlogItem.title),
         attemptNumber: managed.attempt.attemptNumber,
+        planThreadId: planHub.threadId,
       },
     });
 
@@ -844,6 +874,95 @@ export class DesktopDevelopmentLoopService {
     return this.readWork(input, terminal.version);
   }
 
+  async approveReviewContinuation(input: ApproveReviewContinuationInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const identity = this.managedIdentity(input);
+    const [managed, review] = await Promise.all([
+      this.managedWork.read(identity),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    this.assertReviewDecisionTarget(input.attemptId, managed, review);
+    const gate = deriveReviewLoopGate({
+      attemptNumber: managed.attempt.attemptNumber,
+      exactSha: review.round.exactSha,
+      findings: review.findings,
+      evidence: managed.evidence,
+    });
+    if (!gate.continuationPending) {
+      return this.readWork(input, managed.state.version);
+    }
+    const approvedThroughAttemptNumber = managed.attempt.attemptNumber + DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT;
+    const appended = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:review-continuation`,
+      evidence: {
+        kind: 'review_continuation_approved',
+        exactSha: review.round.exactSha,
+        approvedThroughAttemptNumber,
+        approvedByUserId: input.ownerUserId,
+      },
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+    const updated = await this.managedWork.read(identity);
+    await this.activateReviewCompletionIfReady(input, updated, review);
+    return this.readWork(input, appended.state.version);
+  }
+
+  async recordArchitectureDecision(input: RecordArchitectureDecisionInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const identity = this.managedIdentity(input);
+    const [managed, review] = await Promise.all([
+      this.managedWork.read(identity),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    this.assertReviewDecisionTarget(input.attemptId, managed, review);
+    const finding = review.findings.find(
+      (candidate) =>
+        candidate.findingId === input.findingId &&
+        candidate.status === 'open' &&
+        candidate.scope === 'architecture_decision',
+    );
+    if (!finding) throw new Error('Open architecture decision finding not found');
+    const existing = managed.evidence.find(
+      (evidence) =>
+        evidence.kind === 'architecture_decision_recorded' &&
+        evidence.findingId === input.findingId &&
+        evidence.exactSha === review.round.exactSha,
+    );
+    if (existing?.kind === 'architecture_decision_recorded') {
+      if (existing.decision !== input.decision)
+        throw new Error('Architecture decision conflicts with the recorded choice');
+      return this.readWork(input, managed.state.version);
+    }
+    const appended = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:architecture-decision`,
+      evidence: {
+        kind: 'architecture_decision_recorded',
+        exactSha: review.round.exactSha,
+        findingId: input.findingId,
+        decision: input.decision,
+        decidedByUserId: input.ownerUserId,
+      },
+      ...(input.now === undefined ? {} : { now: input.now }),
+    });
+    const updated = await this.managedWork.read(identity);
+    await this.activateReviewCompletionIfReady(input, updated, review);
+    return this.readWork(input, appended.state.version);
+  }
+
   async readWork(input: ReadDesktopWorkInput, knownManagedVersion?: number): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
@@ -861,6 +980,13 @@ export class DesktopDevelopmentLoopService {
     if (!session || session.attemptId !== input.attemptId) {
       throw new Error('Desktop session binding not found for this work attempt');
     }
+    const architectureDecisionIds = new Set(
+      managed.evidence.flatMap((evidence) =>
+        evidence.kind === 'architecture_decision_recorded' && evidence.exactSha === review?.round.exactSha
+          ? [evidence.findingId]
+          : [],
+      ),
+    );
     const openFindings = (review?.findings ?? [])
       .filter((finding) => finding.status === 'open')
       .map((finding) => ({
@@ -868,9 +994,18 @@ export class DesktopDevelopmentLoopService {
         severity: finding.severity,
         summary: finding.title,
         evidenceRefs: finding.evidence,
+        designRefs: finding.designRefs,
+        scope: finding.scope,
+        architectureDecisionRecorded: architectureDecisionIds.has(finding.findingId),
         status: 'open' as const,
       }));
     const exactSha = session.workspace.currentSha;
+    const reviewGate = deriveReviewLoopGate({
+      attemptNumber: managed.attempt.attemptNumber,
+      exactSha: review?.round.exactSha ?? exactSha,
+      findings: review?.findings ?? [],
+      evidence: managed.evidence,
+    });
     const mergeConfirmed = managed.evidence.some(
       (evidence) =>
         evidence.kind === 'merge_confirmed' &&
@@ -915,6 +1050,16 @@ export class DesktopDevelopmentLoopService {
       reviewRoundVersion: review?.round.version ?? null,
       reviewCurrentForWork: review?.currentForWork ?? false,
       openFindings,
+      reviewAttemptLimit: DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
+      reviewContinuationApprovedThroughAttempt: reviewGate.approvedThroughAttempt,
+      reviewContinuationPending:
+        review?.round.phase === 'complete' &&
+        review.consensus?.verdict === 'changes_requested' &&
+        reviewGate.continuationPending,
+      architectureDecisionPending:
+        review?.round.phase === 'complete' &&
+        review.consensus?.verdict === 'changes_requested' &&
+        reviewGate.architectureDecisionPending,
       nextLegalActions: derived.nextLegalActions,
     };
   }
@@ -937,6 +1082,76 @@ export class DesktopDevelopmentLoopService {
     }
     if (requireActiveBinding && session.status !== 'active') throw new Error('Desktop session binding is not active');
     return session;
+  }
+
+  private assertReviewDecisionTarget(
+    attemptId: string,
+    managed: ManagedWorkConsumerSnapshot,
+    review: ReviewRoundSafeView | null,
+  ): asserts review is ReviewRoundSafeView {
+    if (
+      managed.state.lifecycle !== 'active' ||
+      managed.attempt.attemptId !== attemptId ||
+      managed.state.currentAttemptId !== attemptId ||
+      !review ||
+      !review.currentForWork ||
+      review.round.attemptId !== attemptId ||
+      review.round.phase !== 'complete' ||
+      review.consensus?.verdict !== 'changes_requested'
+    ) {
+      throw new Error('Review decision requires the current completed changes-requested round');
+    }
+  }
+
+  private async activateReviewCompletionIfReady(
+    input: Pick<ApproveReviewContinuationInput, 'ownerUserId' | 'projectId' | 'workId' | 'attemptId'>,
+    managed: ManagedWorkConsumerSnapshot,
+    review: ReviewRoundSafeView,
+  ): Promise<void> {
+    const gate = deriveReviewLoopGate({
+      attemptNumber: managed.attempt.attemptNumber,
+      exactSha: review.round.exactSha,
+      findings: review.findings,
+      evidence: managed.evidence,
+    });
+    if (!canContinueReviewLoop(gate) || !this.desktopTaskLauncher) return;
+    const session = await this.sessions.getCurrent(input.projectId, input.workId);
+    if (!session?.chatRef || session.attemptId !== input.attemptId) return;
+    const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const item = (await this.backlogStore.listByUser(input.ownerUserId)).find(
+      (candidate) => candidate.id === managed.admission.producerRef && candidate.projectId === input.projectId,
+    );
+    if (!item) throw new Error('Review display context backlog item is unavailable');
+    const featureId = featureIdForItem(item);
+    if (!featureId) throw new Error('Review display context feature id is unavailable');
+    const operatorDecisions = managed.evidence
+      .filter(
+        (evidence) =>
+          evidence.kind === 'architecture_decision_recorded' &&
+          evidence.exactSha === review.round.exactSha &&
+          review.findings.some((finding) => finding.findingId === evidence.findingId),
+      )
+      .map((evidence) =>
+        evidence.kind === 'architecture_decision_recorded' ? `${evidence.findingId}: ${evidence.decision}` : '',
+      )
+      .filter(Boolean);
+    await this.desktopTaskLauncher.activate({
+      threadId: session.chatRef,
+      sourcePath: session.workspace.worktreePath,
+      objective: buildReviewCompletionObjective({
+        projectName: project.name,
+        featureId,
+        featureTitle: featureTitleForReview(featureId, item.title),
+        attemptNumber: managed.attempt.attemptNumber,
+        projectId: input.projectId,
+        workId: input.workId,
+        attemptId: input.attemptId,
+        reviewRoundId: review.round.roundId,
+        exactSha: review.round.exactSha,
+        runtimeSessionId: session.runtimeSessionId,
+        operatorDecisions,
+      }),
+    });
   }
 
   private managedIdentity(input: { ownerUserId: string; workId: string; attemptId: string }): {
@@ -1076,6 +1291,18 @@ function deriveCompletedReviewState(input: DesktopDevelopmentStateInput): Deskto
   const review = input.review;
   if (!review || review.round.phase !== 'complete') return workspaceImplementationState(input.session.workspace);
   if (review.consensus?.verdict === 'changes_requested') {
+    const gate = deriveReviewLoopGate({
+      attemptNumber: input.managed.attempt.attemptNumber,
+      exactSha: review.round.exactSha,
+      findings: review.findings,
+      evidence: input.managed.evidence,
+    });
+    if (gate.architectureDecisionPending) {
+      return { phase: 'awaiting_architecture_decision', nextLegalActions: ['request_user_architecture_decision'] };
+    }
+    if (gate.continuationPending) {
+      return { phase: 'awaiting_review_continuation', nextLegalActions: ['request_review_continuation_approval'] };
+    }
     return { phase: 'fix_required', nextLegalActions: ['start_fix_attempt'] };
   }
   if (review.consensus?.verdict !== 'approved' || !review.currentForWork) {

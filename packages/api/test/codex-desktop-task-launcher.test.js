@@ -11,12 +11,14 @@ class FakeNativeSession {
   writes = [];
   responses = [];
   waiters = [];
+  threadReadResult = { thread: { turns: [] } };
 
   async write(message) {
     this.writes.push(message);
     if (message.id === undefined) return;
     let result = {};
     if (message.method === 'thread/start') result = { thread: { id: 'native-thread-f006' } };
+    if (message.method === 'thread/read') result = this.threadReadResult;
     this.push({ id: message.id, result });
   }
 
@@ -179,9 +181,7 @@ test('Review completion forwards one visible turn to the current Desktop owner',
   assert.equal(goal.params.threadId, 'bound-thread-f006');
   assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
   assert.equal(goal.params.status, 'paused');
-  assert.deepEqual(delivered, [
-    { threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' },
-  ]);
+  assert.deepEqual(delivered, [{ threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' }]);
   assert.deepEqual(opened, ['bound-thread-f006']);
 });
 
@@ -265,12 +265,80 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
 
   fail = false;
   await launcher.recoverPendingActivations();
-  assert.deepEqual(delivered, [
-    { threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' },
-  ]);
+  assert.deepEqual(delivered, [{ threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' }]);
   assert.deepEqual(opened, ['bound-thread-f006']);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
   assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
+});
+
+test('an IPC acknowledgement is not final until the Desktop turn is observable', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map();
+  const sets = new Map();
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  const messageIds = [];
+  let observable = false;
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async (_threadId, _objective, clientUserMessageId) => messageIds.push(clientUserMessageId),
+    verifyDesktopTurn: async () => observable,
+  });
+  const activation = {
+    threadId: 'bound-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  };
+
+  await launcher.activate(activation);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
+
+  observable = true;
+  await launcher.recoverPendingActivations();
+  assert.equal(messageIds.length, 2);
+  assert.equal(messageIds[0], messageIds[1]);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+});
+
+test('Desktop turn verification ignores matching goal text outside actual turns', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const session = new FakeNativeSession();
+  const launcher = new CodexDesktopTaskLauncher(undefined, {
+    sessionFactory: async () => session,
+    recoveryIntervalMs: 0,
+  });
+  const objective = '[Review 系统消息] Traqen · F006';
+  const messageId = 'cat-cafe-review-message';
+
+  session.threadReadResult = { thread: { goal: { objective }, turns: [] } };
+  assert.equal(await launcher.desktopTurnExists('bound-thread-f006', '/work/traqen', objective, messageId), false);
+
+  session.threadReadResult = {
+    thread: {
+      goal: { objective },
+      turns: [{ items: [{ type: 'user_message', text: objective }], clientUserMessageId: messageId }],
+    },
+  };
+  assert.equal(await launcher.desktopTurnExists('bound-thread-f006', '/work/traqen', objective, messageId), true);
 });
 
 test('failed implementation stop steering remains in the outbox until the owner turn accepts it', async () => {
@@ -380,6 +448,10 @@ test('Desktop IPC discovers the owning window and asks it to start the turn', as
   assert.equal(requests[2].targetClientId, 'desktop-owner');
   assert.equal(requests[2].params.conversationId, 'bound-thread-f006');
   assert.equal(requests[2].params.turnStartParams.input[0].text, '[Review 系统消息] Traqen · F006');
+  assert.match(
+    requests[2].params.turnStartParams.clientUserMessageId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
   assert.equal(requests[5].targetClientId, 'desktop-owner');
   assert.equal(requests[5].params.restoreMessage.cwd, '/work/traqen');
   assert.match(requests[5].params.input[0].text, /update_goal/);

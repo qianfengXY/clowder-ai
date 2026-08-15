@@ -53,6 +53,9 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.match(requests[0].payload.content, /Traqen · F006 Workspace capability settings/);
     assert.match(requests[0].payload.content, /阶段：独立检视/);
     assert.match(requests[0].payload.content, /仓库：qianfengXY\/Traqen/);
+    assert.match(requests[0].payload.content, /权威方案会话：project-feature-plan:project-1:backlog-1/);
+    assert.match(requests[0].payload.content, /每条 finding 必须填写非空 designRefs/);
+    assert.match(requests[0].payload.content, /禁止把个人偏好、超出方案的重构或新增需求包装成 finding/);
     assert.match(requests[0].payload.content, /Attempt #3/);
     assert.doesNotMatch(requests[0].payload.content, /F289/);
     assert.match(requests[0].payload.content, /a{40}/);

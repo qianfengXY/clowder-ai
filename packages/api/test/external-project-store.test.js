@@ -187,11 +187,7 @@ describe('ExternalProjectStore', () => {
 
     const second = await store.recordAcceptedManualPilot(created.id, 'work-2');
     assert.equal(second.desktopDevelopment.successfulManualPilotCount, 2);
-    const automatic = await store.updateDesktopDevelopment(created.id, {
-      expectedVersion: second.desktopDevelopment.version,
-      mergeMode: 'automatic',
-    });
-    assert.equal(automatic.desktopDevelopment.mergeMode, 'automatic');
+    assert.equal(second.desktopDevelopment.mergeMode, 'automatic');
   });
 
   test('update() returns null for nonexistent id', async () => {

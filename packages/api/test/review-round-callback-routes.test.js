@@ -187,5 +187,17 @@ describe('F289 ReviewRound callback routes', () => {
       },
     });
     assert.equal(response.statusCode, 400);
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/review-rounds/round-1/draft',
+      headers,
+      payload: {
+        expectedDraftVersion: 0,
+        idempotencyKey: 'draft-without-plan-ref',
+        verdict: 'findings',
+        findings: [{ severity: 'P2', title: 'Unscoped suggestion', details: 'This has no plan authority.' }],
+      },
+    });
+    assert.equal(response.statusCode, 400);
   });
 });

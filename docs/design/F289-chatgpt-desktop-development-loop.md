@@ -124,6 +124,18 @@ server-side derivation, so clients never reverse-engineer lifecycle from action 
 idempotency key allocates exactly one next F275 attempt, rebinds the same Desktop chat, and returns
 `phase=implementing` without adding another MCP tool or state root.
 
+The retry path is bounded and plan-governed. Every consensus finding carries non-empty `designRefs` and an explicit
+scope. Ordinary findings use `plan_conformance`; reviewers may not introduce preferences, new requirements or
+out-of-plan refactors, and security/performance concerns still cite the frozen design. A serious architectural conflict
+uses P1 `architecture_decision` and pauses in `awaiting_architecture_decision` until the authenticated user records
+whether to keep the current design or approve a design change. Attempt 15 is the first continuation boundary; if it
+still ends with open findings, `awaiting_review_continuation` blocks attempt 16. Each user approval extends the ceiling
+by 15 attempts. Both decisions are append-only managed-work evidence and therefore survive restart and replay.
+
+Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
+the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible
+inside an actual turn; goal metadata alone cannot satisfy confirmation. Retry reuses the same message ID.
+
 ## Merge rollout state machine
 
 ```text
@@ -135,8 +147,7 @@ pilotCount 0/1
     -> accepted -> pilotCount + 1 (idempotent)
 
 pilotCount 2
-  -> auto-merge available (not enabled)
-  -> operator explicitly updates project policy
+  -> mergeMode atomically becomes automatic
   -> automatic merge allowed under the same SHA/review/check gates
 ```
 
@@ -193,8 +204,9 @@ Every write validates:
 | Session binding | permanent binding survives restart | two binds -> highest epoch | deleted chat -> Resume Packet | stale chat write denied |
 | F275 work/attempt | durable canonical IDs | next-attempt idempotency | continue same work | F289 fallback key absent |
 | ReviewRound | private drafts persist | barrier race atomic | latest safe projection | author/self/cross-project denied |
-| Pilot gate | accepted evidence persists | duplicate acceptance increments once | rejection starts new cycle | auto-merge before 2 denied |
+| Pilot gate | accepted evidence persists | duplicate acceptance increments once; second success flips policy once | rejection starts new cycle | auto-merge before 2 denied |
+| Review-loop gate | continuation/architecture evidence persists | duplicate decisions are idempotent; conflicts rejected | next 15-attempt block resumes same work/task | attempt 16/31/... and undecided architecture change denied |
 
 ## Human activation boundary
 
-Implementation may add routes, MCP tools and a Desktop executor skill. It does not edit ChatGPT/Codex runtime configuration, create credentials, alter approval policy, grant GitHub permissions or enable auto-merge. Those are explicit user actions after the local implementation and independent review are complete.
+Implementation may add routes, MCP tools and a Desktop executor skill. It does not edit ChatGPT/Codex runtime configuration, create credentials or grant GitHub permissions. The project policy automatically changes to auto-merge only after two persisted, user-approved manual merge plus final-acceptance pilots; no earlier activation is allowed.

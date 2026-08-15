@@ -1,6 +1,8 @@
+import { buildFeatureWorkspaceThreadId } from '@cat-cafe/shared';
 import type { IBacklogStore } from '../cats/services/stores/ports/BacklogStore.js';
 import type { IManagedWorkConsumerPort } from '../cats/services/stores/ports/ManagedWorkConsumerPort.js';
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
+import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -11,6 +13,7 @@ export interface ReviewRoundDisplayContext {
   readonly featureId: string;
   readonly featureTitle: string;
   readonly attemptNumber: number;
+  readonly planThreadId: string;
 }
 
 export interface ResolveReviewRoundDisplayContextInput {
@@ -29,6 +32,7 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
     private readonly externalProjects: Pick<ExternalProjectStore, 'getById'>,
     private readonly backlogStore: Pick<IBacklogStore, 'listByUser'>,
     private readonly managedWork: Pick<IManagedWorkConsumerPort, 'read'>,
+    private readonly reviewHubs?: Pick<ProjectReviewHubService, 'ensureForFeature'>,
   ) {}
 
   async resolve(input: ResolveReviewRoundDisplayContextInput): Promise<ReviewRoundDisplayContext> {
@@ -52,6 +56,9 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
     if (!item) throw new Error('Review display context backlog item is unavailable');
     const featureId = featureIdForReview(item.tags, item.title);
     if (!featureId) throw new Error('Review display context feature id is unavailable');
+    const planThreadId = this.reviewHubs
+      ? (await this.reviewHubs.ensureForFeature(input.projectId, backlogItemId, 'plan', input.ownerUserId)).threadId
+      : buildFeatureWorkspaceThreadId(input.projectId, backlogItemId, 'plan');
     return {
       projectName: project.name,
       repository: project.desktopDevelopment.repository.fullName,
@@ -59,6 +66,7 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
       featureId,
       featureTitle: featureTitleForReview(featureId, item.title),
       attemptNumber: managed.attempt.attemptNumber,
+      planThreadId,
     };
   }
 }

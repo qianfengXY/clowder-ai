@@ -27,8 +27,23 @@ const findingSchema = z
       .max(100)
       .optional()
       .describe('Optional exact file, line, test, command, or runtime evidence references.'),
+    designRefs: z
+      .array(z.string().min(1).max(2_000))
+      .min(1)
+      .max(100)
+      .describe('Required references to the approved feature plan or acceptance criteria that authorize this finding.'),
+    scope: z
+      .enum(['plan_conformance', 'architecture_decision'])
+      .describe(
+        'Use plan_conformance normally. Use architecture_decision only for a serious P1 architecture conflict that needs user approval.',
+      ),
   })
   .strict()
+  .superRefine((finding, context) => {
+    if (finding.scope === 'architecture_decision' && finding.severity !== 'P1') {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Architecture decisions must use P1 severity' });
+    }
+  })
   .describe('One severity-ranked review finding for the immutable exact SHA.');
 
 export const reviewRoundReadInputSchema = {
@@ -76,6 +91,8 @@ type FindingInput = {
   title: string;
   details: string;
   evidence?: string[];
+  designRefs: string[];
+  scope: 'plan_conformance' | 'architecture_decision';
 };
 
 type ReviewRoundReadInput = { roundId: string };

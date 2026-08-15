@@ -3,6 +3,7 @@ import type { CatId } from './ids.js';
 export const DESKTOP_DEVELOPMENT_PROTOCOL_VERSION = 1 as const;
 export const CHATGPT_DESKTOP_DEVELOPMENT_ACTOR = 'chatgpt-desktop-dev' as const;
 export const DESKTOP_DEVELOPMENT_REQUIRED_PILOTS = 2 as const;
+export const DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT = 15 as const;
 
 export type DesktopDevelopmentProtocolVersion = typeof DESKTOP_DEVELOPMENT_PROTOCOL_VERSION;
 export type DesktopDevelopmentActor = typeof CHATGPT_DESKTOP_DEVELOPMENT_ACTOR;
@@ -14,6 +15,8 @@ export type DesktopDevelopmentPhase =
   | 'independent_review'
   | 'cross_review'
   | 'fix_required'
+  | 'awaiting_review_continuation'
+  | 'awaiting_architecture_decision'
   | 'approved_for_merge'
   | 'awaiting_manual_merge_confirmation'
   | 'auto_merge_ready'
@@ -136,6 +139,9 @@ export interface BarrierSafeReviewFinding {
   readonly severity: 'P1' | 'P2' | 'P3';
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
+  readonly designRefs: readonly string[];
+  readonly scope: 'plan_conformance' | 'architecture_decision';
+  readonly architectureDecisionRecorded: boolean;
   readonly status: 'open' | 'closed';
 }
 
@@ -171,6 +177,10 @@ export interface DesktopDevelopmentResumePacket {
   readonly reviewRoundVersion: number | null;
   readonly reviewCurrentForWork: boolean;
   readonly openFindings: readonly BarrierSafeReviewFinding[];
+  readonly reviewAttemptLimit: number;
+  readonly reviewContinuationApprovedThroughAttempt: number;
+  readonly reviewContinuationPending: boolean;
+  readonly architectureDecisionPending: boolean;
   readonly nextLegalActions: readonly string[];
 }
 
@@ -334,6 +344,7 @@ export function recordAcceptedManualPilot(
   const nextCount = (binding.successfulManualPilotCount + 1) as 1 | 2;
   return {
     ...binding,
+    mergeMode: nextCount >= DESKTOP_DEVELOPMENT_REQUIRED_PILOTS ? 'automatic' : binding.mergeMode,
     successfulManualPilotCount: nextCount,
     successfulManualPilotWorkIds: [...binding.successfulManualPilotWorkIds, normalizedWorkId],
     version: binding.version + 1,

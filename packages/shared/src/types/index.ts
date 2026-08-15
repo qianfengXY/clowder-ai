@@ -1089,6 +1089,7 @@ export type {
   ReviewConsensusVerdict,
   ReviewDraftFinding,
   ReviewDraftVerdict,
+  ReviewFindingScope,
   ReviewFindingStatus,
   ReviewPrivateDraft,
   ReviewRound,

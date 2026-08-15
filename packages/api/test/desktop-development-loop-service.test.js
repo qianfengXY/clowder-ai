@@ -341,7 +341,7 @@ describe(
       assert.equal(reported.phase, 'independent_review');
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
-      assert.equal(reviewHubEnsureCount, 1);
+      assert.equal(reviewHubEnsureCount, 2);
       assert.deepEqual(reviewDispatches, [
         {
           stage: 'independent',
@@ -361,12 +361,11 @@ describe(
             featureId: 'F289',
             featureTitle: 'Implement the Desktop loop',
             attemptNumber: 1,
+            planThreadId: `project-feature-plan:${project.id}:backlog-1`,
           },
         },
       ]);
-      assert.deepEqual(desktopPauses, [
-        { threadId: 'chat-2', sourcePath: '/Volumes/WorkSSD/example-worktree' },
-      ]);
+      assert.deepEqual(desktopPauses, [{ threadId: 'chat-2', sourcePath: '/Volumes/WorkSSD/example-worktree' }]);
 
       const round = await reviewRounds.readCurrentSafe({
         ownerUserId: 'owner-1',
@@ -497,7 +496,16 @@ describe(
         idempotencyKey: 'consensus',
         verdict: 'changes_requested',
         checksPassed: false,
-        findings: [{ severity: 'P1', title: 'Consensus P1', details: 'This is safe.', evidence: ['src/a.ts:1'] }],
+        findings: [
+          {
+            severity: 'P1',
+            title: 'Consensus P1',
+            details: 'This requires a user architecture decision.',
+            evidence: ['src/a.ts:1'],
+            designRefs: ['project-feature-plan:project-1:backlog-1#architecture'],
+            scope: 'architecture_decision',
+          },
+        ],
         resolvedFindingIds: [],
         now: 7_000,
       });
@@ -515,8 +523,25 @@ describe(
         ['Consensus P1'],
       );
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
-      assert.deepEqual(packet.nextLegalActions, ['start_fix_attempt']);
+      assert.deepEqual(packet.nextLegalActions, ['request_user_architecture_decision']);
+      assert.equal(packet.phase, 'awaiting_architecture_decision');
+      assert.equal(packet.architectureDecisionPending, true);
+
+      packet = await service.recordArchitectureDecision({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        findingId: packet.openFindings[0].findingId,
+        decision: 'keep_original_plan',
+        idempotencyKey: 'architecture-decision-consensus-p1',
+        now: 7_200,
+      });
+      assert.equal(packet.architectureDecisionPending, false);
       assert.equal(packet.phase, 'fix_required');
+      assert.deepEqual(packet.nextLegalActions, ['start_fix_attempt']);
 
       const fixAttempt = await service.connect({
         protocolVersion: 1,

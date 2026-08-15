@@ -16,6 +16,8 @@ code_anchors:
   - packages/api/src/domains/projects/external-project-store.ts
   - packages/api/src/domains/projects/project-review-hub-service.ts
   - packages/api/src/domains/desktop-development-loop/desktop-session-store.ts
+  - packages/api/src/domains/desktop-development-loop/review-loop-policy.ts
+  - packages/api/src/domains/desktop-development-loop/codex-desktop-task-launcher.ts
   - packages/api/src/routes/desktop-development-loop.ts
   - packages/web/src/components/mission-control/DesktopDevelopmentPanel.tsx
   - packages/web/src/components/mission-control/ImportProjectModal.tsx
@@ -42,11 +44,13 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 1. A project has at most one Desktop development binding; each imported backlog feature has one deterministic plan thread and one deterministic Review thread.
 2. Feature-thread soft deletion restores the same identity; a code SHA or delivery cycle never creates another visible Review thread for that feature. The legacy project Review Hub remains callback-compatible for historical in-flight rounds only.
-3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works.
+3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works, and the second accepted pilot atomically enables it.
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
 5. Desktop author identity is distinct from reviewer CatIds and cannot appear in the reviewer roster.
 6. Chat disappearance never expires the binding and never deletes work, ReviewRound, evidence or pilot state.
 7. Missing F275/F253/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers, and never falls through to F211 by impersonating a Cat session.
+8. A changes-requested round cannot start attempt 16/31/... without the matching user continuation evidence, and cannot pass an unresolved architecture-decision finding without a persisted user decision.
+9. A Desktop wake remains in the durable outbox until the deterministic delivery ID or objective is observable in an actual bound-task turn; IPC acknowledgement or goal metadata alone is insufficient.
 
 ## Extend By
 
@@ -65,4 +69,4 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 ## Static Scan Hints
 
-Watch for `DesktopDevelopmentProjectBinding`, `project-feature-plan:`, `project-feature-review:`, legacy `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.
+Watch for `DesktopDevelopmentProjectBinding`, `project-feature-plan:`, `project-feature-review:`, legacy `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `review_continuation_approved`, `architecture_decision_recorded`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.

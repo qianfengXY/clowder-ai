@@ -4381,6 +4381,7 @@ async function main(): Promise<void> {
       externalProjectStore,
       backlogStore,
       managedWorkConsumerPort,
+      projectReviewHubService,
     );
     desktopDevelopmentLoopService = new serviceMod.DesktopDevelopmentLoopService(
       externalProjectStore,

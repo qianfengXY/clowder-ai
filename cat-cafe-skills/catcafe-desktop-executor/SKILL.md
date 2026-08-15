@@ -65,6 +65,14 @@ managed-work version 和 binding epoch 再调用一次 `cat_cafe_development_wor
 F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `attemptNumber` 必须递增且 phase 回到
 `implementing`。未取得新 attempt 前不得报告修复 SHA。
 
+当 `phase=awaiting_review_continuation` 或 `phase=awaiting_architecture_decision` 时立即停止 Desktop 写入：
+
+- `request_review_continuation_approval` 只允许用户在 Cat Café 界面批准下一组最多 15 次 Review；Desktop 不代批、
+  不重连、不中途创建 attempt。
+- `request_user_architecture_decision` 只允许用户在 Cat Café 针对对应 finding 选择保持原方案或批准方案变更；
+  Desktop 不得自行选择，也不得先按 reviewer 的方案外建议改代码。
+- 用户完成全部必要决策后，Cat Café 会向原绑定窗口投递新的单次通知；收到前不要轮询。
+
 ## 3. 实现、测试与提交
 
 在项目的永久 worktree 中使用 ChatGPT Desktop 原生文件、终端和 Git 能力：
@@ -94,11 +102,14 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   再通过 ChatGPT Desktop 本地 IPC 定位当前 owner，以 `thread-follower-start-turn` 请求 owner 窗口提交且仅提交一个通知 turn。
   真正的 `turn/start` 由 owner 窗口自己的 app-server 执行；Cat Café 不得用 daemon 抢写该 thread，不得启动第二个
   app-server，也不得创建替代窗口。原生 deep link 只负责聚焦窗口，不承担消息提交。
-- goal 唤醒暂时失败时由 Cat Café 的持久化 outbox 重试；Desktop 不需要为此保持 turn 或轮询。
+- goal 唤醒暂时失败或 IPC 只返回成功但通知 turn 尚不可读时，由 Cat Café 的持久化 outbox 使用同一个幂等
+  message id 重试；Desktop 不需要为此保持 turn 或轮询。
 - 原 chat 收到继续指令或被用户重新打开后，先调用 `cat_cafe_development_work_read` 读取最新 Resume Packet；禁止沿用
   implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
+- 只实现 `scope=plan_conformance` 且带权威 `designRefs` 的 finding；经用户裁决的架构 finding 必须严格服从
+  Cat Café 记录的决定。禁止把 Review 中新增的个人偏好、方案外重构或需求扩张带入实现。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
 - 每个新 SHA 都必须开启完整的新 ReviewRound；旧 SHA 的批准不能沿用。
 
@@ -111,8 +122,8 @@ Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/a
 - 项目前两次成功试点：在当前 ChatGPT chat 明确询问用户是否合入；得到确认后调用
   `cat_cafe_development_merge_confirmation_record`，再用 Desktop 原生 Git 合入，最后调用
   `cat_cafe_development_merge_report` 报告 merge commit。
-- 项目已满足两次试点且用户显式开启自动合入：仍需 exact SHA、零 open finding、checks 和 branch policy
-  全部通过；不要仅凭计数自行开启自动合入。
+- 项目前两次成功试点完成后，Cat Café 自动把项目策略切换为自动合入；后续仍需 exact SHA、零 open finding、
+  checks 和 branch policy 全部通过。Desktop 不得自行修改这个策略或绕过前两次确认。
 - 合入后进入 `acceptance_pending`。最终体验验收只在 Cat Café 项目界面由用户记录；Desktop 不代签验收。
 
 验收不通过时继续同一个项目、功能 Review 会话和 canonical work lineage，按 Resume Packet 进入新 attempt/cycle。

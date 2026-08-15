@@ -46,6 +46,7 @@ test('Review display context resolves the external project feature instead of th
       featureId: 'F006',
       featureTitle: 'Workspace capability settings',
       attemptNumber: 3,
+      planThreadId: 'project-feature-plan:project-traqen:backlog-f006',
     },
   );
 });

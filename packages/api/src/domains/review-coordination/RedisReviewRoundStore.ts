@@ -498,7 +498,24 @@ function normalizeFindingInputs<T extends ReviewDraftFindingInput>(items: readon
     const evidence = item.evidence ?? [];
     if (!Array.isArray(evidence) || evidence.length > 100) throw new Error('Finding evidence is invalid');
     for (const value of evidence) assertText(value, 'finding.evidence', 1_000);
-    return { ...item, title: item.title.trim(), details: item.details.trim(), evidence: [...evidence] };
+    const designRefs = item.designRefs ?? evidence;
+    if (!Array.isArray(designRefs) || designRefs.length > 100) throw new Error('Finding designRefs is invalid');
+    for (const value of designRefs) assertText(value, 'finding.designRefs', 1_000);
+    const scope = item.scope ?? 'plan_conformance';
+    if (scope !== 'plan_conformance' && scope !== 'architecture_decision') {
+      throw new Error('Finding scope is invalid');
+    }
+    if (scope === 'architecture_decision' && item.severity !== 'P1') {
+      throw new Error('Architecture decision findings must use P1 severity');
+    }
+    return {
+      ...item,
+      title: item.title.trim(),
+      details: item.details.trim(),
+      evidence: [...evidence],
+      designRefs: [...designRefs],
+      scope,
+    };
   });
 }
 
@@ -577,13 +594,26 @@ function parseDraft(raw: string): ReviewPrivateDraft {
     findings: asArray<ReviewDraftFinding>(draft.findings).map((finding) => ({
       ...finding,
       evidence: asStringArray(finding.evidence),
+      designRefs: asStringArray(finding.designRefs),
+      scope:
+        finding.scope === 'architecture_decision' || finding.scope === 'plan_conformance'
+          ? finding.scope
+          : 'plan_conformance',
     })),
   };
 }
 
 function parseFinding(raw: string): ReviewConsensusFinding {
   const finding = parseJson<ReviewConsensusFinding>(raw, 'ReviewRound finding');
-  return { ...finding, evidence: asStringArray(finding.evidence) };
+  return {
+    ...finding,
+    evidence: asStringArray(finding.evidence),
+    designRefs: asStringArray(finding.designRefs),
+    scope:
+      finding.scope === 'architecture_decision' || finding.scope === 'plan_conformance'
+        ? finding.scope
+        : 'plan_conformance',
+  };
 }
 
 function requireReviewer(round: ReviewRound, reviewerCatId: CatId): void {

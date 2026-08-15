@@ -89,7 +89,15 @@ describe('F289 project Review Hub tools', () => {
       expectedDraftVersion: 0,
       idempotencyKey: 'draft-1',
       verdict: 'findings',
-      findings: [{ severity: 'P2', title: 'Missing fence', details: 'Add an epoch check.' }],
+      findings: [
+        {
+          severity: 'P2',
+          title: 'Missing fence',
+          details: 'Add an epoch check.',
+          designRefs: ['plan-thread#acceptance-1'],
+          scope: 'plan_conformance',
+        },
+      ],
     });
     await handleReviewConsensusPublish({
       roundId: 'round-1',
@@ -98,7 +106,15 @@ describe('F289 project Review Hub tools', () => {
       idempotencyKey: 'consensus-1',
       verdict: 'changes_requested',
       checksPassed: true,
-      findings: [{ severity: 'P2', title: 'Missing fence', details: 'Add an epoch check.' }],
+      findings: [
+        {
+          severity: 'P2',
+          title: 'Missing fence',
+          details: 'Add an epoch check.',
+          designRefs: ['plan-thread#acceptance-1'],
+          scope: 'plan_conformance',
+        },
+      ],
       resolvedFindingIds: [],
     });
     assert.equal(requests.length, 2);
@@ -108,7 +124,15 @@ describe('F289 project Review Hub tools', () => {
       expectedDraftVersion: 0,
       idempotencyKey: 'draft-1',
       verdict: 'findings',
-      findings: [{ severity: 'P2', title: 'Missing fence', details: 'Add an epoch check.' }],
+      findings: [
+        {
+          severity: 'P2',
+          title: 'Missing fence',
+          details: 'Add an epoch check.',
+          designRefs: ['plan-thread#acceptance-1'],
+          scope: 'plan_conformance',
+        },
+      ],
     });
   });
 });

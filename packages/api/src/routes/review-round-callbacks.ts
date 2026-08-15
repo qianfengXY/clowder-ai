@@ -25,8 +25,15 @@ const findingSchema = z
     title: z.string().min(1).max(500),
     details: z.string().min(1).max(10_000),
     evidence: z.array(z.string().min(1).max(2_000)).max(100).optional(),
+    designRefs: z.array(z.string().min(1).max(2_000)).min(1).max(100),
+    scope: z.enum(['plan_conformance', 'architecture_decision']),
   })
-  .strict();
+  .strict()
+  .superRefine((finding, context) => {
+    if (finding.scope === 'architecture_decision' && finding.severity !== 'P1') {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Architecture decisions must use P1 severity' });
+    }
+  });
 const draftSchema = z
   .object({
     expectedDraftVersion: z.number().int().nonnegative(),

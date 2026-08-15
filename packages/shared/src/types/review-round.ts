@@ -2,6 +2,7 @@ import type { CatId } from './ids.js';
 import type { ManagedWorkExecutorActor } from './managed-work.js';
 
 export type ReviewSeverity = 'P1' | 'P2' | 'P3';
+export type ReviewFindingScope = 'plan_conformance' | 'architecture_decision';
 export type ReviewRoundPhase = 'independent' | 'cross_review' | 'consensus_ready' | 'complete';
 export type ReviewDraftVerdict = 'approve' | 'findings';
 export type ReviewConsensusVerdict = 'changes_requested' | 'approved';
@@ -33,6 +34,10 @@ export interface ReviewDraftFinding {
   readonly title: string;
   readonly details: string;
   readonly evidence: readonly string[];
+  /** Every proposed change must point back to the approved feature plan. */
+  readonly designRefs: readonly string[];
+  /** Serious architecture contradictions are routed to the user instead of becoming implementation advice. */
+  readonly scope: ReviewFindingScope;
 }
 
 export interface ReviewPrivateDraft {
@@ -56,6 +61,8 @@ export interface ReviewConsensusFinding {
   readonly title: string;
   readonly details: string;
   readonly evidence: readonly string[];
+  readonly designRefs: readonly string[];
+  readonly scope: ReviewFindingScope;
   readonly status: ReviewFindingStatus;
   readonly createdAt: number;
   readonly resolvedAt?: number;

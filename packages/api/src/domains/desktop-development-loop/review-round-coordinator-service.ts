@@ -7,6 +7,7 @@ import type {
 } from '../review-coordination/ReviewRoundStore.js';
 import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
 
@@ -183,14 +184,28 @@ export class ReviewRoundCoordinatorService {
       },
       ...(input.now === undefined ? {} : { now: input.now }),
     });
-    await this.wakeBoundDesktopTask({
+    const managed = await this.managedWork.read({
+      consumerId: CONSUMER_ID,
       ownerUserId: input.ownerUserId,
-      projectId: before.round.projectId,
       workId: before.round.workId,
       attemptId: before.round.attemptId,
-      reviewRoundId: before.round.roundId,
-      exactSha: before.round.exactSha,
     });
+    const gate = deriveReviewLoopGate({
+      attemptNumber: managed.attempt.attemptNumber,
+      exactSha: completed.round.exactSha,
+      findings: completed.findings,
+      evidence: managed.evidence,
+    });
+    if (completed.consensus?.verdict === 'approved' || canContinueReviewLoop(gate)) {
+      await this.wakeBoundDesktopTask({
+        ownerUserId: input.ownerUserId,
+        projectId: before.round.projectId,
+        workId: before.round.workId,
+        attemptId: before.round.attemptId,
+        reviewRoundId: before.round.roundId,
+        exactSha: before.round.exactSha,
+      });
+    }
     return completed;
   }
 

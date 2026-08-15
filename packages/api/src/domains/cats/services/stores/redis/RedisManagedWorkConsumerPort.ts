@@ -447,6 +447,17 @@ function normalizeEvidence(input: ManagedWorkEvidenceInput): ManagedWorkEvidence
       assertPositiveInteger(input.bindingEpoch, 'bindingEpoch');
       assertId(input.confirmedByUserId, 'confirmedByUserId');
       return { ...input, exactSha };
+    case 'review_continuation_approved':
+      assertPositiveInteger(input.approvedThroughAttemptNumber, 'approvedThroughAttemptNumber');
+      assertId(input.approvedByUserId, 'approvedByUserId');
+      return { ...input, exactSha };
+    case 'architecture_decision_recorded':
+      assertId(input.findingId, 'findingId');
+      if (input.decision !== 'keep_original_plan' && input.decision !== 'approve_plan_change') {
+        throw new Error('architecture decision is invalid');
+      }
+      assertId(input.decidedByUserId, 'decidedByUserId');
+      return { ...input, exactSha };
     case 'merged':
       assertFullSha(input.mergeCommitSha, 'mergeCommitSha');
       return { ...input, exactSha, mergeCommitSha: input.mergeCommitSha.toLowerCase() };

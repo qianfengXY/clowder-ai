@@ -144,6 +144,10 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     reviewRoundVersion: null,
     reviewCurrentForWork: false,
     openFindings: [],
+    reviewAttemptLimit: 15,
+    reviewContinuationApprovedThroughAttempt: 15,
+    reviewContinuationPending: false,
+    architectureDecisionPending: false,
     nextLegalActions: ['implement_and_report_committed_sha'],
   };
 
@@ -213,6 +217,14 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       recordAcceptance: async (input) => {
         calls.push(['recordAcceptance', input]);
         return { ...packet, workLifecycle: input.accepted ? 'accepted' : 'rejected', nextLegalActions: [] };
+      },
+      approveReviewContinuation: async (input) => {
+        calls.push(['approveReviewContinuation', input]);
+        return { ...packet, reviewContinuationApprovedThroughAttempt: 30 };
+      },
+      recordArchitectureDecision: async (input) => {
+        calls.push(['recordArchitectureDecision', input]);
+        return { ...packet, architectureDecisionPending: false };
       },
     };
     const app = Fastify();
@@ -410,6 +422,66 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           ownerUserId: 'operator-1',
           projectId: 'project-1',
           backlogItemId: 'backlog-1',
+        },
+      ],
+    ]);
+  });
+
+  test('keeps bounded Review continuation and architecture decisions on the Cat Cafe user surface', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/review-continuation',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-15',
+        expectedManagedWorkVersion: 20,
+        idempotencyKey: 'continue-attempt-15',
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().reviewContinuationApprovedThroughAttempt, 30);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/architecture-decision',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-15',
+        expectedManagedWorkVersion: 21,
+        idempotencyKey: 'architecture-finding-1',
+        findingId: 'finding-1',
+        decision: 'keep_original_plan',
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(calls, [
+      [
+        'approveReviewContinuation',
+        {
+          protocolVersion: 1,
+          attemptId: 'attempt-15',
+          expectedManagedWorkVersion: 20,
+          idempotencyKey: 'continue-attempt-15',
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
+        },
+      ],
+      [
+        'recordArchitectureDecision',
+        {
+          protocolVersion: 1,
+          attemptId: 'attempt-15',
+          expectedManagedWorkVersion: 21,
+          idempotencyKey: 'architecture-finding-1',
+          findingId: 'finding-1',
+          decision: 'keep_original_plan',
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
         },
       ],
     ]);
