@@ -569,6 +569,8 @@ describe(
       assert.equal(fixAttempt.attemptNumber, 2);
       assert.equal(fixAttempt.bindingEpoch, packet.bindingEpoch + 1);
       assert.equal(fixAttempt.phase, 'implementing');
+      assert.equal(fixAttempt.reviewContinuationPending, false);
+      assert.equal(fixAttempt.architectureDecisionPending, false);
       assert.deepEqual(fixAttempt.nextLegalActions, ['fix_open_findings']);
 
       const replayedFixAttempt = await service.connect({

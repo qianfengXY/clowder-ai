@@ -1067,14 +1067,8 @@ export class DesktopDevelopmentLoopService {
       openFindings,
       reviewAttemptLimit: DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
       reviewContinuationApprovedThroughAttempt: reviewGate.approvedThroughAttempt,
-      reviewContinuationPending:
-        review?.round.phase === 'complete' &&
-        review.consensus?.verdict === 'changes_requested' &&
-        reviewGate.continuationPending,
-      architectureDecisionPending:
-        review?.round.phase === 'complete' &&
-        review.consensus?.verdict === 'changes_requested' &&
-        reviewGate.architectureDecisionPending,
+      reviewContinuationPending: derived.phase === 'awaiting_review_continuation',
+      architectureDecisionPending: derived.phase === 'awaiting_architecture_decision',
       nextLegalActions: derived.nextLegalActions,
     };
   }
