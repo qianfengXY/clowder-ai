@@ -28,6 +28,8 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 8. 项目前两次成功试点必须由用户在当前 ChatGPT 会话中确认合入。只有“已合入且最终验收通过”才增加成功试点计数。
 9. 两次成功试点后，项目自动切换为自动合入；exact-SHA、零 finding、检查与分支策略门禁不变，最终产品验收仍始终由用户完成。
 10. 验收不通过时，同一项目和功能 Review 会话开启新的 delivery cycle，保留上一轮证据，不重建整个上下文。
+11. Mission Hub 为每个功能展示当前 Attempt 的完整链路：Desktop 实现、独立检视、交叉检视、共识、修复交接/合入、最终验收；只有服务端确认状态迁移后节点才显示完成。
+12. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过 exact-SHA Review、架构决策、15 轮续审或最终验收，也不得创建平行 work/attempt/round。
 
 ## 角色边界
 
@@ -105,6 +107,15 @@ design_ready
   -> accepted | rejected -> design_ready (new delivery cycle)
 ```
 
+Mission Hub 把这个生命周期投影为当前 Attempt 的有序节点，而不是创建第二份状态机。节点使用
+`pending / active / blocked / completed` 表示可见进度，并携带当前负责人、开始/完成时间、Review 完成人数和
+唯一合法的人工恢复动作。`completed` 只能从 F275 evidence、F253 ReviewRound 或 terminal truth 推导；聊天文字、
+Resume Capsule 的 baton holder 和按钮点击本身都不能证明已经交给下一轮。
+
+人工“再次触发”只重投当前节点：实现/修复/合入节点唤醒原绑定 Desktop 任务；Review 节点向尚未完成的
+reviewer 或 recorder 重发带 `Review 系统消息` 标识的当前 stage。用户决策门禁继续使用专用动作，通用重试接口
+必须拒绝代替用户做决定。
+
 whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port 不可用，F289 必须返回 `managed_work_capability_unavailable`，不能通过 thread、branch、task 或本地 Redis key 猜测/复制 work identity。
 
 ## 核心不变量
@@ -171,6 +182,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-R4: 同一功能 Review 会话可连续承载多个 delivery cycle、attempt 与 round；不同功能互不混流。（`project-review-hub-service.test.js`、`desktop-development-loop-service.test.js`）
 - [x] AC-R5: finding 必须携带方案引用与范围；严重架构冲突在 Cat Café 等待用户决策，不能被 Review 建议暗中改写方案。（`review-round-callback-routes.test.js`、`review-round-tools.test.ts`、`review-loop-policy.test.js`）
 - [x] AC-R6: 第 15 次及之后每组 15 次 Review 未清零时等待用户续审批准；Desktop IPC 只有在任务实际出现该轮消息后才清除 durable outbox。（`review-loop-policy.test.js`、`codex-desktop-task-launcher.test.js`）
+- [x] AC-R7: Mission Hub 展示服务端推导的完整 Attempt 链路、负责人、Review 进度与迁移时间；当前 Desktop/Review 节点可由用户幂等重投，过期 version 被拒绝，人工门禁不可被通用重试绕过。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`DesktopDevelopmentPanel.tsx`）
 
 ### Merge / acceptance
 

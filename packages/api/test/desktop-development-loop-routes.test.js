@@ -226,6 +226,10 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         calls.push(['recordArchitectureDecision', input]);
         return { ...packet, architectureDecisionPending: false };
       },
+      retryCurrentStage: async (input) => {
+        calls.push(['retryCurrentStage', input]);
+        return { work: packet, action: 'wake_desktop', target: 'ChatGPT Desktop 原绑定窗口' };
+      },
     };
     const app = Fastify();
     const reviewRoundCoordinatorService = {
@@ -479,6 +483,50 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           idempotencyKey: 'architecture-finding-1',
           findingId: 'finding-1',
           decision: 'keep_original_plan',
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
+        },
+      ],
+    ]);
+  });
+
+  test('re-triggers only the current workflow stage through the authenticated Cat Cafe surface', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/retry-current-stage',
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-1',
+        expectedManagedWorkVersion: 2,
+        idempotencyKey: 'manual-stage-retry-1',
+      },
+    });
+    assert.equal(response.statusCode, 401);
+
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/retry-current-stage',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-1',
+        expectedManagedWorkVersion: 2,
+        idempotencyKey: 'manual-stage-retry-1',
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().action, 'wake_desktop');
+    assert.equal(response.json().work.workId, 'work-1');
+    assert.deepEqual(calls, [
+      [
+        'retryCurrentStage',
+        {
+          protocolVersion: 1,
+          attemptId: 'attempt-1',
+          expectedManagedWorkVersion: 2,
+          idempotencyKey: 'manual-stage-retry-1',
           projectId: 'project-1',
           workId: 'work-1',
           ownerUserId: 'operator-1',

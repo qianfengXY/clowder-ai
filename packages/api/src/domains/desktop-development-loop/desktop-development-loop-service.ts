@@ -9,6 +9,7 @@ import {
   DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
   type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
+  type DesktopDevelopmentWorkflowNode,
   type DesktopSessionBinding,
   type ManagedWorkConsumerSnapshot,
   type ManagedWorkLifecycle,
@@ -123,6 +124,14 @@ export interface ApproveReviewContinuationInput {
 export interface RecordArchitectureDecisionInput extends ApproveReviewContinuationInput {
   readonly findingId: string;
   readonly decision: 'keep_original_plan' | 'approve_plan_change';
+}
+
+export interface RetryDesktopDevelopmentStageInput extends ApproveReviewContinuationInput {}
+
+export interface RetryDesktopDevelopmentStageResult {
+  readonly work: DesktopDevelopmentResumePacket;
+  readonly action: 'wake_desktop' | 'replay_review_stage';
+  readonly target: string;
 }
 
 export interface ReadDesktopWorkInput {
@@ -963,6 +972,48 @@ export class DesktopDevelopmentLoopService {
     return this.readWork(input, appended.state.version);
   }
 
+  async retryCurrentStage(input: RetryDesktopDevelopmentStageInput): Promise<RetryDesktopDevelopmentStageResult> {
+    this.assertProtocol(input.protocolVersion);
+    const work = await this.readWork(input);
+    if (work.attemptId !== input.attemptId) {
+      throw new Error(`Managed-work stale attempt: current ${work.attemptId}`);
+    }
+    if (work.managedWorkVersion !== input.expectedManagedWorkVersion) {
+      throw new Error(
+        `Managed-work version conflict: expected ${input.expectedManagedWorkVersion}, actual ${work.managedWorkVersion}`,
+      );
+    }
+
+    if (work.phase === 'independent_review' || work.phase === 'cross_review') {
+      const target = await this.replayCurrentReviewStage(input);
+      return { work: await this.readWork(input), action: 'replay_review_stage', target };
+    }
+
+    if (
+      work.phase === 'ready_for_desktop' ||
+      work.phase === 'implementing' ||
+      work.phase === 'implementation_ready' ||
+      work.phase === 'fix_required' ||
+      work.phase === 'approved_for_merge' ||
+      work.phase === 'awaiting_manual_merge_confirmation' ||
+      work.phase === 'auto_merge_ready'
+    ) {
+      await this.wakeDesktopForCurrentStage(input, work);
+      return { work: await this.readWork(input), action: 'wake_desktop', target: 'ChatGPT Desktop 原绑定窗口' };
+    }
+
+    if (work.phase === 'awaiting_architecture_decision') {
+      throw new Error('Current stage requires an architecture decision; choose a decision instead of retrying it');
+    }
+    if (work.phase === 'awaiting_review_continuation') {
+      throw new Error('Current stage requires Review continuation approval; approve it instead of retrying it');
+    }
+    if (work.phase === 'acceptance_pending') {
+      throw new Error('Current stage requires final acceptance; record the acceptance decision instead of retrying it');
+    }
+    throw new Error('Completed or rejected work has no stage to retry');
+  }
+
   async readWork(input: ReadDesktopWorkInput, knownManagedVersion?: number): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
@@ -1070,6 +1121,124 @@ export class DesktopDevelopmentLoopService {
       reviewContinuationPending: derived.phase === 'awaiting_review_continuation',
       architectureDecisionPending: derived.phase === 'awaiting_architecture_decision',
       nextLegalActions: derived.nextLegalActions,
+      workflowNodes: deriveWorkflowNodes({ managed, session, review, derived }),
+    };
+  }
+
+  private async replayCurrentReviewStage(input: RetryDesktopDevelopmentStageInput): Promise<string> {
+    const [managed, review] = await Promise.all([
+      this.managedWork.read(this.managedIdentity(input)),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    if (!review || !review.currentForWork || review.round.attemptId !== input.attemptId) {
+      throw new Error('Current Review round is unavailable for replay');
+    }
+    if (review.round.phase === 'complete') throw new Error('Completed Review cannot be replayed as an active stage');
+
+    const context = await this.resolveWorkflowDisplayContext(input.ownerUserId, input.projectId, managed);
+    const stage = review.round.phase === 'consensus_ready' ? 'consensus' : review.round.phase;
+    const completedReviewerCatIds =
+      stage === 'independent'
+        ? review.round.independentFinishedCatIds
+        : stage === 'cross_review'
+          ? review.round.crossReviewFinishedCatIds
+          : review.round.reviewerCatIds;
+    const pendingReviewerCatIds =
+      stage === 'consensus'
+        ? [review.round.recorderCatId]
+        : review.round.reviewerCatIds.filter((catId) => !completedReviewerCatIds.includes(catId));
+    if (pendingReviewerCatIds.length === 0)
+      throw new Error('Current Review stage has no pending participant to replay');
+
+    await this.reviewDispatcher.dispatch({
+      stage,
+      ownerUserId: review.round.ownerUserId,
+      projectId: review.round.projectId,
+      reviewHubThreadId: review.round.reviewThreadId ?? buildProjectReviewHubId(review.round.projectId),
+      roundId: review.round.roundId,
+      exactSha: review.round.exactSha,
+      reviewerCatIds: pendingReviewerCatIds,
+      allReviewerCatIds: review.round.reviewerCatIds,
+      completedReviewerCatIds,
+      recorderCatId: review.round.recorderCatId,
+      displayContext: context,
+      deliveryKey: `manual:${input.idempotencyKey}`,
+    });
+    return stage === 'consensus'
+      ? `共识记录者 ${review.round.recorderCatId}`
+      : `${pendingReviewerCatIds.length} 位待处理 reviewer`;
+  }
+
+  private async wakeDesktopForCurrentStage(
+    input: RetryDesktopDevelopmentStageInput,
+    work: DesktopDevelopmentResumePacket,
+  ): Promise<void> {
+    if (!this.desktopTaskLauncher) throw new Error('ChatGPT Desktop task launcher is unavailable');
+    const [managed, session, review] = await Promise.all([
+      this.managedWork.read(this.managedIdentity(input)),
+      this.sessions.getCurrent(input.projectId, input.workId),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    if (!session?.chatRef || session.attemptId !== input.attemptId) {
+      throw new Error('Current work attempt has no bound ChatGPT Desktop window');
+    }
+    const context = await this.resolveWorkflowDisplayContext(input.ownerUserId, input.projectId, managed);
+    const objective =
+      work.phase === 'fix_required' && review?.round.phase === 'complete' && review.round.attemptId === input.attemptId
+        ? buildReviewCompletionObjective({
+            ...context,
+            projectId: input.projectId,
+            workId: input.workId,
+            attemptId: input.attemptId,
+            reviewRoundId: review.round.roundId,
+            exactSha: review.round.exactSha,
+            runtimeSessionId: session.runtimeSessionId,
+            operatorDecisions: reviewOperatorDecisions(managed, review),
+          })
+        : buildManualWorkflowResumeObjective({
+            ...context,
+            projectId: input.projectId,
+            workId: input.workId,
+            attemptId: input.attemptId,
+            phase: work.phase,
+            runtimeSessionId: session.runtimeSessionId,
+          });
+    await this.desktopTaskLauncher.activate({
+      threadId: session.chatRef,
+      sourcePath: session.workspace.worktreePath,
+      objective,
+    });
+  }
+
+  private async resolveWorkflowDisplayContext(
+    ownerUserId: string,
+    projectId: string,
+    managed: ManagedWorkConsumerSnapshot,
+  ) {
+    const project = await this.requireConfiguredProject(projectId, ownerUserId);
+    const item = (await this.backlogStore.listByUser(ownerUserId)).find(
+      (candidate) => candidate.id === managed.admission.producerRef && candidate.projectId === projectId,
+    );
+    if (!item) throw new Error('Development-loop backlog item is unavailable');
+    const featureId = featureIdForItem(item);
+    if (!featureId) throw new Error('Development-loop feature id is unavailable');
+    const planHub = await this.reviewHubs.ensureForFeature(projectId, item.id, 'plan', ownerUserId);
+    return {
+      projectName: project.name,
+      repository: project.desktopDevelopment.repository.fullName,
+      backlogItemId: item.id,
+      featureId,
+      featureTitle: featureTitleForReview(featureId, item.title),
+      attemptNumber: managed.attempt.attemptNumber,
+      planThreadId: planHub.threadId,
     };
   }
 
@@ -1242,6 +1411,235 @@ export class DesktopDevelopmentLoopService {
       );
     }
   }
+}
+
+function buildManualWorkflowResumeObjective(input: {
+  readonly projectName: string;
+  readonly featureId: string;
+  readonly featureTitle: string;
+  readonly attemptNumber: number;
+  readonly projectId: string;
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly phase: DesktopDevelopmentPhase;
+  readonly runtimeSessionId: string;
+}): string {
+  return [
+    `[开发闭环系统消息] ${input.projectName} · ${input.featureId} · ${input.featureTitle}`,
+    '',
+    '用户在 CatCafe 的完整流程链路中手动触发了当前停滞节点。',
+    `当前阶段：${input.phase}`,
+    `当前实现轮次：Attempt #${input.attemptNumber}`,
+    `projectId：${input.projectId}`,
+    `workId：${input.workId}`,
+    `attemptId：${input.attemptId}`,
+    `runtimeSessionId：${input.runtimeSessionId}`,
+    '',
+    '请在原绑定任务中读取最新 Resume Packet，只执行服务端返回的 nextLegalActions。',
+    '完成一次合法动作后结束本次 turn；不要轮询等待 CatCafe，也不要创建新的 ChatGPT 任务。',
+  ].join('\n');
+}
+
+function deriveWorkflowNodes(input: {
+  readonly managed: ManagedWorkConsumerSnapshot;
+  readonly session: DesktopSessionBinding;
+  readonly review: ReviewRoundSafeView | null;
+  readonly derived: DesktopDevelopmentDerivedState;
+}): readonly DesktopDevelopmentWorkflowNode[] {
+  const context = buildWorkflowProjectionContext(input);
+  return [
+    implementationWorkflowNode(context),
+    independentReviewWorkflowNode(context),
+    crossReviewWorkflowNode(context),
+    consensusWorkflowNode(context),
+    handoffWorkflowNode(context),
+    mergeWorkflowNode(context),
+    acceptanceWorkflowNode(context),
+  ];
+}
+
+interface WorkflowProjectionContext {
+  readonly managed: ManagedWorkConsumerSnapshot;
+  readonly session: DesktopSessionBinding;
+  readonly review: ReviewRoundSafeView | null;
+  readonly phase: DesktopDevelopmentPhase;
+  readonly implementationAt: number | null;
+  readonly mergedAt: number | null;
+  readonly acceptanceAt: number | null;
+  readonly consensusApproved: boolean;
+}
+
+function buildWorkflowProjectionContext(input: {
+  readonly managed: ManagedWorkConsumerSnapshot;
+  readonly session: DesktopSessionBinding;
+  readonly review: ReviewRoundSafeView | null;
+  readonly derived: DesktopDevelopmentDerivedState;
+}): WorkflowProjectionContext {
+  const attemptId = input.managed.attempt.attemptId;
+  const review = input.review?.round.attemptId === attemptId && input.review.currentForWork ? input.review : null;
+  return {
+    managed: input.managed,
+    session: input.session,
+    review,
+    phase: input.derived.phase,
+    implementationAt: latestEvidenceAt(input.managed, 'implementation_committed', attemptId),
+    mergedAt: latestEvidenceAt(input.managed, 'merged', attemptId),
+    acceptanceAt: latestEvidenceAt(input.managed, 'acceptance_recorded', attemptId),
+    consensusApproved: review?.round.phase === 'complete' && review.consensus?.verdict === 'approved',
+  };
+}
+
+function implementationWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const completed = Boolean(context.implementationAt || context.review);
+  const unavailable =
+    context.phase === 'ready_for_desktop' ||
+    !context.session.workspace.worktreePresent ||
+    context.session.status !== 'active';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'active';
+  if (completed) status = 'completed';
+  else if (unavailable) status = 'blocked';
+  return {
+    id: 'implementation',
+    status,
+    actor: 'chatgpt_desktop',
+    startedAt: context.managed.attempt.createdAt,
+    completedAt: context.implementationAt,
+    manualAction: completed ? null : 'wake_desktop',
+  };
+}
+
+function independentReviewWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const active = context.review?.round.phase === 'independent';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (active) status = 'active';
+  else if (context.review) status = 'completed';
+  return {
+    id: 'independent_review',
+    status,
+    actor: 'reviewers',
+    startedAt: context.review?.round.createdAt ?? null,
+    completedAt: context.review?.round.barrierOpenedAt ?? null,
+    completedCount: context.review?.progress.independentFinished ?? 0,
+    requiredCount: context.review?.round.reviewerCatIds.length ?? 0,
+    manualAction: active ? 'replay_review_stage' : null,
+  };
+}
+
+function crossReviewWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const phase = context.review?.round.phase;
+  const active = phase === 'cross_review';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (active) status = 'active';
+  else if (phase === 'consensus_ready' || phase === 'complete') status = 'completed';
+  return {
+    id: 'cross_review',
+    status,
+    actor: 'reviewers',
+    startedAt: context.review?.round.barrierOpenedAt ?? null,
+    completedAt: null,
+    completedCount: context.review?.progress.crossReviewFinished ?? 0,
+    requiredCount: context.review?.round.reviewerCatIds.length ?? 0,
+    manualAction: active ? 'replay_review_stage' : null,
+  };
+}
+
+function consensusWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const phase = context.review?.round.phase;
+  const active = phase === 'consensus_ready';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (active) status = 'active';
+  else if (phase === 'complete') status = 'completed';
+  return {
+    id: 'consensus',
+    status,
+    actor: 'review_recorder',
+    startedAt: active || phase === 'complete' ? (context.review?.round.barrierOpenedAt ?? null) : null,
+    completedAt: context.review?.consensus?.publishedAt ?? context.review?.round.completedAt ?? null,
+    manualAction: active ? 'replay_review_stage' : null,
+  };
+}
+
+function handoffWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const reviewComplete = context.review?.round.phase === 'complete';
+  const architectureGate = context.phase === 'awaiting_architecture_decision';
+  const continuationGate = context.phase === 'awaiting_review_continuation';
+  const blocked = architectureGate || continuationGate;
+  const active = context.phase === 'fix_required';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (blocked) status = 'blocked';
+  else if (active) status = 'active';
+  else if (reviewComplete) status = 'completed';
+  return {
+    id: 'handoff',
+    status,
+    actor: blocked ? 'user' : context.consensusApproved ? 'catcafe' : 'chatgpt_desktop',
+    startedAt: context.review?.round.completedAt ?? null,
+    completedAt: context.consensusApproved ? (context.review?.round.completedAt ?? null) : null,
+    manualAction: handoffManualAction(context.phase),
+  };
+}
+
+function handoffManualAction(phase: DesktopDevelopmentPhase): DesktopDevelopmentWorkflowNode['manualAction'] {
+  if (phase === 'awaiting_architecture_decision') return 'record_architecture_decision';
+  if (phase === 'awaiting_review_continuation') return 'approve_review_continuation';
+  if (phase === 'fix_required') return 'wake_desktop';
+  return null;
+}
+
+function mergeWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (context.mergedAt) status = 'completed';
+  else if (context.consensusApproved) status = 'active';
+  return {
+    id: 'merge',
+    status,
+    actor: 'chatgpt_desktop',
+    startedAt: context.consensusApproved ? (context.review?.round.completedAt ?? null) : null,
+    completedAt: context.mergedAt,
+    manualAction: context.consensusApproved && !context.mergedAt ? 'wake_desktop' : null,
+  };
+}
+
+function acceptanceWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
+  const terminal = context.managed.state.lifecycle !== 'active';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
+  if (context.mergedAt && terminal) status = 'completed';
+  else if (context.mergedAt) status = 'active';
+  return {
+    id: 'acceptance',
+    status,
+    actor: 'user',
+    startedAt: context.mergedAt,
+    completedAt: context.acceptanceAt,
+    manualAction: context.mergedAt && !terminal ? 'record_acceptance' : null,
+  };
+}
+
+function reviewOperatorDecisions(managed: ManagedWorkConsumerSnapshot, review: ReviewRoundSafeView): readonly string[] {
+  const findingIds = new Set(review.findings.map((finding) => finding.findingId));
+  return managed.evidence.flatMap((evidence) => {
+    if (
+      evidence.kind !== 'architecture_decision_recorded' ||
+      evidence.exactSha !== review.round.exactSha ||
+      !findingIds.has(evidence.findingId)
+    ) {
+      return [];
+    }
+    return [`${evidence.findingId}: ${evidence.decision}`];
+  });
+}
+
+function latestEvidenceAt(
+  managed: ManagedWorkConsumerSnapshot,
+  kind: 'implementation_committed' | 'merged' | 'acceptance_recorded',
+  attemptId: string,
+): number | null {
+  let latest: number | null = null;
+  for (const evidence of managed.evidence) {
+    if (evidence.kind !== kind || evidence.attemptId !== attemptId) continue;
+    latest = latest === null ? evidence.recordedAt : Math.max(latest, evidence.recordedAt);
+  }
+  return latest;
 }
 
 function resumeDesignRefs(designRefs: readonly string[], legacyPlanThreadId: string | null): readonly string[] {

@@ -1,6 +1,6 @@
 'use client';
 
-import type { DesktopDevelopmentResumePacket, ExternalProject } from '@cat-cafe/shared';
+import type { DesktopDevelopmentResumePacket, DesktopDevelopmentWorkflowNode, ExternalProject } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
@@ -41,6 +41,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
   const [reviewDecisionKey, setReviewDecisionKey] = useState<string | null>(null);
+  const [retryingWorkId, setRetryingWorkId] = useState<string | null>(null);
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
@@ -263,6 +264,41 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     }
   };
 
+  const retryCurrentStage = async (work: DesktopDevelopmentResumePacket) => {
+    setRetryingWorkId(work.workId);
+    setStatus(null);
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${project.id}/development-loop/works/${work.workId}/retry-current-stage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            protocolVersion: work.protocolVersion,
+            attemptId: work.attemptId,
+            expectedManagedWorkVersion: work.managedWorkVersion,
+            idempotencyKey: `manual-stage-retry-${work.attemptId}-${Date.now()}`,
+          }),
+        },
+      );
+      const body = (await response.json()) as {
+        work?: DesktopDevelopmentResumePacket;
+        action?: 'wake_desktop' | 'replay_review_stage';
+        target?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.work) throw new Error(body.error ?? '无法再次触发当前节点');
+      setWorks((current) => current.map((item) => (item.workId === body.work?.workId ? body.work : item)));
+      setStatus(
+        `已登记并再次触发当前节点（目标：${body.target ?? '当前负责人'}）。节点变为“已完成”才表示服务端确认进入下一步。`,
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法再次触发当前节点');
+    } finally {
+      setRetryingWorkId(null);
+    }
+  };
+
   if (!binding) {
     return (
       <section className="rounded-xl bg-[var(--console-card-bg)] p-5">
@@ -453,6 +489,13 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   {work.branch} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
                 </div>
               )}
+              {work && (
+                <WorkflowChain
+                  work={work}
+                  retrying={retryingWorkId === work.workId}
+                  onRetry={() => void retryCurrentStage(work)}
+                />
+              )}
               {work && work.openFindings.length > 0 && (
                 <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
               )}
@@ -633,4 +676,163 @@ function Info({ label, value }: { label: string; value: string }) {
       <dd className="mt-1 break-words text-xs font-medium text-cafe">{value}</dd>
     </div>
   );
+}
+
+function WorkflowChain({
+  work,
+  retrying,
+  onRetry,
+}: {
+  work: DesktopDevelopmentResumePacket;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const nodes = work.workflowNodes ?? [];
+  if (nodes.length === 0) return null;
+  const current = nodes.find((node) => node.status === 'blocked') ?? nodes.find((node) => node.status === 'active');
+  const retryable = current?.manualAction === 'wake_desktop' || current?.manualAction === 'replay_review_stage';
+  return (
+    <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3" data-testid={`workflow-chain-${work.workId}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-xs font-medium text-cafe">完整开发链路 · Attempt #{work.attemptNumber}</div>
+          <div className="mt-1 text-micro text-cafe-secondary">
+            {current
+              ? `当前停在：${workflowNodeLabel(current.id)} · 等待${workflowActorLabel(current.actor)}`
+              : '本轮链路已结束'}
+          </div>
+        </div>
+        {retryable && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retrying}
+            className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+          >
+            {retrying ? '触发中...' : workflowActionLabel(current.manualAction)}
+          </button>
+        )}
+      </div>
+      <ol className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {nodes.map((node, index) => (
+          <li
+            key={node.id}
+            className={`rounded-lg border px-3 py-2 ${workflowNodeClass(node.status)}`}
+            data-testid={`workflow-node-${work.workId}-${node.id}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-cafe">
+                {index + 1}. {workflowNodeLabel(node.id)}
+              </span>
+              <span className="text-micro text-cafe-secondary">{workflowStatusLabel(node.status)}</span>
+            </div>
+            <div className="mt-1 text-micro text-cafe-secondary">负责人：{workflowActorLabel(node.actor)}</div>
+            {node.requiredCount !== undefined && node.requiredCount > 0 && (
+              <div className="mt-1 text-micro text-cafe-secondary">
+                进度：{node.completedCount ?? 0}/{node.requiredCount}
+              </div>
+            )}
+            {(node.completedAt ?? node.startedAt) && (
+              <div className="mt-1 text-micro text-cafe-secondary">
+                {node.completedAt ? '完成' : '开始'}：{formatWorkflowTime(node.completedAt ?? node.startedAt)}
+              </div>
+            )}
+            {node.status === 'blocked' && node.manualAction && (
+              <div className="mt-1 text-micro font-medium text-cafe">{workflowActionLabel(node.manualAction)}</div>
+            )}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-2 text-micro leading-relaxed text-cafe-secondary">
+        节点变为“已完成”才表示服务端已确认进入下一步；“进行中/被阻断”表示球仍在当前负责人手里。重复触发只会重投当前合法动作，不会跳过
+        Review 或人工门禁。
+      </p>
+    </div>
+  );
+}
+
+function workflowNodeLabel(id: DesktopDevelopmentWorkflowNode['id']): string {
+  switch (id) {
+    case 'implementation':
+      return 'Desktop 实现与提交';
+    case 'independent_review':
+      return '独立检视';
+    case 'cross_review':
+      return '交叉检视';
+    case 'consensus':
+      return '共识整理';
+    case 'handoff':
+      return '修复交接 / 合入分流';
+    case 'merge':
+      return '合入';
+    case 'acceptance':
+      return '最终验收';
+  }
+}
+
+function workflowActorLabel(actor: DesktopDevelopmentWorkflowNode['actor']): string {
+  switch (actor) {
+    case 'chatgpt_desktop':
+      return 'ChatGPT Desktop';
+    case 'reviewers':
+      return 'Review 猫猫';
+    case 'review_recorder':
+      return '共识记录猫猫';
+    case 'catcafe':
+      return 'CatCafe 协调器';
+    case 'user':
+      return '你';
+  }
+}
+
+function workflowStatusLabel(status: DesktopDevelopmentWorkflowNode['status']): string {
+  switch (status) {
+    case 'pending':
+      return '未开始';
+    case 'active':
+      return '进行中';
+    case 'blocked':
+      return '被阻断';
+    case 'completed':
+      return '已完成';
+  }
+}
+
+function workflowActionLabel(action: NonNullable<DesktopDevelopmentWorkflowNode['manualAction']>): string {
+  switch (action) {
+    case 'wake_desktop':
+      return '再次触发 ChatGPT';
+    case 'replay_review_stage':
+      return '再次触发本阶段 Review';
+    case 'record_architecture_decision':
+      return '请在下方处理架构决策';
+    case 'approve_review_continuation':
+      return '请在下方批准继续 Review';
+    case 'record_acceptance':
+      return '请在下方完成最终验收';
+  }
+}
+
+function workflowNodeClass(status: DesktopDevelopmentWorkflowNode['status']): string {
+  switch (status) {
+    case 'active':
+      return 'border-[var(--mc-accent)] bg-[var(--console-hover-bg)]';
+    case 'blocked':
+      return 'border-[var(--mc-accent)] bg-[var(--console-shell-bg)]';
+    case 'completed':
+      return 'border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)]';
+    case 'pending':
+      return 'border-transparent bg-[var(--console-shell-bg)] opacity-70';
+  }
+}
+
+function formatWorkflowTime(value: number | null): string {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(value));
 }

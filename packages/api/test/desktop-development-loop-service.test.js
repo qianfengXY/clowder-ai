@@ -268,6 +268,10 @@ describe(
       assert.equal(first.managedWorkVersion, 2);
       assert.equal(first.reviewRoundId, null);
       assert.deepEqual(first.nextLegalActions, ['implement_and_report_committed_sha']);
+      assert.equal(first.workflowNodes[0].id, 'implementation');
+      assert.equal(first.workflowNodes[0].status, 'active');
+      assert.equal(first.workflowNodes[0].manualAction, 'wake_desktop');
+      assert.ok(first.workflowNodes.slice(1).every((node) => node.status === 'pending'));
       assert.doesNotMatch(JSON.stringify(first), /example-worktree/);
 
       const connectedProject = await service.readProject({
@@ -341,6 +345,14 @@ describe(
       assert.equal(reported.phase, 'independent_review');
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
+      assert.deepEqual(
+        reported.workflowNodes.slice(0, 3).map((node) => [node.id, node.status, node.manualAction]),
+        [
+          ['implementation', 'completed', null],
+          ['independent_review', 'active', 'replay_review_stage'],
+          ['cross_review', 'pending', null],
+        ],
+      );
       assert.equal(reviewHubEnsureCount, 2);
       assert.deepEqual(reviewDispatches, [
         {
@@ -393,6 +405,92 @@ describe(
       assert.equal(replayed.managedWorkVersion, reported.managedWorkVersion);
       assert.equal(reviewDispatches.length, 2, 'the dispatcher receives a retry and deduplicates at message ingress');
       assert.equal(desktopPauses.length, 2, 'an idempotent report keeps the durable goal paused');
+    });
+
+    test('lets the operator re-trigger the current Desktop or Review node without changing canonical state', async () => {
+      const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+        pause: async (input) => desktopPauses.push(input),
+      };
+      let packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-retry',
+        chatRef: 'chat-retry',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-retry',
+        workspace: workspace(),
+        now: 2_000,
+      });
+
+      const desktopRetry = await service.retryCurrentStage({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: packet.workId,
+        attemptId: packet.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'manual-desktop-retry',
+        now: 2_500,
+      });
+      assert.equal(desktopRetry.action, 'wake_desktop');
+      assert.equal(desktopRetry.work.attemptId, packet.attemptId);
+      assert.equal(desktopRetry.work.managedWorkVersion, packet.managedWorkVersion);
+      assert.equal(desktopWakes.length, 1);
+      assert.equal(desktopWakes[0].threadId, 'chat-retry');
+      assert.match(desktopWakes[0].objective, /\[开发闭环系统消息\]/);
+      assert.match(desktopWakes[0].objective, /不要轮询等待 CatCafe/);
+
+      packet = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: packet.workId,
+        attemptId: packet.attemptId,
+        runtimeSessionId: 'runtime-retry',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'report-retry',
+        now: 3_000,
+      });
+      assert.equal(reviewDispatches.length, 1);
+
+      const reviewRetry = await service.retryCurrentStage({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: packet.workId,
+        attemptId: packet.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'manual-review-retry',
+        now: 3_500,
+      });
+      assert.equal(reviewRetry.action, 'replay_review_stage');
+      assert.equal(reviewRetry.work.reviewRoundId, packet.reviewRoundId);
+      assert.equal(reviewDispatches.length, 2);
+      assert.equal(reviewDispatches[1].stage, 'independent');
+      assert.equal(reviewDispatches[1].deliveryKey, 'manual:manual-review-retry');
+      assert.deepEqual(reviewDispatches[1].reviewerCatIds, ['cat-codex', 'cat-kimi']);
+
+      await assert.rejects(
+        () =>
+          service.retryCurrentStage({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: packet.workId,
+            attemptId: packet.attemptId,
+            expectedManagedWorkVersion: packet.managedWorkVersion - 1,
+            idempotencyKey: 'stale-review-retry',
+          }),
+        /version conflict/i,
+      );
     });
 
     test('returns only barrier-safe consensus findings in the Resume Packet', async () => {

@@ -135,6 +135,18 @@ Legacy findings written before `designRefs` became mandatory are projected with 
 thread as their sole inferred design anchor. The write path stays strict, and no review evidence is promoted into a
 design decision.
 
+The same read builds an ordered `workflowNodes` projection for Mission Hub. Each node carries a semantic node ID,
+server-derived `pending / active / blocked / completed` status, responsible actor, timestamps, optional reviewer
+progress and one legal manual action. It is deliberately not persisted: F275 evidence, F253 ReviewRound progress and
+the F289 session binding remain the only truth. A hand-off is visible as complete only after the destination's
+canonical state exists; a Resume Capsule or conversational claim alone is insufficient.
+
+The authenticated Cat Café surface may retry the current stage with the observed attempt and managed-work version.
+Desktop implementation/fix/merge retries wake the same permanent task; Review retries re-dispatch only unfinished
+participants (or the designated consensus recorder) with a new deterministic delivery key. Architecture choice,
+15-attempt continuation and final acceptance remain dedicated user decisions and are rejected by the generic retry
+route. Terminal or stale attempts cannot be replayed.
+
 Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
 the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible
 inside an actual turn; goal metadata alone cannot satisfy confirmation. If the bound task is dormant and has no IPC

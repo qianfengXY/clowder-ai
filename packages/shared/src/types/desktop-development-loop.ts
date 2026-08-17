@@ -24,6 +24,41 @@ export type DesktopDevelopmentPhase =
   | 'accepted'
   | 'rejected';
 
+export type DesktopDevelopmentWorkflowNodeId =
+  | 'implementation'
+  | 'independent_review'
+  | 'cross_review'
+  | 'consensus'
+  | 'handoff'
+  | 'merge'
+  | 'acceptance';
+
+export type DesktopDevelopmentWorkflowNodeStatus = 'pending' | 'active' | 'blocked' | 'completed';
+
+export type DesktopDevelopmentWorkflowActor = 'chatgpt_desktop' | 'reviewers' | 'review_recorder' | 'catcafe' | 'user';
+
+export type DesktopDevelopmentManualAction =
+  | 'wake_desktop'
+  | 'replay_review_stage'
+  | 'record_architecture_decision'
+  | 'approve_review_continuation'
+  | 'record_acceptance';
+
+/**
+ * Server-derived projection of one visible step in the current attempt.
+ * This is a view over F275/F253/F289 truth, never a second workflow ledger.
+ */
+export interface DesktopDevelopmentWorkflowNode {
+  readonly id: DesktopDevelopmentWorkflowNodeId;
+  readonly status: DesktopDevelopmentWorkflowNodeStatus;
+  readonly actor: DesktopDevelopmentWorkflowActor;
+  readonly startedAt: number | null;
+  readonly completedAt: number | null;
+  readonly completedCount?: number;
+  readonly requiredCount?: number;
+  readonly manualAction: DesktopDevelopmentManualAction | null;
+}
+
 export interface GitHubRepositoryIdentity {
   readonly host: 'github.com';
   readonly owner: string;
@@ -182,6 +217,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly reviewContinuationPending: boolean;
   readonly architectureDecisionPending: boolean;
   readonly nextLegalActions: readonly string[];
+  /** Ordered, user-visible projection of the current attempt and its hand-offs. */
+  readonly workflowNodes: readonly DesktopDevelopmentWorkflowNode[];
 }
 
 export interface PublicDesktopDevelopmentProject {

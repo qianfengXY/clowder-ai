@@ -113,6 +113,7 @@ const reviewContinuationSchema = z
     idempotencyKey: idSchema,
   })
   .strict();
+const retryCurrentStageSchema = reviewContinuationSchema;
 const architectureDecisionSchema = reviewContinuationSchema
   .extend({
     findingId: idSchema,
@@ -412,6 +413,31 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
           ownerUserId,
         });
         return reply.send({ reviewRound, replayed: true });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/works/:workId/retry-current-stage',
+    async (request, reply) => {
+      const ownerUserId = requireUserId(request, reply);
+      if (!ownerUserId) return;
+      if (!desktopDevelopmentLoopService) {
+        return reply.status(503).send({ error: 'Desktop development loop is unavailable' });
+      }
+      const params = z.object({ projectId: idSchema, workId: idSchema }).strict().safeParse(request.params);
+      const body = retryCurrentStageSchema.safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        return reply.send(
+          await desktopDevelopmentLoopService.retryCurrentStage({
+            ...params.data,
+            ...body.data,
+            ownerUserId,
+          }),
+        );
       } catch (error) {
         return sendError(reply, error);
       }
