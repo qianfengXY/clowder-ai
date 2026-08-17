@@ -191,7 +191,8 @@ export const reviewRoundTools = [
       "Create or replace the authenticated reviewer's versioned private exact-SHA draft. " +
       'Use when: independent review has produced a complete approve verdict or severity-ranked findings. ' +
       'NOT for: finishing the stage, reading peers, publishing consensus, or reviewing a different SHA. ' +
-      'Output: the updated private draft and draft version; peers cannot read it before the barrier.',
+      'Output: the updated private draft and draft version; peers cannot read it before the barrier. ' +
+      'After the stage is finished, the user-visible reply must follow the Review Hub shared two-table Markdown contract; do not replace it with prose.',
     inputSchema: reviewDraftSubmitInputSchema,
     handler: handleReviewDraftSubmit,
     governance: {
@@ -207,7 +208,8 @@ export const reviewRoundTools = [
       "Fence the authenticated reviewer's current independent draft as finished. " +
       'Use when: your private draft is final and must count toward opening the independent-review barrier. ' +
       'NOT for: submitting a draft, skipping another reviewer, cross-review, or publishing consensus. ' +
-      'Output: updated round phase/version; the barrier opens only after every assigned reviewer finishes.',
+      'Output: updated round phase/version; the barrier opens only after every assigned reviewer finishes. ' +
+      'The user-visible reply must follow the Review Hub shared two-table Markdown contract and include only this reviewer before the barrier.',
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewIndependentFinish,
     governance: {
@@ -239,7 +241,8 @@ export const reviewRoundTools = [
       'Record that the authenticated reviewer completed cross-review of the barrier-open drafts. ' +
       'Use when: you compared every independent draft and resolved corroborations or contradictions. ' +
       'NOT for: independent review, draft submission, or unilateral consensus. ' +
-      'Output: updated round phase/version; consensus remains blocked until every reviewer finishes.',
+      'Output: updated round phase/version; consensus remains blocked until every reviewer finishes. ' +
+      'The user-visible reply must follow the Review Hub shared two-table Markdown contract and keep one row per assessed finding.',
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewCrossFinish,
     governance: {
@@ -255,7 +258,8 @@ export const reviewRoundTools = [
       'Publish the final barrier-safe consensus for an exact-SHA round and append its canonical managed-work review evidence. ' +
       'Use when: all reviewers finished cross-review and the server-designated recorder has the canonical verdict, checks, findings, and resolved ids. ' +
       'NOT for: non-recorders, pre-barrier publication, GitHub Issues, Git merge, push, deploy, or project-specific publication policy. ' +
-      'Output: completed ReviewRound consensus, durable findings, and canonical F275 review evidence.',
+      'Output: completed ReviewRound consensus, durable findings, and canonical F275 review evidence. ' +
+      'The user-visible reply must follow the Review Hub shared two-table Markdown contract, including rejected or resolved rows.',
     inputSchema: reviewConsensusPublishInputSchema,
     handler: handleReviewConsensusPublish,
     governance: {

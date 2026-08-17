@@ -56,14 +56,22 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.match(requests[0].payload.content, /权威方案会话：project-feature-plan:project-1:backlog-1/);
     assert.match(requests[0].payload.content, /每条 finding 必须填写非空 designRefs/);
     assert.match(requests[0].payload.content, /禁止把个人偏好、超出方案的重构或新增需求包装成 finding/);
+    assert.match(requests[0].payload.content, /GPT 与 Kimi 共用同一模板/);
+    assert.match(
+      requests[0].payload.content,
+      /\| 编号 \| 检视者 \| 级别 \| 结论 \| 检视意见 \| 证据 \| 方案依据 \| 处理要求 \|/,
+    );
+    assert.match(requests[0].payload.content, /没有 finding 时仍必须输出一行/);
     assert.match(requests[0].payload.content, /Attempt #3/);
     assert.doesNotMatch(requests[0].payload.content, /F289/);
     assert.match(requests[0].payload.content, /a{40}/);
     assert.match(requests[1].payload.content, /^@gpt\n@kimi\n/);
     assert.match(requests[1].payload.content, /独立检视 Barrier 已开启/);
+    assert.match(requests[1].payload.content, /成立 \/ 不成立 \/ 重复 \/ 待用户决策/);
     assert.match(requests[2].payload.content, /^@gpt\n/);
     assert.doesNotMatch(requests[2].payload.content, /^@gpt\n@kimi/m);
     assert.match(requests[2].payload.content, /阶段：共识整理/);
+    assert.match(requests[2].payload.content, /纳入共识 \/ 驳回 \/ 已解决 \/ 待用户决策/);
     assert.equal(new Set(requests.map((request) => request.payload.idempotencyKey)).size, 3);
     assert.equal(
       requests.every((request) =>

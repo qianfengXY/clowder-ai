@@ -307,6 +307,24 @@ function progressLine(stage: ReviewRoundDispatchStage, completed: number, total:
   return `独立检视：${total} / ${total} 已完成\n交叉检视：${total} / ${total} 已完成`;
 }
 
+const VISIBLE_REVIEW_REPORT_CONTRACT = [
+  '面向用户的 Review 输出格式（强制，GPT 与 Kimi 共用同一模板）：',
+  '1. 完成本阶段工具调用后，最终可见回复必须按顺序包含下面两张 GFM Markdown 表格；不得改列、换序，也不得用列表或散文代替表格。',
+  '2. 摘要表：',
+  '| 项目 / 功能 | 阶段 | Review Round | Attempt | 精确提交 | Verdict |',
+  '| --- | --- | --- | --- | --- | --- |',
+  '| 实际项目与功能 | 当前阶段 | 实际 Round ID | 实际 Attempt | 实际 SHA | 本阶段结论 |',
+  '3. 检视意见表：',
+  '| 编号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- |',
+  '| 稳定编号 | 当前检视者 | P1/P2/P3/— | 阶段结论 | 具体问题或通过说明 | 文件、行号、测试或命令 | designRefs 或验收条件 | 必须采取的动作或“无需处理” |',
+  '4. 每条 finding 单独一行；优先沿用 draftFindingId/findingId。单元格内换行使用 <br>，竖线必须转义为 \\|。不要把表格放进代码块。',
+  '5. 没有 finding 时仍必须输出一行：级别填“—”、结论填“通过”、检视意见说明已完成的检查、处理要求填“无需处理”。不得只回复“通过”或一段总结。',
+  '6. 独立检视阶段只展示当前检视者自己的结论，不得泄露、推测或占位展示其他 reviewer 的内容。',
+  '7. 交叉检视阶段对每条独立 finding 标记“成立 / 不成立 / 重复 / 待用户决策”；共识阶段标记“纳入共识 / 驳回 / 已解决 / 待用户决策”。被驳回的意见也保留一行并写明依据。',
+  '8. 表格前后不得再重复输出 findings 的纯文字清单；必要说明写入对应表格单元格。',
+].join('\n');
+
 function stageInstructions(stage: ReviewRoundDispatchStage): string {
   const planBoundary = [
     '方案边界（强制）：',
@@ -325,6 +343,8 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
       '3. 使用 cat_cafe_review_draft_submit 提交私有 Review draft。',
       '4. 随后使用 cat_cafe_review_independent_finish 标记独立检视完成。',
       '5. 本阶段不要修改代码、提交、合并、推送或部署。',
+      '',
+      VISIBLE_REVIEW_REPORT_CONTRACT,
     ].join('\n');
   }
   if (stage === 'cross_review') {
@@ -337,6 +357,8 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
       '3. 使用 cat_cafe_review_cross_finish 标记交叉检视完成。',
       '4. 两位 reviewer 都完成后，系统将自动进入共识整理阶段。',
       '5. 本阶段不要修改代码、提交、合并、推送或部署。',
+      '',
+      VISIBLE_REVIEW_REPORT_CONTRACT,
     ].join('\n');
   }
   return [
@@ -346,6 +368,8 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
     '1. 核验并合并仍然成立的 findings。',
     '2. 使用 cat_cafe_review_consensus_publish 发布该精确提交的最终 verdict。',
     '3. 不要发布 Issue，也不要修改代码、合并、推送或部署。',
+    '',
+    VISIBLE_REVIEW_REPORT_CONTRACT,
   ].join('\n');
 }
 

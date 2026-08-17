@@ -122,9 +122,10 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 
 1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源。
 2. 一个导入功能只有一个方案会话和一个 Review 会话；一个 exact SHA 只有一个 active immutable ReviewRound。
-3. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
-4. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
-5. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过且历史共识 finding 全关闭。
+3. 每个 Review 阶段面向用户的回复统一采用同一份双表格协议：阶段摘要表 + 检视意见明细表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
+4. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
+5. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
+6. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过且历史共识 finding 全关闭。
 6. session/transition/evidence 写入同时验证 actor、项目 scope、expected version、binding epoch 与 idempotency key。
 7. Resume Packet 是 server-derived projection，不能包含凭据、私有 reviewer draft 或可从远端滥用的本地绝对路径。
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
