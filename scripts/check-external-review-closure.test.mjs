@@ -23,12 +23,14 @@ describe('review completion dual-route hard guard', () => {
       每条 finding 引用 git:refs/heads/<方案分支>@<完整 designExactSha>。
       同时引用 git:refs/heads/<方案分支>@<完整 designExactSha>:<适用设计文档路径>。
       只读取系统消息选中的中文权威文档，英文翻译件不进入 Review。最终可见回复使用中文。
+      从用户旅程、前端产品体验、交互、验收标准建立矩阵，并加载 \`refs/chatgpt-review-user-journey.md\`。
       独立检视时 Barrier 前不得读取或推测其他 reviewer 意见。
       调用 \`cat_cafe_review_draft_submit\`、\`cat_cafe_review_independent_finish\`、
       \`cat_cafe_review_cross_finish\` 和 \`cat_cafe_review_consensus_publish\`。
       全程不得修改代码或 Git；重大分歧使用 \`scope=architecture_decision\`。
       无法共识时保持 \`consensus_ready\`；每个系统消息只执行一次对应阶段。
       可见表格首列使用仅用于展示的短序号；完整 ID，禁止把可见短序号当作 callback 标识。
+      每位 reviewer 的必需旅程均有 \`exactSha\` 真实交互通过证据，才能设置 \`checksPassed=true\`。
     `);
     assert.deepEqual(valid, []);
 
@@ -48,10 +50,13 @@ describe('review completion dual-route hard guard', () => {
     if (typeof reviewGuard.checkChatgptReviewRoundTemplate !== 'function') return;
 
     const valid = reviewGuard.checkChatgptReviewRoundTemplate(`
+      | 旅程 | 验证者 | 起点与操作 | 预期与实际结果 | 证据 | 结果 |
+      | J1 | GPT | 空状态点击入口 | 页面打开 | 浏览器记录 | 通过 |
       | 序号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |
       | --- | --- | --- | --- | --- | --- | --- | --- |
       | 1 | GPT | P2 | 成立 | 示例 | 文件 | 方案 | 修复 |
       按当前表格行顺序填写 \`1\`、\`2\`、\`3\`。完整 ID 只用于 callback，短序号不得作为 callback 标识。
+      静态检查不得填写为真实交互通过证据，共识不得设置 \`checksPassed=true\`。
     `);
     assert.deepEqual(valid, []);
 
@@ -61,6 +66,27 @@ describe('review completion dual-route hard guard', () => {
     `);
     assert.match(invalid.join('\n'), /序号/);
     assert.match(invalid.join('\n'), /full internal finding ID/);
+  });
+
+  it('requires independent exact-SHA user-journey evidence for UI review', () => {
+    assert.equal(typeof reviewGuard.checkChatgptReviewUserJourneyLanguage, 'function');
+    if (typeof reviewGuard.checkChatgptReviewUserJourneyLanguage !== 'function') return;
+
+    const valid = reviewGuard.checkChatgptReviewUserJourneyLanguage(`
+      矩阵覆盖主路径、首次启动/空状态、正常状态和失败状态。
+      从用户可见页面入口开始；直接调用 API 只能作为补充诊断。
+      构建成功、单元测试、组件/快照渲染、菜单文字存在、阅读 JSX、直接调用 API 都不能单独证明通过。
+      每位 reviewer 独立执行自己的矩阵；缺少真实用户旅程验收证据时保持阻断，不能设置 checksPassed=true。
+      设置功能最低覆盖零 Workspace / 首次启动。
+    `);
+    assert.deepEqual(valid, []);
+
+    const invalid = reviewGuard.checkChatgptReviewUserJourneyLanguage(
+      'Build and unit tests passed, so the frontend user journey is approved.',
+    );
+    assert.match(invalid.join('\n'), /首次启动\/空状态/);
+    assert.match(invalid.join('\n'), /用户可见页面入口/);
+    assert.match(invalid.join('\n'), /checksPassed=true/);
   });
 
   it('rejects active guidance that turns every SHA change or every diff into mandatory re-review', () => {

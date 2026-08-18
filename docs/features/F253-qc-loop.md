@@ -151,6 +151,7 @@ qc.idle
 5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>` 与至少一份本功能设计文档。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户处理。
 6. 用户可以保持当前方案，或与猫猫修改并提交同一方案分支。Cat Café 验证方案 SHA 后才恢复原 ChatGPT 窗口；ChatGPT 按 callback 共识修复并提交新 code SHA，再重新开始完整 ReviewRound。
 7. 所有已接受 finding（含 P3）关闭、无新 finding、checks 通过后才允许合入；merge 后仍必须等待用户亲自验收。
+8. 方案包含用户交互或前端验收时，每位独立 reviewer 都必须在 exact SHA 上从页面入口执行真实用户旅程；build、unit test、静态渲染和直接 API 验证均不能替代，缺失证据时 checks 不得通过。
 
 执行真相源：`chatgpt-review-rounds` skill；Review 系统消息只携带本轮身份、阶段和双 SHA，每轮可见结构真相源为 `cat-cafe-skills/refs/chatgpt-review-round-template.md`。
 

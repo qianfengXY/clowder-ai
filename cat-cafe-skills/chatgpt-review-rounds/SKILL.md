@@ -5,7 +5,7 @@ description: >
   Execute one callback-backed independent, cross-review, or consensus stage for ChatGPT-authored Cat Café work.
   Use when: a compact Review system message supplies a Review Round, exact code SHA, shared design-branch SHA, and feature design documents.
   Not for: ordinary cat-authored review, implementation, Git writes, merge, push, deploy, or inventing a plan beyond the design branch.
-  Output: durable Review callbacks plus the shared two-table user-visible report; pause for user resolution on design disagreement.
+  Output: durable Review callbacks plus the shared table report, including mandatory user-journey evidence when the design has user-facing behavior.
 triggers:
   - "Review 系统消息"
   - "独立检视"
@@ -46,6 +46,10 @@ git:refs/heads/<方案分支>@<完整 designExactSha>:<适用设计文档路径>
 第一条证明方案提交，第二条从本功能已配置的文档中至少选择一份；需要更精确时可在该文档 ref 后附章节。
 缺少任一依据的 finding 不得提交。禁止引用未配置文档、英文翻译件或其他功能文档来扩张本轮范围。
 
+开始看 diff 前，先把选中设计文档里的“用户旅程、前端产品体验、交互、验收标准”映射成验收矩阵。只要方案包含
+用户可见行为或 UI 验收，就必须完整读取并执行
+[`refs/chatgpt-review-user-journey.md`](../refs/chatgpt-review-user-journey.md)；不能根据本轮 diff 是否碰前端来跳过。
+
 ## 方案边界
 
 Review 只判断实现是否正确落地方案提交及其验收条件：
@@ -66,20 +70,23 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 
 1. 调用 `cat_cafe_review_round_read` 与 `cat_cafe_review_private_draft_read` 获取本人可见状态。
 2. 只读检查实现 SHA、方案 SHA、diff、源文件和风险匹配测试；Barrier 前不得读取或推测其他 reviewer 意见。
-3. 调用 `cat_cafe_review_draft_submit` 提交完整私有 draft。`approve` 时 findings 必须为空；`findings` 时逐条给出证据、精确方案 ref 与 scope。
-4. 调用 `cat_cafe_review_independent_finish` 完成本阶段。不得修改代码或 Git。
+3. 方案含用户交互时，本 reviewer 必须在 `exactSha` 的隔离环境中亲自从页面入口执行验收矩阵。构建、单元测试、
+   组件渲染测试和源码静态检查不能替代真实点击、输入、导航、状态变化及可观察结果。
+4. 任一必需旅程失败或无法执行时，提交 `scope=plan_conformance` 的阻断 finding；不得给出 `approve`。
+5. 调用 `cat_cafe_review_draft_submit` 提交完整私有 draft。`approve` 时 findings 必须为空；`findings` 时逐条给出证据、精确方案 ref 与 scope。
+6. 调用 `cat_cafe_review_independent_finish` 完成本阶段。不得修改代码或 Git。
 
 ### 交叉检视
 
 1. 调用 `cat_cafe_review_barrier_drafts_read`；Barrier 未开启就停止，不绕过。
-2. 对全部独立 finding 逐条核验事实、证据、重复关系与方案依据；不能用多数票代替证据。
+2. 对全部独立 finding 逐条核验事实、证据、重复关系与方案依据；同时确认每位 reviewer 都独立完成了必需的用户旅程矩阵，不能由一只猫的浏览器证据代替另一只。
 3. 调用 `cat_cafe_review_cross_finish`。本阶段仍不得修改代码或发布共识。
 
 ### 共识整理
 
 1. 确认自己是服务端指定 recorder，读取 barrier-safe 状态与 drafts。
 2. 合并仍成立的 findings，保留被驳回、重复、已解决项的可见说明。
-3. 能形成共识时调用 `cat_cafe_review_consensus_publish`；approved 必须 checks 通过且 open findings 为零。
+3. 能形成共识时调用 `cat_cafe_review_consensus_publish`；approved 必须 checks 通过且 open findings 为零。方案含用户交互时，只有每位 reviewer 的必需旅程均有 `exactSha` 真实交互通过证据，才能设置 `checksPassed=true`。
 4. reviewer 无法形成共识时，不新增 reviewer、不反复自唤醒、不伪造结论：保持 `consensus_ready`，用统一表格列出分歧并等待用户介入。
 5. 收到系统消息中的用户裁决后，以裁决为最终依据，直接发布本轮共识，不再等待 reviewer 自行收敛。
 
@@ -107,6 +114,9 @@ callback 仍必须使用服务端返回的完整 ID，禁止把可见短序号�
 | 把方案讨论会话当最终方案 | 只认系统消息中的共用方案分支、精确 SHA 与设计文档清单 |
 | 为每个功能再创建方案分支 | 项目只保留一个共用方案分支；功能只选择文档 |
 | 同时读取或列出中英文版本 | 只读取系统消息选中的中文权威文档；英文翻译件不进入 Review |
+| 只跑 build/unit test 就判定前端通过 | 从设计提取用户旅程，在 `exactSha` 运行页面中真实操作并记录可观察结果 |
+| 只验证正常数据状态 | 同时覆盖方案相关的首次启动/空状态、正常状态、失败/冲突状态及明确要求的键盘/移动端 |
+| 一只猫的浏览器证据供两只猫共用 | 每位独立 reviewer 都必须亲自执行必需旅程 |
 | 把模板和约束复制进系统消息 | 加载本技能与引用模板 |
 | Review 中顺手重设计 | 提交 `architecture_decision` P1 并暂停给用户 |
 | 共识卡住就增加 reviewer | 保持 `consensus_ready`，等待用户裁决 |

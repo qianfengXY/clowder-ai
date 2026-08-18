@@ -32,6 +32,8 @@ export function checkChatgptReviewRoundLanguage(source) {
     '中文权威文档',
     '英文翻译件',
     '最终可见回复使用中文',
+    '用户旅程、前端产品体验、交互、验收标准',
+    '`refs/chatgpt-review-user-journey.md`',
     'Barrier 前不得读取或推测其他 reviewer 意见',
     '`cat_cafe_review_draft_submit`',
     '`cat_cafe_review_independent_finish`',
@@ -42,16 +44,37 @@ export function checkChatgptReviewRoundLanguage(source) {
     '保持 `consensus_ready`',
     '仅用于展示的短序号',
     '完整 ID，禁止把可见短序号当作 callback 标识',
+    '每位 reviewer 的必需旅程均有 `exactSha` 真实交互通过证据',
+    '才能设置 `checksPassed=true`',
     '每个系统消息只执行一次对应阶段',
+  ]);
+}
+
+export function checkChatgptReviewUserJourneyLanguage(source) {
+  return requireTokens(source, 'chatgpt-review-rounds user-journey gate', [
+    '主路径',
+    '首次启动/空状态',
+    '正常状态',
+    '失败状态',
+    '从用户可见页面入口开始',
+    '直接调用 API 只能作为补充诊断',
+    '构建成功、单元测试、组件/快照渲染、菜单文字存在、阅读 JSX、直接调用 API',
+    '每位 reviewer 独立执行自己的矩阵',
+    '缺少真实用户旅程验收证据',
+    'checksPassed=true',
+    '零 Workspace / 首次启动',
   ]);
 }
 
 export function checkChatgptReviewRoundTemplate(source) {
   const errors = requireTokens(source, 'chatgpt-review-rounds visible template', [
     '| 序号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |',
+    '| 旅程 | 验证者 | 起点与操作 | 预期与实际结果 | 证据 | 结果 |',
     '按当前表格行顺序填写 `1`、`2`、`3`',
     '完整 ID 只用于 callback',
     '短序号不得作为 callback 标识',
+    '不得填写为真实交互通过证据',
+    '共识不得设置 `checksPassed=true`',
   ]);
   if (/\|\s*`?<draftFindingId\s*\/\s*findingId/i.test(source)) {
     errors.push('chatgpt-review-rounds visible template exposes a full internal finding ID in the table.');
@@ -65,6 +88,7 @@ export function checkReviewRoutingSurfaces({
   receiveReviewSkill,
   chatgptReviewRoundsSkill,
   chatgptReviewRoundsTemplate,
+  chatgptReviewUserJourneyReference,
   mergeGateSkill,
   ironLaw,
   inboundPrReference,
@@ -111,6 +135,7 @@ export function checkReviewRoutingSurfaces({
     ]),
     ...checkChatgptReviewRoundLanguage(chatgptReviewRoundsSkill),
     ...checkChatgptReviewRoundTemplate(chatgptReviewRoundsTemplate),
+    ...checkChatgptReviewUserJourneyLanguage(chatgptReviewUserJourneyReference),
     ...requireTokens(mergeGateSkill, 'merge-gate review provenance convention', [
       'reviewReentry',
       'already-consumed exact-HEAD review',

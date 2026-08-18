@@ -342,7 +342,7 @@ skills:
       Execute one callback-backed independent, cross-review, or consensus stage for ChatGPT-authored Cat Café work.
       Use when: a compact Review system message supplies a Review Round, exact code SHA, shared design-branch SHA, and feature design documents.
       Not for: ordinary cat-authored review, implementation, Git writes, merge, push, deploy, or inventing a plan beyond the design branch.
-      Output: durable Review callbacks plus the shared two-table user-visible report; pause for user resolution on design disagreement.
+      Output: durable Review callbacks plus the shared table report, including mandatory user-journey evidence when the design has user-facing behavior.
     triggers:
       - "ChatGPT 提交代码"
       - "多猫独立检视"
@@ -353,7 +353,7 @@ skills:
       - "普通猫作者的单一 reviewer 流程"
       - "自检"
       - "cloud-only review"
-    output: "Callback-backed Review stage + shared two-table report, bound to exact code and design commits"
+    output: "Callback-backed Review stage + shared report with required user-journey evidence, bound to exact code and design commits"
     next: ["merge-gate"]
     sop_step: 3
     merged_from: null

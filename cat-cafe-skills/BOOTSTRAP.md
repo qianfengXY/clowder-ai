@@ -83,7 +83,8 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `refs/commit-signatures.md` | 猫猫签名表 + @ 句柄 |
 | `refs/pr-template.md` | PR 模板 + remote review 触发模板 |
 | `refs/review-request-template.md` | Review 请求信模板 |
-| `refs/chatgpt-review-round-template.md` | GPT/Kimi 共用的 Review Hub 两表输出模板 |
+| `refs/chatgpt-review-round-template.md` | GPT/Kimi 共用的 Review Hub 表格输出模板 |
+| `refs/chatgpt-review-user-journey.md` | 方案含用户交互时的真实页面旅程验收门 |
 | `refs/vision-evidence-workflow.md` | 前端截图/录屏证据流程（B1） |
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
 | `refs/f190-frontend-lessons.md` | F190 Console intake 的前端案例与红区教训 |
