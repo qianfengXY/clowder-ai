@@ -57,4 +57,27 @@ test('Review display context resolves the external project feature instead of th
       designDocuments: ['docs/design/f006.md'],
     },
   );
+
+  assert.deepEqual(
+    await resolver.resolve({
+      ownerUserId: 'owner-1',
+      projectId: 'project-traqen',
+      workId: 'work-f006',
+      attemptId: 'attempt-3',
+      designBranch: 'design/f001-legacy-system-understanding',
+      designExactSha: 'd'.repeat(40),
+      designDocuments: ['docs/design/f006.md', 'docs/design/f006.zh-CN.md'],
+    }),
+    {
+      projectName: 'Traqen',
+      repository: 'qianfengXY/Traqen',
+      backlogItemId: 'backlog-f006',
+      featureId: 'F006',
+      featureTitle: 'Workspace capability settings',
+      attemptNumber: 3,
+      designBranch: 'design/shared-specs',
+      designExactSha: 'd'.repeat(40),
+      designDocuments: ['docs/design/f006.zh-CN.md'],
+    },
+  );
 });

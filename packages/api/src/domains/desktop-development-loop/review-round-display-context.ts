@@ -76,17 +76,28 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
       input.designBranch && input.designExactSha
         ? { branch: input.designBranch, exactSha: input.designExactSha }
         : null;
-    const configuredBranch = recordedDesign
-      ? recordedDesign.branch
-      : await this.externalProjects.getProjectDesignBranch(input.projectId);
+    const projectDesignBranch = await this.externalProjects.getProjectDesignBranch(input.projectId);
+    const configuredBranch = recordedDesign?.branch ?? projectDesignBranch;
     if (!configuredBranch) throw new Error('Review display context design branch is unavailable');
-    const design =
+    let design =
       recordedDesign ??
       (await this.designBranchResolver({
         sourcePath: project.sourcePath,
         repository: project.desktopDevelopment.repository,
         branch: configuredBranch,
       }));
+    if (recordedDesign && projectDesignBranch && projectDesignBranch !== recordedDesign.branch) {
+      try {
+        const renamedDesign = await this.designBranchResolver({
+          sourcePath: project.sourcePath,
+          repository: project.desktopDevelopment.repository,
+          branch: projectDesignBranch,
+        });
+        if (renamedDesign.exactSha === recordedDesign.exactSha) design = renamedDesign;
+      } catch {
+        // A recorded exact SHA remains valid when the currently configured alias is unavailable.
+      }
+    }
     const configuredDocuments =
       input.designDocuments ?? (await this.externalProjects.getFeatureDesignDocuments(input.projectId))[backlogItemId];
     if (!configuredDocuments?.length && !recordedDesign) {

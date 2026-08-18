@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-test('Review coordinator requires every new finding to cite the round design commit', async () => {
+test('Review coordinator requires every new finding to cite only the configured round design documents', async () => {
   const { ReviewRoundCoordinatorService } = await import(
     '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
   );
@@ -14,9 +14,9 @@ test('Review coordinator requires every new finding to cite the round design com
       workId: 'work-1',
       attemptId: 'attempt-1',
       exactSha: 'a'.repeat(40),
-      designBranch: 'design/f006-workspace',
+      designBranch: 'design/f001-legacy-system-understanding',
       designExactSha: designSha,
-      designDocuments: ['docs/design/f006.md'],
+      designDocuments: ['docs/design/f006.md', 'docs/design/f006.zh-CN.md'],
       reviewerCatIds: ['cat-gpt', 'cat-kimi'],
       recorderCatId: 'cat-gpt',
       reviewThreadId: 'project-feature-review:project-1:backlog-1',
@@ -33,6 +33,13 @@ test('Review coordinator requires every new finding to cite the round design com
     },
     {},
     {},
+    {
+      resolve: async () => ({
+        designBranch: 'design/shared-specs',
+        designExactSha: designSha,
+        designDocuments: ['docs/design/f006.zh-CN.md'],
+      }),
+    },
   );
   const base = {
     ownerUserId: 'owner-1',
@@ -53,7 +60,26 @@ test('Review coordinator requires every new finding to cite the round design com
 
   await assert.rejects(
     () => service.submitDraft({ ...base, findings: [{ ...finding, designRefs: ['docs/plan.md'] }] }),
-    new RegExp(`git:refs/heads/design/f006-workspace@${designSha}`),
+    new RegExp(`git:refs/heads/design/shared-specs@${designSha}`),
+  );
+  assert.equal(submitted, 0);
+
+  await assert.rejects(
+    () =>
+      service.submitDraft({
+        ...base,
+        findings: [
+          {
+            ...finding,
+            designRefs: [
+              `git:refs/heads/design/shared-specs@${designSha}`,
+              `git:refs/heads/design/shared-specs@${designSha}:docs/design/f006.zh-CN.md`,
+              `git:refs/heads/design/shared-specs@${designSha}:docs/design/f006.md`,
+            ],
+          },
+        ],
+      }),
+    /only the design documents configured for this feature/,
   );
   assert.equal(submitted, 0);
 
@@ -63,8 +89,9 @@ test('Review coordinator requires every new finding to cite the round design com
       {
         ...finding,
         designRefs: [
-          `git:refs/heads/design/f006-workspace@${designSha}`,
-          `git:refs/heads/design/f006-workspace@${designSha}:docs/design/f006.md`,
+          `git:refs/heads/design/shared-specs@${designSha}`,
+          `git:refs/heads/design/shared-specs@${designSha}:docs/design/f006.zh-CN.md`,
+          `git:refs/heads/design/shared-specs@${designSha}:docs/design/f006.zh-CN.md#验收条件`,
         ],
       },
     ],

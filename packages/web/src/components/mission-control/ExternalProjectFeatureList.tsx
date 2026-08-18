@@ -640,7 +640,8 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
                   </button>
                 </div>
                 <p className="mb-2 text-micro text-cafe-secondary">
-                  每行一个仓库相对路径。Review 会冻结共用方案分支的精确提交，并只按这些文档检视本功能。
+                  每行一个仓库相对路径。Review
+                  会冻结共用方案分支的精确提交，并只按这些文档检视本功能；若中英文成对，只选择中文权威文档，不要加入英文翻译件。
                 </p>
                 <div className="flex flex-wrap items-start gap-2">
                   <textarea

@@ -36,6 +36,7 @@ import {
   type DesignBranchResolver,
   type DesignDocumentsResolver,
   normalizeDesignDocuments,
+  preferChineseDesignDocuments,
   type ResolvedDesignAuthority,
   type ResolvedDesignBranch,
   resolveDesignBranch,
@@ -1265,7 +1266,7 @@ export class DesktopDevelopmentLoopService {
         ? buildDesignAuthorityRefs(
             review.round.designBranch,
             review.round.designExactSha,
-            review.round.designDocuments ?? [],
+            preferChineseDesignDocuments(review.round.designDocuments ?? []),
           )
         : design.status === 'ready' && design.branch && design.exactSha
           ? buildDesignAuthorityRefs(design.branch, design.exactSha, design.documents)
@@ -1317,7 +1318,7 @@ export class DesktopDevelopmentLoopService {
       designExactSha: design.exactSha,
       designDocuments: design.documents,
       reviewDesignExactSha: review?.round.designExactSha ?? null,
-      reviewDesignDocuments: review?.round.designDocuments ?? [],
+      reviewDesignDocuments: preferChineseDesignDocuments(review?.round.designDocuments ?? []),
       workId: managed.state.workId,
       attemptId: managed.attempt.attemptId,
       attemptNumber: managed.attempt.attemptNumber,

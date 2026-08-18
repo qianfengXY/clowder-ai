@@ -12,6 +12,7 @@ import type {
   ReviewDraftFindingInput,
 } from '../review-coordination/ReviewRoundStore.js';
 import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
+import { preferChineseDesignDocuments } from './design-branch-resolver.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
@@ -90,7 +91,8 @@ export class ReviewRoundCoordinatorService {
 
   async submitDraft(input: SubmitCoordinatedReviewDraftInput) {
     const safe = await this.requireReviewerInHub(input);
-    assertFindingDesignRefs(safe, input.findings);
+    const displayContext = this.reviewDisplayContexts ? await this.resolveDisplayContext(safe.round) : undefined;
+    assertFindingDesignRefs(safe, input.findings, displayContext);
     return this.reviewRounds.submitIndependentDraft({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
@@ -170,7 +172,8 @@ export class ReviewRoundCoordinatorService {
 
   async publishConsensus(input: PublishCoordinatedReviewConsensusInput): Promise<ReviewRoundSafeView> {
     const before = await this.requireReviewerInHub(input);
-    assertFindingDesignRefs(before, input.findings);
+    const displayContext = this.reviewDisplayContexts ? await this.resolveDisplayContext(before.round) : undefined;
+    assertFindingDesignRefs(before, input.findings, displayContext);
     const completed = await this.reviewRounds.publishConsensus({
       ownerUserId: input.ownerUserId,
       roundId: input.roundId,
@@ -343,20 +346,40 @@ export class ReviewRoundCoordinatorService {
 function assertFindingDesignRefs(
   review: ReviewRoundSafeView,
   findings: readonly { readonly designRefs: readonly string[] }[],
+  displayContext?: {
+    readonly designBranch: string;
+    readonly designExactSha: string;
+    readonly designDocuments: readonly string[];
+  },
 ): void {
-  const { designBranch, designExactSha } = review.round;
+  const designBranch = displayContext?.designBranch ?? review.round.designBranch;
+  const designExactSha = displayContext?.designExactSha ?? review.round.designExactSha;
   if (!designBranch || !designExactSha) return;
   const requiredRef = buildReviewDesignRef(designBranch, designExactSha);
   if (findings.some((finding) => !finding.designRefs.includes(requiredRef))) {
     throw new Error(`Every Review finding must reference the authoritative design commit: ${requiredRef}`);
   }
-  const requiredDocumentRefs = (review.round.designDocuments ?? []).map((documentPath) =>
-    buildReviewDesignDocumentRef(designBranch, designExactSha, documentPath),
-  );
+  const requiredDocumentRefs = preferChineseDesignDocuments(
+    displayContext?.designDocuments ?? review.round.designDocuments ?? [],
+  ).map((documentPath) => buildReviewDesignDocumentRef(designBranch, designExactSha, documentPath));
   if (
     requiredDocumentRefs.length > 0 &&
     findings.some((finding) => !finding.designRefs.some((value) => requiredDocumentRefs.includes(value)))
   ) {
     throw new Error('Every Review finding must reference at least one configured design document');
+  }
+  const designDocumentPrefix = `${requiredRef}:`;
+  if (
+    findings.some((finding) =>
+      finding.designRefs.some(
+        (value) =>
+          value.startsWith(designDocumentPrefix) &&
+          !requiredDocumentRefs.some(
+            (configuredRef) => value === configuredRef || value.startsWith(`${configuredRef}#`),
+          ),
+      ),
+    )
+  ) {
+    throw new Error('Review findings may reference only the design documents configured for this feature');
   }
 }

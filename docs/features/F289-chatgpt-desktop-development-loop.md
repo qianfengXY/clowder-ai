@@ -140,7 +140,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
 9. 协议版本或 capability 不兼容时写操作 fail closed；只读状态与恢复指引仍可返回。
 10. Cat Café 或 ChatGPT 可见窗口删除不等于 work/ReviewRound/证据删除。
-11. Review finding 必须引用冻结的方案提交与本功能设计文档；未由用户决定且未提交到共用方案分支的严重架构冲突，以及每 15 次循环边界，均阻断下一次 Desktop 投递。
+11. Review finding 必须引用冻结的方案提交，且只能引用本功能选中的设计文档；中英文成对时只读取中文权威文档，英文翻译件不进入 Review。未由用户决定且未提交到共用方案分支的严重架构冲突，以及每 15 次循环边界，均阻断下一次 Desktop 投递。
 12. Reviewer 无法形成共识时只接受当前用户的显式裁决授权；不得自动多数表决、追加 reviewer 或从聊天文字猜测授权。授权一经记录不可静默改写。
 
 ## MCP 合同

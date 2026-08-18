@@ -123,7 +123,7 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 2. 至少两只非作者猫读取同一个代码 SHA 和方案 SHA，各自独立检视并通过 callback 保存私有 draft；全部完成前禁止互看。
 3. 独立检视与后续交叉检视期间 Git 只读：reviewer 不改共享分支，不 commit/push/rebase。
 4. 全员通过 barrier 后公开意见，交叉核验证据、合并重复项；指定 recorder 只通过 Review callback 发布共识，不写 Git ledger。
-5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>`，并引用至少一份本功能设计文档。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户。
+5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>`，并且只能引用本功能已选设计文档中的至少一份；中英文成对时只选择并读取中文权威文档，英文翻译件不进入 Review。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户。
 6. 用户保持当前方案，或与猫猫修改并提交同一方案分支后，Cat Café 才向原 ChatGPT 窗口投递一次继续通知。
 7. ChatGPT 按 callback 共识修复、测试并提交新 code SHA，再从独立检视开始下一轮；全部 finding 关闭且 checks 通过后才能进入合入门禁，最终仍等待用户亲自验收。
 

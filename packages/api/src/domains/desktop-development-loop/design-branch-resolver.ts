@@ -126,5 +126,13 @@ export function normalizeDesignDocuments(documents: readonly string[]): readonly
     }
     return path;
   });
-  return [...new Set(normalized)];
+  return preferChineseDesignDocuments([...new Set(normalized)]);
+}
+
+export function preferChineseDesignDocuments(documents: readonly string[]): readonly string[] {
+  const selected = new Set(documents);
+  return documents.filter((documentPath) => {
+    if (!documentPath.endsWith('.md') || documentPath.endsWith('.zh-CN.md')) return true;
+    return !selected.has(`${documentPath.slice(0, -'.md'.length)}.zh-CN.md`);
+  });
 }
