@@ -14,23 +14,24 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 
 ## Finish line
 
-用户导入外部项目功能后，可以在该功能独立的方案会话中讨论，并从功能列表自动创建对应的 ChatGPT Desktop 开发任务；实现提交后，Cat Café 在该功能独立、长期复用的 Review 会话中完成两猫独立 Review、交叉印证与 finding 闭环。任一可见聊天窗口被删除或替换，都不会删除项目、交付轮次、ReviewRound 或证据。
+用户导入外部项目功能后，可以在该功能独立的方案讨论会话中协作，并把最终方案提交到为该功能绑定的方案分支。Cat Café 只以该分支的精确提交作为实现与 Review 权威，然后从功能列表自动创建对应的 ChatGPT Desktop 开发任务；实现提交后，Cat Café 在该功能独立、长期复用的 Review 会话中完成两猫独立 Review、交叉印证与 finding 闭环。任一可见聊天窗口被删除或替换，都不会删除项目、交付轮次、ReviewRound、方案分支绑定或证据。
 
 ## 用户旅程
 
 1. 用户在 Cat Café 创建项目，同时绑定 GitHub 仓库、默认分支和本地 checkout。
-2. 用户在该项目的普通会话中与猫猫讨论多个方案；冻结后的 Feature Doc、ADR 或实施计划提交到绑定仓库。
-3. 用户点击功能的“启动开发”；Cat Café 自动创建对应的 ChatGPT Desktop 任务，该任务连接精确 managed work 并取得 Resume Packet。
-4. ChatGPT Desktop 在永久 worktree 中实现、测试、commit，并按项目策略 push/开 PR；Cat Café 不代替 Desktop 写产品代码。
-5. 每个导入功能只有一个方案会话和一个 Review 会话。每次新实现在该功能 Review 会话中创建新的 ReviewRound，不创建新的可见会话窗口。
-6. CodeX 与 Kimi 对同一完整 commit SHA 先独立 Review，再交叉印证；只有 barrier 打开后的共识 finding 会交给 Desktop。
-7. ChatGPT 原实现会话读取 finding、修复、提交新 SHA；新 SHA 必须重新完成完整 ReviewRound，直到零 open finding。
-8. 项目前两次成功试点必须由用户在当前 ChatGPT 会话中确认合入。只有“已合入且最终验收通过”才增加成功试点计数。
-9. 两次成功试点后，项目自动切换为自动合入；exact-SHA、零 finding、检查与分支策略门禁不变，最终产品验收仍始终由用户完成。
-10. 验收不通过时，同一项目和功能 Review 会话开启新的 delivery cycle，保留上一轮证据，不重建整个上下文。
-11. Mission Hub 为每个功能展示当前 Attempt 的完整链路：Desktop 实现、独立检视、交叉检视、共识、修复交接/合入、最终验收；只有服务端确认状态迁移后节点才显示完成。
-12. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过 exact-SHA Review、架构决策、15 轮续审或最终验收，也不得创建平行 work/attempt/round。
-13. 当现有 reviewer 无法形成共识时，不引入第三 reviewer。用户可在 Mission Hub 给出最终裁决，并授权原共识记录猫在同一 round、同一 exact SHA 上提交最终检视意见。
+2. 用户在该项目的普通会话中与猫猫讨论多个方案；冻结后的 Feature Doc、ADR 或实施计划提交到该功能绑定的方案分支。
+3. Cat Café 校验方案分支属于项目绑定的同一 Git 仓库，并冻结其本地精确提交；未配置、未提交或仓库不一致时禁止启动。
+4. 用户点击功能的“启动开发”；Cat Café 自动创建对应的 ChatGPT Desktop 任务，该任务连接精确 managed work 并取得带方案分支与方案 SHA 的 Resume Packet。
+5. ChatGPT Desktop 在永久 worktree 中按冻结的方案 SHA 实现、测试、commit，并按项目策略 push/开 PR；Cat Café 不代替 Desktop 写产品代码。
+6. 每个导入功能只有一个方案分支绑定、一个方案讨论会话和一个 Review 会话。每次新实现在该功能 Review 会话中创建新的 ReviewRound，不创建新的可见会话窗口。
+7. CodeX 与 Kimi 对同一完整实现 SHA、同一完整方案 SHA 先独立 Review，再交叉印证；只有 barrier 打开后的共识 finding 会交给 Desktop。
+8. ChatGPT 原实现会话读取 finding、修复、提交新 SHA；每次任务通知都重申方案分支精确提交，新实现 SHA 必须重新完成完整 ReviewRound，直到零 open finding。
+9. 项目前两次成功试点必须由用户在当前 ChatGPT 会话中确认合入。只有“已合入且最终验收通过”才增加成功试点计数。
+10. 两次成功试点后，项目自动切换为自动合入；exact-SHA、零 finding、检查与分支策略门禁不变，最终产品验收仍始终由用户完成。
+11. 验收不通过时，同一项目和功能 Review 会话开启新的 delivery cycle，保留上一轮证据，不重建整个上下文。
+12. Mission Hub 为每个功能展示当前 Attempt 的完整链路：方案提交、Desktop 实现、独立检视、交叉检视、共识、修复交接/合入、最终验收；只有服务端确认状态迁移后节点才显示完成。
+13. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过方案 SHA、实现 exact-SHA Review、方案分歧、15 轮续审或最终验收，也不得创建平行 work/attempt/round。
+14. 当现有 reviewer 无法形成共识时，不引入第三 reviewer。用户可在 Mission Hub 给出最终裁决，并授权原共识记录猫在同一 round、同一 exact SHA 上提交最终检视意见。
 
 ## 角色边界
 
@@ -44,9 +45,10 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 
 ## 产品模型
 
-### 一个功能，一个方案会话和一个 Review 会话
+### 一个功能，一个方案分支、一个方案讨论会话和一个 Review 会话
 
-- 两个会话身份由 `projectId + backlogItemId + kind` 确定，长期复用。
+- 方案分支绑定由 `projectId + backlogItemId` 确定；只接受项目绑定仓库中的本地已提交分支，并在每轮实现/Review 中记录精确 SHA。
+- 两个会话身份由 `projectId + backlogItemId + kind` 确定，长期复用。方案讨论会话只承载讨论背景，不是实现或 Review 权威。
 - ReviewRound 是 Hub 内的持久对象；一个 SHA 对应一个 immutable round。
 - Review 对应的 Cat Café thread 是可见视图。软删除后可原位恢复；不得因为软删除就为同一功能创建第二个 Review 会话。
 - 历史项目级 Review Hub 只为已经在途的旧 round 保留回调兼容；新 round 一律投影到功能 Review 会话。
@@ -71,10 +73,10 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 ### 有界、方案约束的 Review 循环
 
 - Review 只有在当前 exact SHA 的全部共识 finding 已解决后才可停止并进入合入门禁；存在 open finding 必须回到原 Desktop 任务修复。
-- 每个 finding 必须携带非空 `designRefs`，并标记为 `plan_conformance` 或 `architecture_decision`。Reviewer 只能依据冻结方案判断实现偏差；安全、性能意见也必须引用方案依据，不得借 Review 引入个人偏好、方案外重构或新需求。
-- 严重架构问题只能作为 P1 `architecture_decision` finding 提交。Cat Café 暂停自动投递并要求用户选择“保持原方案”或“批准方案变更”；决定作为 managed-work evidence 持久化后才可继续。
+- 每个 finding 必须携带规范的 `git:refs/heads/<方案分支>@<完整方案 SHA>`，并标记为 `plan_conformance` 或 `architecture_decision`。Reviewer 只能依据本轮冻结的方案提交判断实现偏差；安全、性能意见也必须引用该提交，不得借 Review 引入个人偏好、方案外重构或新需求。
+- 严重架构问题只能作为 P1 `architecture_decision` finding 提交。Cat Café 暂停 Review 并上报用户；用户与猫猫可以继续在会话中讨论，但只有修改并提交方案分支后，才能选择“方案分支已更新，继续”。保持原方案则要求分支仍指向本轮方案 SHA。决定作为 managed-work evidence 持久化后才可继续实现与 Review。
 - 初始允许 attempt 1–15。第 15 次 Review 后仍有 open finding 时，Cat Café 进入 `awaiting_review_continuation`，由用户批准后再开放下一组 15 次；禁止后台无限唤醒 Desktop。
-- 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取，并把该功能实际绑定的方案会话作为唯一补充 `designRef`；不把旧 P1 追溯解释为架构变更授权，也不从 Review 证据猜测设计。
+- 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取；若功能已有有效方案分支，则以其当前精确提交补充 `designRef`，否则停在方案分支配置门禁。不得把讨论会话或旧 P1 追溯解释为方案权威，也不从 Review 证据猜测设计。
 - 两名 reviewer 在交叉检视后仍无法收敛时，round 保持 `consensus_ready`。用户裁决以 append-only `review_consensus_authorized` 证据绑定 `reviewRoundId + exactSha`；原 recorder 只能据此整理并发布共识，不得新增 reviewer。该授权只解决分歧，不绕过 merge confirmation 或 final acceptance。
 
 ## Stateful Object Census
@@ -82,7 +84,8 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 | 对象 | 真相所有者 | 身份与持久状态 | 关键不变量 |
 |---|---|---|---|
 | `DesktopDevelopmentProjectBinding` | F289 | `projectId`、repo、default branch、本地 checkout 引用、reviewer roster、merge policy、pilot count、protocol version、version | TTL=0；路径仅本地返回；不得从目录/聊天猜绑定 |
-| `FeatureWorkspaceThreads` | F289 + existing ThreadStore view | deterministic `projectId/backlogItemId/kind`、plan/review thread views | 每功能至多一个 plan 与一个 Review 会话；软删除原位恢复；旧 project Hub 仅兼容在途回调 |
+| `FeatureDesignBranchBinding` | F289 | `projectId/backlogItemId`、方案分支名；精确 SHA 在读取、任务和 ReviewRound 中冻结 | 分支必须属于绑定仓库且已有提交；会话不能替代它；Review 分歧只能通过用户决策及方案提交推进 |
+| `FeatureWorkspaceThreads` | F289 + existing ThreadStore view | deterministic `projectId/backlogItemId/kind`、方案讨论/Review thread views | 每功能至多一个方案讨论与一个 Review 会话；软删除原位恢复；旧 project Hub 仅兼容在途回调 |
 | `DesktopSessionBinding` | F289 | project/work、external actor runtime session、chat ref、binding epoch、status | 绑定永久有效；同一 work 仅最高 epoch 可写；窗口消失不终止 work；不伪装成 F211 Cat session |
 | `WorkspaceBinding` | F289 | repo identity、永久 worktree、branch、base/current SHA、validation time | 不对公共消息暴露路径；丢失只恢复 committed truth |
 | `WorkAdmission` / `WorkAttempt` / terminal evidence | F275 | canonical work root、ordered attempts、typed evidence、whole-work terminal | F289 不创建平行 job/attempt/terminal ledger |
@@ -94,14 +97,15 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 ## 生命周期
 
 ```text
-design_ready
+awaiting_design_branch
+  -> design_ready
   -> ready_for_desktop
   -> implementing
   -> implementation_ready
   -> independent_review
   -> cross_review
   -> fix_required -> implementing (new attempt / new SHA / new round)
-  -> awaiting_architecture_decision -> fix_required
+  -> awaiting_architecture_decision -> design branch commit -> fix_required
   -> awaiting_review_continuation (attempt 15/30/45...) -> fix_required
   -> approved_for_merge
   -> awaiting_manual_merge_confirmation | auto_merge_ready
@@ -118,12 +122,15 @@ Resume Capsule 的 baton holder 和按钮点击本身都不能证明已经交给
 reviewer 或 recorder 重发带 `Review 系统消息` 标识的当前 stage。用户决策门禁继续使用专用动作，通用重试接口
 必须拒绝代替用户做决定。
 
+Review 系统消息只携带路由、项目/功能、阶段、实现 SHA、方案分支/SHA、round 与进度，并要求加载
+`chatgpt-review-rounds` skill。统一表格、回调顺序和强制约束只在 skill 中维护，不在每轮消息里重复展开。
+
 whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port 不可用，F289 必须返回 `managed_work_capability_unavailable`，不能通过 thread、branch、task 或本地 Redis key 猜测/复制 work identity。
 
 ## 核心不变量
 
-1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源。
-2. 一个导入功能只有一个方案会话和一个 Review 会话；一个 exact SHA 只有一个 active immutable ReviewRound。
+1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源；功能方案分支的精确提交是唯一实现与 Review 方案真相源。
+2. 一个导入功能只有一个方案分支绑定、一个方案讨论会话和一个 Review 会话；一个实现 exact SHA + 方案 exact SHA 组合只有一个 active immutable ReviewRound。
 3. 每个 Review 阶段面向用户的回复统一采用同一份双表格协议：阶段摘要表 + 检视意见明细表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
 4. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
 5. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
@@ -133,7 +140,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
 9. 协议版本或 capability 不兼容时写操作 fail closed；只读状态与恢复指引仍可返回。
 10. Cat Café 或 ChatGPT 可见窗口删除不等于 work/ReviewRound/证据删除。
-11. Review finding 必须引用冻结方案；未由用户决定的严重架构冲突和每 15 次循环边界均阻断下一次 Desktop 投递。
+11. Review finding 必须引用冻结的方案提交；未由用户决定且未提交到方案分支的严重架构冲突，以及每 15 次循环边界，均阻断下一次 Desktop 投递。
 12. Reviewer 无法形成共识时只接受当前用户的显式裁决授权；不得自动多数表决、追加 reviewer 或从聊天文字猜测授权。授权一经记录不可静默改写。
 
 ## MCP 合同
@@ -170,6 +177,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-P2: 每个项目只会 resolve 到一个 Review Hub；10 个并发 ensure 请求仍只创建/恢复一个 Hub thread。（`project-review-hub-service.test.js`）
 - [x] AC-P3: Hub thread 软删除后原位恢复且 round/history 不变；底层视图不可恢复地丢失时按同一 deterministic Hub ID 重建，不复制 lifecycle truth。（`project-review-hub-service.test.js`）
 - [x] AC-P4: 项目绑定和 pilot count 在服务重启后仍存在；本地路径不出现在公开 DTO/消息/日志。（`external-project-store.test.js`、`desktop-development-loop.test.js`）
+- [x] AC-P5: 每个功能可持久绑定同仓库的本地已提交方案分支；启动、恢复、Desktop 任务和 ReviewRound 都冻结并展示精确方案 SHA，错误仓库/缺失分支 fail closed。（`design-branch-resolver.test.js`、`external-project-store.redis.test.js`、`desktop-development-launch.test.js`、`desktop-development-loop-routes.test.js`）
 
 ### Desktop session / recovery
 
@@ -188,6 +196,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-R6: 第 15 次及之后每组 15 次 Review 未清零时等待用户续审批准；Desktop IPC 只有在任务实际出现该轮消息后才清除 durable outbox。（`review-loop-policy.test.js`、`codex-desktop-task-launcher.test.js`）
 - [x] AC-R7: Mission Hub 展示服务端推导的完整 Attempt 链路、负责人、Review 进度与迁移时间；当前 Desktop/Review 节点可由用户幂等重投，过期 version 被拒绝，人工门禁不可被通用重试绕过。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`DesktopDevelopmentPanel.tsx`）
 - [x] AC-R8: 共识无法收敛时，用户可为当前 round + exact SHA 写入不可变裁决授权；服务端重投原 recorder 并暴露授权状态，不新增 reviewer，也不放宽合入与验收门禁。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`review-round-stage-dispatcher.test.js`、`desktop-development-form.test.ts`）
+- [x] AC-R9: Review 系统消息保持短小，只投递准确身份/阶段/双 SHA 并加载统一 skill；模板与稳定强制约束不重复嵌入每条消息。（`review-round-stage-dispatcher.test.js`、`chatgpt-review-rounds/SKILL.md`）
 
 ### Merge / acceptance
 

@@ -6,21 +6,22 @@ Feature truth: `docs/features/F289-chatgpt-desktop-development-loop.md`
 
 ## Decision summary
 
-F289 is a project-scoped bridge, not a second workflow engine. Cat Café owns the durable project, design context and Review Hub view; F275 owns work/attempt/terminal truth; F253 owns ReviewRound semantics; F289 owns the external Desktop session binding; F286 governs the strict MCP profile. ChatGPT Desktop owns repository mutation through its native local tools. F211 remains unchanged because its runtime-session records require a CatId, agent-key principal and Antigravity provenance, none of which is valid for the `chatgpt-desktop-dev` external actor.
+F289 is a project-scoped bridge, not a second workflow engine. Cat Café owns the durable project, per-feature design-branch binding and Review Hub view; F275 owns work/attempt/terminal truth; F253 owns ReviewRound semantics; F289 owns the external Desktop session binding; F286 governs the strict MCP profile. ChatGPT Desktop owns repository mutation through its native local tools. F211 remains unchanged because its runtime-session records require a CatId, agent-key principal and Antigravity provenance, none of which is valid for the `chatgpt-desktop-dev` external actor.
 
-The central UX decision is **one imported feature, one plan conversation, one Review conversation, one native Desktop task**. Delivery cycles and code SHAs reuse the feature Review conversation. Historical project-wide Review Hub rounds remain callback-compatible during migration. Cat Café and ChatGPT chats are replaceable bindings over persisted state.
+The central UX decision is **one imported feature, one authoritative design branch, one discussion conversation, one Review conversation, one native Desktop task**. A conversation may contain competing ideas; only the exact commit on the bound design branch governs implementation and Review. Delivery cycles and code SHAs reuse the feature Review conversation. Historical project-wide Review Hub rounds remain callback-compatible during migration. Cat Café and ChatGPT chats are replaceable bindings over persisted state.
 
 ## System flow
 
 ```text
 Cat Café Project
-  ├─ ordinary design threads ──> committed design sources
+  ├─ ordinary design threads (discussion only)
   ├─ DesktopDevelopmentProjectBinding
   │    ├─ repo/default branch/local checkout
   │    ├─ reviewer + merge policy
   │    └─ successfulManualPilotCount
   └─ imported feature
-       ├─ deterministic plan thread
+       ├─ bound design branch -> frozen exact design SHA
+       ├─ deterministic discussion thread
        ├─ deterministic Review thread -> F253 ReviewRounds
        └─ DeliveryCycle -> F275 Work -> Attempts
                                       ^                 |
@@ -35,7 +36,8 @@ Cat Café Project
 | Concern | Owner | F289 action |
 |---|---|---|
 | Project/repo/reviewer/rollout policy | F289 on ExternalProject | persist versioned binding; no secret storage |
-| Visible feature plan/Review conversations | F289 resolver + ThreadStore | deterministic project + backlog identities; ensure/restore the same two threads |
+| Authoritative feature design | F289 + project Git checkout | persist branch binding; validate exact Git root/repository/local branch commit; freeze SHA per implementation and ReviewRound |
+| Visible feature discussion/Review conversations | F289 resolver + ThreadStore | deterministic project + backlog identities; ensure/restore the same two threads; discussion is never promoted to authority |
 | Work/attempt/evidence/terminal | F275 managed-work | consume named port; no fallback identity/state |
 | Independent review/barrier/consensus | F253 review coordination | add durable project/work/SHA records behind shared interface |
 | Desktop session provenance | F289 | persist the external actor session, chat ref and permanent binding epoch without impersonating a Cat session |
@@ -67,10 +69,20 @@ type DesktopDevelopmentProjectBinding = {
 
 `sourcePath` remains the project-private local checkout reference. Public DTOs use a boolean such as `localCheckoutBound`, not the absolute path.
 
+### FeatureDesignBranchBinding
+
+- Persist `featureDesignBranches[backlogItemId] = branch` with the external project.
+- Resolve only the exact local `refs/heads/<branch>^{commit}` in the configured project checkout.
+- Require the checkout Git top-level and normalized GitHub origin to match the project binding.
+- Resolution is read-only: never checkout, fetch, merge or mutate the working tree.
+- Start and resume fail closed in `awaiting_design_branch` until a valid committed branch exists.
+- Every Desktop objective and ReviewRound records the branch plus full design SHA. Later branch movement does not rewrite historical round authority.
+
 ### FeatureWorkspaceThreads
 
 - `planThreadId = project-feature-plan:<projectId>:<backlogItemId>`.
 - `reviewThreadId = project-feature-review:<projectId>:<backlogItemId>`.
+- The legacy `plan` kind is displayed as “方案讨论”. It remains a conversation binding only and is not an implementation input.
 - Both ThreadStore IDs are deterministic and idempotently ensured.
 - `deletedAt != null` means hidden view; resolver calls existing restore semantics and returns the same ID.
 - Hard-loss recovery re-creates the same deterministic thread ID. The project/work/round records do not move or get copied.
@@ -98,7 +110,7 @@ Only the highest active epoch can mutate. Rebind is a CAS transaction that super
 
 ### ReviewRound
 
-Round identity includes project/work/attempt and full SHA. Full SHA and roster are immutable. Private drafts are stored separately from the barrier-safe projection. Atomic finish logic opens the barrier only when every required reviewer independently finishes. Consensus/finding status changes are versioned/idempotent.
+Round identity includes project/work/attempt, full implementation SHA and the frozen design SHA. Both SHAs and the roster are immutable. Private drafts are stored separately from the barrier-safe projection. Atomic finish logic opens the barrier only when every required reviewer independently finishes. Consensus/finding status changes are versioned/idempotent.
 
 ### Managed-work discovery
 
@@ -109,6 +121,7 @@ Desktop resolves a project from the exact GitHub `owner/name`, then receives `ma
 Resume Packet is composed on read from project binding, F275 work/attempt, Desktop session/workspace and the latest safe ReviewRound view. It contains:
 
 - project/repository/default branch and protocol compatibility;
+- authoritative design branch/current exact SHA plus the design SHA frozen by the current ReviewRound;
 - delivery cycle, attempt and server-derived phase;
 - current branch/full SHA/last committed recovery point;
 - checks and evidence references;
@@ -124,16 +137,18 @@ server-side derivation, so clients never reverse-engineer lifecycle from action 
 idempotency key allocates exactly one next F275 attempt, rebinds the same Desktop chat, and returns
 `phase=implementing` without adding another MCP tool or state root.
 
-The retry path is bounded and plan-governed. Every consensus finding carries non-empty `designRefs` and an explicit
+The retry path is bounded and design-commit-governed. Every consensus finding carries the canonical
+`git:refs/heads/<branch>@<full-sha>` in `designRefs` and an explicit
 scope. Ordinary findings use `plan_conformance`; reviewers may not introduce preferences, new requirements or
-out-of-plan refactors, and security/performance concerns still cite the frozen design. A serious architectural conflict
+out-of-plan refactors, and security/performance concerns still cite the frozen design commit. A serious architectural conflict
 uses P1 `architecture_decision` and pauses in `awaiting_architecture_decision` until the authenticated user records
-whether to keep the current design or approve a design change. Attempt 15 is the first continuation boundary; if it
+whether to keep the reviewed design or continue after a revised design was committed to the bound branch. The latter
+requires the branch SHA to advance; ordinary chat edits or verbal approval cannot pass the gate. Attempt 15 is the first continuation boundary; if it
 still ends with open findings, `awaiting_review_continuation` blocks attempt 16. Each user approval extends the ceiling
 by 15 attempts. Both decisions are append-only managed-work evidence and therefore survive restart and replay.
-Legacy findings written before `designRefs` became mandatory are projected with the feature's actual bound plan
-thread as their sole inferred design anchor. The write path stays strict, and no review evidence is promoted into a
-design decision.
+Legacy findings written before `designRefs` became mandatory are projected with the feature's validated design-branch
+commit when available; otherwise the workflow stops at the design-branch gate. The write path stays strict, and no
+discussion thread or review evidence is promoted into a design decision.
 
 Consensus non-convergence does not create another reviewer or another round. The authenticated user may append one
 `review_consensus_authorized` ruling scoped to the current `reviewRoundId + exactSha`. The designated recorder is then
@@ -155,6 +170,11 @@ route. Terminal or stale attempts cannot be replayed.
 While a round is `consensus_ready`, Mission Hub additionally exposes the dedicated user-ruling action. Before a ruling,
 generic replay may only remind the existing recorder; after a ruling, replay carries the same durable instruction and
 never asks for a third reviewer.
+
+Review dispatch is intentionally a compact envelope: routing handles, project/feature identity, stage, implementation
+SHA, design branch/SHA, round/progress and an optional unique user ruling. It tells the reviewer to load
+`chatgpt-review-rounds`; the table schema, callback procedure and stable constraints live in that skill and its reference
+template instead of being copied into every system message.
 
 Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
 the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible

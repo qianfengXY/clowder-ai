@@ -18,25 +18,24 @@ describe('review completion dual-route hard guard', () => {
     if (typeof reviewGuard.checkChatgptReviewRoundLanguage !== 'function') return;
 
     const valid = reviewGuard.checkChatgptReviewRoundLanguage(`
-      只服务于 operator 拍板的“ChatGPT 执行、Cat Café 设计与 Review”工作流
-      independent_review: 每只猫只读同一个 \`reviewedCodeHead\`，私下保留自己的 findings，
-      不得阅读、索取或预测其他猫的意见
-      cross_review: begins only after every independent review is complete
-      recorder: co-creator 指定的 recorder，只有 recorder 可以提交并推送
-      ledger: review-notes/chatgpt/<change-id>/round-<NN>.md binds reviewedCodeHead and consensus findings
-      closure: push 成功才代表本轮检视完毕；ChatGPT 不修改历史 ledger
-      lifecycle: ChatGPT fixes accepted findings, then a new round repeats until openFindings=0
-      terminal: approved_for_merge allows ChatGPT to merge main，等待 co-creator 亲自验收
+      固定 \`Review Round\`、实现提交 \`exactSha\`、\`方案分支\` 与 \`方案提交 designExactSha\`。
+      方案讨论会话可以提供背景，但不是权威方案。
+      每条 finding 引用 git:refs/heads/<方案分支>@<完整 designExactSha>。
+      独立检视时 Barrier 前不得读取或推测其他 reviewer 意见。
+      调用 \`cat_cafe_review_draft_submit\`、\`cat_cafe_review_independent_finish\`、
+      \`cat_cafe_review_cross_finish\` 和 \`cat_cafe_review_consensus_publish\`。
+      全程不得修改代码或 Git；重大分歧使用 \`scope=architecture_decision\`。
+      无法共识时保持 \`consensus_ready\`；每个系统消息只执行一次对应阶段。
     `);
     assert.deepEqual(valid, []);
 
     const invalid = reviewGuard.checkChatgptReviewRoundLanguage(
       'Several cats review together and ChatGPT merges when it looks good.',
     );
-    assert.match(invalid.join('\n'), /independent_review/);
-    assert.match(invalid.join('\n'), /co-creator 指定的 recorder/);
-    assert.match(invalid.join('\n'), /reviewedCodeHead/);
-    assert.match(invalid.join('\n'), /openFindings=0/);
+    assert.match(invalid.join('\n'), /Review Round/);
+    assert.match(invalid.join('\n'), /方案提交 designExactSha/);
+    assert.match(invalid.join('\n'), /cat_cafe_review_consensus_publish/);
+    assert.match(invalid.join('\n'), /consensus_ready/);
   });
 
   it('rejects active guidance that turns every SHA change or every diff into mandatory re-review', () => {

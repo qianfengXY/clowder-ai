@@ -339,22 +339,21 @@ skills:
   chatgpt-review-rounds:
     category: "开发流程"
     description: >
-      Operator-approved multi-cat review rounds for code authored by ChatGPT desktop Codex.
-      Use when: ChatGPT has pushed a code HEAD and co-creator requires independent cat reviews,
-      cross-review consensus, and a Git ledger written by one designated recorder.
-      Not for: ordinary cat-authored changes, single-source risk-routed review, self-check, or cloud-only review.
-      Output: one immutable consensus ledger commit per round; repeat until approved_for_merge and openFindings=0.
+      Execute one callback-backed independent, cross-review, or consensus stage for ChatGPT-authored Cat Café work.
+      Use when: a compact Review system message supplies a Review Round, exact code SHA, and exact design-branch SHA.
+      Not for: ordinary cat-authored review, implementation, Git writes, merge, push, deploy, or inventing a plan beyond the design branch.
+      Output: durable Review callbacks plus the shared two-table user-visible report; pause for user resolution on design disagreement.
     triggers:
       - "ChatGPT 提交代码"
       - "多猫独立检视"
       - "交叉检视"
       - "review round"
-      - "共识 ledger"
+      - "Review 系统消息"
     not_for:
       - "普通猫作者的单一 reviewer 流程"
       - "自检"
       - "cloud-only review"
-    output: "Operator-designated Git consensus ledger per round; repeat to approved_for_merge"
+    output: "Callback-backed Review stage + shared two-table report, bound to exact code and design commits"
     next: ["merge-gate"]
     sop_step: 3
     merged_from: null
@@ -388,7 +387,7 @@ skills:
     description: >
       处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
       Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
-      Not for: ChatGPT multi-cat round ledger（用 chatgpt-review-rounds）、发 review 请求（用 request-review）、
+      Not for: ChatGPT callback-backed multi-cat round（用 chatgpt-review-rounds）、发 review 请求（用 request-review）、
       自检（用 quality-gate）。
       Output: 逐项修复确认 + reviewer 放行。
     triggers:

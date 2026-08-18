@@ -18,7 +18,8 @@ triggers:
 
 这条技能把 ChatGPT Desktop 当作外部实现者连接到 Cat Café 的项目、managed work 和 ReviewRound。
 Cat Café 保管项目、工作、Review 与验收真相；Desktop 只用原生本地文件与 Git 能力改代码，并通过严格 MCP
-报告状态。聊天记录、分支名、PR、窗口 ID 和 Scheduled Task 引用都不是工作身份。
+报告状态。聊天记录、PR、窗口 ID 和 Scheduled Task 引用都不是工作身份；实现依据是 Resume Packet 中每功能
+方案分支捕获的精确提交，而不是方案讨论会话。
 
 ## 启动前提
 
@@ -60,25 +61,31 @@ Cat Café 保管项目、工作、Review 与验收真相；Desktop 只用原生�
 
 连接后只执行 Resume Packet 的 `nextLegalActions`。不要从旧聊天、旧卡片或记忆推断当前阶段。
 
+Resume Packet 必须同时给出非空 `designBranch` 与 `designExactSha`。在不 checkout、不移动分支的前提下读取这个
+精确提交中的方案文件，并确认当前任务的 Feature ID、实现边界与验收条件。方案分支之后移动时，重新读取 Resume
+Packet；不得把方案讨论会话里的未提交想法当作新方案。
+
 当 `phase=fix_required` / `nextLegalActions=[start_fix_attempt]` 时，先用当前 Resume Packet 的 attempt、
 managed-work version 和 binding epoch 再调用一次 `cat_cafe_development_work_connect`。服务端会幂等创建下一个
 F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `attemptNumber` 必须递增且 phase 回到
 `implementing`。未取得新 attempt 前不得报告修复 SHA。
 
-当 `phase=awaiting_review_continuation` 或 `phase=awaiting_architecture_decision` 时立即停止 Desktop 写入：
+当 `phase=awaiting_design_branch`、`phase=awaiting_review_continuation` 或
+`phase=awaiting_architecture_decision` 时立即停止 Desktop 写入：
 
+- `configure_design_branch` 只能由用户在 Cat Café 功能列表绑定本地已提交方案分支；Desktop 不自造分支名。
 - `request_review_continuation_approval` 只允许用户在 Cat Café 界面批准下一组最多 15 次 Review；Desktop 不代批、
   不重连、不中途创建 attempt。
-- `request_user_architecture_decision` 只允许用户在 Cat Café 针对对应 finding 选择保持原方案或批准方案变更；
-  Desktop 不得自行选择，也不得先按 reviewer 的方案外建议改代码。
+- `request_user_architecture_decision` 表示 Review 与方案分支有重大分歧。用户可以保持当前方案，或和猫猫修改并提交
+  方案分支；Desktop 不得自行选择，也不得先按 reviewer 的方案外建议改代码。
 - 用户完成全部必要决策后，Cat Café 会向原绑定窗口投递新的单次通知；收到前不要轮询。
 
 ## 3. 实现、测试与提交
 
 在项目的永久 worktree 中使用 ChatGPT Desktop 原生文件、终端和 Git 能力：
 
-1. 确认 repository、branch、base SHA 与 Resume Packet 一致。
-2. 按项目规范实现并运行风险匹配测试。
+1. 确认 repository、实现 branch、base SHA、方案分支与方案 SHA 都和 Resume Packet 一致。
+2. 严格按 `designExactSha` 中的方案实现，并运行风险匹配测试；每次系统任务都重新核对这个依据。
 3. 提交所有准备交付的改动，确认 worktree 的 current SHA 等于 last committed SHA。
 4. 调用 `cat_cafe_development_implementation_report` 报告完整 commit SHA。
 
@@ -110,9 +117,9 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
-- 只实现 `scope=plan_conformance` 且带权威 `designRefs` 的 finding；经用户裁决的架构 finding 必须严格服从
+- 只实现 `scope=plan_conformance` 且引用 `git:refs/heads/<designBranch>@<designExactSha>` 的 finding；经用户裁决的架构 finding 必须严格服从
   Cat Café 记录的决定。禁止把 Review 中新增的个人偏好、方案外重构或需求扩张带入实现。
-- 对启用该约束前已落库、缺少 `designRefs` 的历史 finding，服务端只会补入该功能实际绑定的权威方案会话；执行端仍必须先读取该方案，不能自行猜测设计意图。
+- 对启用该约束前已落库的历史 finding，只能作为迁移证据；继续实现前仍必须先配置并读取方案分支。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
 - 每个新 SHA 都必须开启完整的新 ReviewRound；旧 SHA 的批准不能沿用。
 

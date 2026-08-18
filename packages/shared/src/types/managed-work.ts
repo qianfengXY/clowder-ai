@@ -82,6 +82,8 @@ export type ManagedWorkEvidenceInput =
       readonly findingId: string;
       readonly decision: 'keep_original_plan' | 'approve_plan_change';
       readonly decidedByUserId: string;
+      readonly designBranch?: string;
+      readonly designExactSha?: string;
     }
   | {
       readonly kind: 'review_consensus_authorized';

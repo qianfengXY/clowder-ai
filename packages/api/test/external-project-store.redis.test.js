@@ -111,4 +111,14 @@ describe('ExternalProjectStore (Redis)', { skip: shouldSkipSuite ? 'Redis isolat
     const listed = await newStore.listByUser('user1');
     assert.equal(listed.length, 1);
   });
+
+  it('persists per-feature design branches across store restart', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const project = await store.create('user1', { name: 'designs', description: '', sourcePath: '/designs' });
+    await store.setFeatureDesignBranch(project.id, 'backlog-f006', 'design/f006-workspace');
+    const newStore = new ExternalProjectStore(redis);
+    assert.deepEqual(await newStore.getFeatureDesignBranches(project.id), {
+      'backlog-f006': 'design/f006-workspace',
+    });
+  });
 });

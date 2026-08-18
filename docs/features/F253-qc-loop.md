@@ -140,19 +140,19 @@ qc.idle
 
 **关键约束**：如果 reviewer 给了 semantic fix 建议（不只是 hygiene），author 改完后 **review provenance 必须重新闭合**（Layer 3 re-confirm on final HEAD）。Layer 3 的 APPROVE 是 merge-gate evidence 的 `reviewer` + `review_head` 来源。
 
-### Phase D: ChatGPT author 多猫共识 Review rounds（2026-08-04 operator directive）
+### Phase D: ChatGPT author 多猫共识 Review rounds（2026-08-04 operator directive，F289 callback carrier）
 
 当实现作者是 **ChatGPT 桌面 Codex**，且 operator 明确启用本 lane 时，采用多猫独立判断后再共识收敛的窄例外；普通 Cat Café 代码 review 仍走上方按风险路由的 QC Loop。
 
-1. ChatGPT 提交精确 code HEAD、PR 与测试证据后，至少两只非作者猫读取同一个 HEAD，分别独立检视并把意见保留在自己的本地上下文；独立阶段禁止互看意见。
+1. ChatGPT 提交精确 code HEAD 与测试证据后，Cat Café 同时捕获该功能方案分支的精确提交；至少两只非作者猫读取同一代码 SHA 与方案 SHA，分别独立检视并通过 callback 保存私有 draft；独立阶段禁止互看意见。
 2. 独立检视与后续交叉检视期间，所有 reviewer 对 Git 只读：不修改共享分支，不 commit/push/rebase/checkout。
 3. 只有所有 reviewer 都明确完成独立检视后，才开启交叉检视；猫猫相互核验证据、去重 finding，并形成统一共识。
-4. 只有 operator 指定的 recorder 能把共识写入 `review-notes/chatgpt/<change-id>/round-<NN>.md` 并 push。push 成功代表该轮检视完成；历史 ledger 不由 ChatGPT 改写。
-5. ChatGPT 按该轮 ledger 修复、测试、提交新 code HEAD，然后重新从独立检视开始下一轮。所有已接受 finding（含 P3）关闭且没有新 finding 前禁止合入。
-6. 最后一轮 ledger 必须记录 `approved_for_merge`、`openFindings: 0` 并绑定 reviewed code HEAD。recorder 的 ledger-only commit 是唯一允许的 review 期 Git 写入；若 HEAD 还有任何代码、测试、配置或其他文档变化，approval 立即 stale，必须开启新一轮。
-7. 风险门禁全绿后由 ChatGPT squash merge main；merge 后不代表用户验收完成，必须等待 operator 亲自验收。
+4. 只有服务端指定的 recorder 能通过 `cat_cafe_review_consensus_publish` 发布共识。ReviewRound callback 是持久化真相；reviewer 不写或推送 Git ledger。
+5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>`。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户处理。
+6. 用户可以保持当前方案，或与猫猫修改并提交同一方案分支。Cat Café 验证方案 SHA 后才恢复原 ChatGPT 窗口；ChatGPT 按 callback 共识修复并提交新 code SHA，再重新开始完整 ReviewRound。
+7. 所有已接受 finding（含 P3）关闭、无新 finding、checks 通过后才允许合入；merge 后仍必须等待用户亲自验收。
 
-执行真相源：`chatgpt-review-rounds` skill；每轮结构真相源：`cat-cafe-skills/refs/chatgpt-review-round-template.md`。
+执行真相源：`chatgpt-review-rounds` skill；Review 系统消息只携带本轮身份、阶段和双 SHA，每轮可见结构真相源为 `cat-cafe-skills/refs/chatgpt-review-round-template.md`。
 
 ### Phase E: Durable ReviewRound carrier（2026-08-08 F289 consumer）
 

@@ -190,6 +190,20 @@ describe('ExternalProjectStore', () => {
     assert.equal(second.desktopDevelopment.mergeMode, 'automatic');
   });
 
+  test('stores one design branch per feature independently from discussion threads', async () => {
+    const created = await store.create('user1', { name: 'bound', description: '', sourcePath: '/bound' });
+    await store.setFeatureDesignBranch(created.id, 'backlog-f006', 'design/f006-workspace');
+    await store.setFeatureDesignBranch(created.id, 'backlog-f007', 'design/f007-import');
+    assert.deepEqual(await store.getFeatureDesignBranches(created.id), {
+      'backlog-f006': 'design/f006-workspace',
+      'backlog-f007': 'design/f007-import',
+    });
+    await store.setFeatureDesignBranch(created.id, 'backlog-f006', null);
+    assert.deepEqual(await store.getFeatureDesignBranches(created.id), {
+      'backlog-f007': 'design/f007-import',
+    });
+  });
+
   test('update() returns null for nonexistent id', async () => {
     assert.equal(await store.update('nope', { name: 'x' }), null);
   });

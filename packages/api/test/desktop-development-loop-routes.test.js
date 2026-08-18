@@ -121,6 +121,9 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
     projectId: 'project-1',
     repository: { host: 'github.com', owner: 'owner', name: 'repo', fullName: 'owner/repo' },
     defaultBranch: 'main',
+    designBranch: 'design/f006-workspace',
+    designExactSha: 'd'.repeat(40),
+    reviewDesignExactSha: null,
     workId: 'work-1',
     attemptId: 'attempt-1',
     workLifecycle: 'active',
@@ -180,6 +183,30 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
             status: 'available',
           },
         ];
+      },
+      listFeatureDesignBranches: async (input) => {
+        calls.push(['listFeatureDesignBranches', input]);
+        return [
+          {
+            projectId: input.projectId,
+            backlogItemId: 'backlog-1',
+            featureId: 'F006',
+            branch: 'design/f006-workspace',
+            exactSha: 'd'.repeat(40),
+            status: 'ready',
+          },
+        ];
+      },
+      updateFeatureDesignBranch: async (input) => {
+        calls.push(['updateFeatureDesignBranch', input]);
+        return {
+          projectId: input.projectId,
+          backlogItemId: input.backlogItemId,
+          featureId: 'F006',
+          branch: input.branch,
+          exactSha: 'd'.repeat(40),
+          status: 'ready',
+        };
       },
       startProjectWork: async (input) => {
         calls.push(['startProjectWork', input]);
@@ -441,6 +468,39 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           ownerUserId: 'operator-1',
           projectId: 'project-1',
           backlogItemId: 'backlog-1',
+        },
+      ],
+    ]);
+  });
+
+  test('lists and binds an exact per-feature design branch on the Cat Cafe user surface', async () => {
+    const { app, calls } = await createApp();
+    let response = await app.inject({
+      method: 'GET',
+      url: '/api/external-projects/project-1/development-loop/design-branches?protocolVersion=1',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().designBranches[0].exactSha, 'd'.repeat(40));
+
+    response = await app.inject({
+      method: 'PUT',
+      url: '/api/external-projects/project-1/development-loop/features/backlog-1/design-branch',
+      headers: { 'x-cat-cafe-user': 'operator-1', 'content-type': 'application/json' },
+      payload: { protocolVersion: 1, branch: 'design/f006-workspace' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().designBranch.branch, 'design/f006-workspace');
+    assert.deepEqual(calls, [
+      ['listFeatureDesignBranches', { protocolVersion: 1, ownerUserId: 'operator-1', projectId: 'project-1' }],
+      [
+        'updateFeatureDesignBranch',
+        {
+          protocolVersion: 1,
+          ownerUserId: 'operator-1',
+          projectId: 'project-1',
+          backlogItemId: 'backlog-1',
+          branch: 'design/f006-workspace',
         },
       ],
     ]);

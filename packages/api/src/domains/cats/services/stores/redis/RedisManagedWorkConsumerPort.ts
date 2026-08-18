@@ -457,7 +457,20 @@ function normalizeEvidence(input: ManagedWorkEvidenceInput): ManagedWorkEvidence
         throw new Error('architecture decision is invalid');
       }
       assertId(input.decidedByUserId, 'decidedByUserId');
-      return { ...input, exactSha };
+      if (Boolean(input.designBranch) !== Boolean(input.designExactSha)) {
+        throw new Error('architecture decision design branch and SHA must be provided together');
+      }
+      if (input.designBranch !== undefined && !input.designBranch.trim()) {
+        throw new Error('architecture decision design branch is invalid');
+      }
+      if (input.designExactSha !== undefined) assertFullSha(input.designExactSha, 'designExactSha');
+      return {
+        ...input,
+        exactSha,
+        ...(input.designBranch && input.designExactSha
+          ? { designBranch: input.designBranch.trim(), designExactSha: input.designExactSha.toLowerCase() }
+          : {}),
+      };
     case 'review_consensus_authorized':
       assertId(input.reviewRoundId, 'reviewRoundId');
       assertOpaqueString(input.instruction, 'instruction');

@@ -21,21 +21,21 @@ export function checkReviewContinuityLanguage({ ironLaw, requestReview, mergeGat
 
 export function checkChatgptReviewRoundLanguage(source) {
   return requireTokens(source, 'chatgpt-review-rounds convention', [
-    '只服务于 operator 拍板的“ChatGPT 执行、Cat Café 设计与 Review”工作流',
-    'independent_review',
-    '只读同一个 `reviewedCodeHead`',
-    '私下保留自己的 findings',
-    '不得阅读、索取或预测其他猫的意见',
-    'cross_review',
-    'co-creator 指定的 recorder',
-    '只有 recorder 可以提交并推送',
-    'review-notes/chatgpt/<change-id>/round-<NN>.md',
-    'reviewedCodeHead',
-    'push 成功才代表本轮检视完毕',
-    'ChatGPT 不修改历史 ledger',
-    'openFindings=0',
-    'approved_for_merge',
-    '等待 co-creator 亲自验收',
+    '`Review Round`',
+    '实现提交 `exactSha`',
+    '`方案分支`',
+    '`方案提交 designExactSha`',
+    '方案讨论会话可以提供背景，但不是权威方案',
+    'git:refs/heads/<方案分支>@<完整 designExactSha>',
+    'Barrier 前不得读取或推测其他 reviewer 意见',
+    '`cat_cafe_review_draft_submit`',
+    '`cat_cafe_review_independent_finish`',
+    '`cat_cafe_review_cross_finish`',
+    '`cat_cafe_review_consensus_publish`',
+    '不得修改代码或 Git',
+    '`scope=architecture_decision`',
+    '保持 `consensus_ready`',
+    '每个系统消息只执行一次对应阶段',
   ]);
 }
 

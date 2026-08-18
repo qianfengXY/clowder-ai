@@ -5,10 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
-import {
-  buildDesktopAcceptanceRequest,
-  buildDesktopConsensusAuthorizationRequest,
-} from './desktop-development-form';
+import { buildDesktopAcceptanceRequest, buildDesktopConsensusAuthorizationRequest } from './desktop-development-form';
 
 type DevelopmentLaunchStatus =
   | 'available'
@@ -197,7 +194,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录最终验收');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
       setStatus(
-        accepted ? '最终验收已通过；本轮交付已闭环' : '最终验收未通过；证据已保留，请回到方案会话开启新交付轮次',
+        accepted
+          ? '最终验收已通过；本轮交付已闭环'
+          : '最终验收未通过；证据已保留，请更新并提交方案分支后开启新交付轮次',
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法记录最终验收');
@@ -260,7 +259,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录架构决策');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(decision === 'keep_original_plan' ? '已决定保持原方案' : '已批准本项方案变更');
+      setStatus(decision === 'keep_original_plan' ? '已决定保持当前方案分支版本' : '已确认方案分支已更新');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法记录架构决策');
     } finally {
@@ -514,8 +513,19 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 </div>
               </div>
               {work && (
-                <div className="mt-2 text-micro text-cafe-secondary">
-                  {work.branch} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
+                <div className="mt-2 space-y-1 text-micro text-cafe-secondary">
+                  <div>
+                    实现：{work.branch} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
+                  </div>
+                  <div>
+                    方案：
+                    {work.designBranch && work.designExactSha
+                      ? `${work.designBranch}@${work.designExactSha.slice(0, 12)}`
+                      : '未配置（请到功能列表绑定本地已提交方案分支）'}
+                    {work.reviewDesignExactSha && work.reviewDesignExactSha !== work.designExactSha
+                      ? ` · 本轮 Review 基于 ${work.reviewDesignExactSha.slice(0, 12)}`
+                      : ''}
+                  </div>
                 </div>
               )}
               {work && (
@@ -530,7 +540,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               )}
               {work?.architectureDecisionPending && (
                 <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
-                  <p className="text-xs font-medium text-cafe">重大架构问题需要你的决策</p>
+                  <p className="text-xs font-medium text-cafe">Review 与方案分支出现重大分歧，需要你的决策</p>
                   {work.openFindings
                     .filter(
                       (finding) => finding.scope === 'architecture_decision' && !finding.architectureDecisionRecorded,
@@ -549,7 +559,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                             disabled={reviewDecisionKey !== null}
                             className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
                           >
-                            保持原方案
+                            保持当前方案分支
                           </button>
                           <button
                             type="button"
@@ -559,7 +569,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                             disabled={reviewDecisionKey !== null}
                             className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
                           >
-                            批准方案变更
+                            方案分支已更新，继续
                           </button>
                         </div>
                       </div>
@@ -596,7 +606,8 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   ) : (
                     <>
                       <p className="text-xs leading-relaxed text-cafe-secondary">
-                        仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round 与精确提交；不会绕过后续合入确认和最终验收。
+                        仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round
+                        与精确提交；不会绕过后续合入确认和最终验收。
                       </p>
                       <label className="block">
                         <span className="text-micro font-medium text-cafe-secondary">你的最终裁决意见</span>
@@ -617,9 +628,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                       <button
                         type="button"
                         onClick={() => void authorizeReviewConsensus(work)}
-                        disabled={
-                          reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()
-                        }
+                        disabled={reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()}
                         className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
                       >
                         授权记录猫按此提交
@@ -695,7 +704,9 @@ function describeWorkState(work: DesktopDevelopmentResumePacket): string {
     case 'awaiting_review_continuation':
       return '已达 15 轮上限，等待你批准继续';
     case 'awaiting_architecture_decision':
-      return '重大架构问题，等待你决策';
+      return '方案分歧，等待你处理';
+    case 'awaiting_design_branch':
+      return '等待配置已提交的方案分支';
     case 'cross_review':
       return work.reviewPhase === 'consensus_ready'
         ? work.consensusAuthorization
@@ -833,6 +844,8 @@ function WorkflowChain({
 
 function workflowNodeLabel(id: DesktopDevelopmentWorkflowNode['id']): string {
   switch (id) {
+    case 'design':
+      return '方案分支';
     case 'implementation':
       return 'Desktop 实现与提交';
     case 'independent_review':
@@ -880,12 +893,14 @@ function workflowStatusLabel(status: DesktopDevelopmentWorkflowNode['status']): 
 
 function workflowActionLabel(action: NonNullable<DesktopDevelopmentWorkflowNode['manualAction']>): string {
   switch (action) {
+    case 'configure_design_branch':
+      return '请到功能列表配置方案分支';
     case 'wake_desktop':
       return '再次触发 ChatGPT';
     case 'replay_review_stage':
       return '再次触发本阶段 Review';
     case 'record_architecture_decision':
-      return '请在下方处理架构决策';
+      return '请在下方处理方案分歧';
     case 'approve_review_continuation':
       return '请在下方批准继续 Review';
     case 'record_acceptance':

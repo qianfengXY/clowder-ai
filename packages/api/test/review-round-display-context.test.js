@@ -11,8 +11,10 @@ test('Review display context resolves the external project feature instead of th
         id: 'project-traqen',
         userId: 'owner-1',
         name: 'Traqen',
+        sourcePath: '/work/traqen',
         desktopDevelopment: { repository: { fullName: 'qianfengXY/Traqen' } },
       }),
+      getFeatureDesignBranches: async () => ({ 'backlog-f006': 'design/f006-workspace-capability' }),
     },
     {
       listByUser: async () => [
@@ -30,6 +32,8 @@ test('Review display context resolves the external project feature instead of th
         attempt: { attemptNumber: 3 },
       }),
     },
+    undefined,
+    async ({ branch }) => ({ branch, exactSha: 'd'.repeat(40) }),
   );
 
   assert.deepEqual(
@@ -46,7 +50,8 @@ test('Review display context resolves the external project feature instead of th
       featureId: 'F006',
       featureTitle: 'Workspace capability settings',
       attemptNumber: 3,
-      planThreadId: 'project-feature-plan:project-traqen:backlog-f006',
+      designBranch: 'design/f006-workspace-capability',
+      designExactSha: 'd'.repeat(40),
     },
   );
 });

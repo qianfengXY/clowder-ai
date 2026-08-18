@@ -21,6 +21,7 @@ export class ExternalProjectStore {
   private readonly redis: RedisClient | undefined;
   private readonly fallbackProjects = new Map<string, ExternalProject>();
   private readonly fallbackFeatureWorkspaceBindings = new Map<string, Record<string, string>>();
+  private readonly fallbackFeatureDesignBranches = new Map<string, Record<string, string>>();
 
   constructor(redis?: RedisClient) {
     this.redis = redis;
@@ -149,6 +150,47 @@ export class ExternalProjectStore {
     if (Number(result) !== 1) throw new Error('Conversation is already bound to another feature workspace');
   }
 
+  async getFeatureDesignBranches(projectId: string): Promise<Record<string, string>> {
+    if (!this.redis) return { ...(this.fallbackFeatureDesignBranches.get(projectId) ?? {}) };
+    const raw = await this.redis.hget(ExternalProjectKeys.detail(projectId), 'featureDesignBranches');
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  async setFeatureDesignBranch(projectId: string, backlogItemId: string, branch: string | null): Promise<void> {
+    if (!this.redis) {
+      const current = { ...(this.fallbackFeatureDesignBranches.get(projectId) ?? {}) };
+      if (branch) current[backlogItemId] = branch;
+      else delete current[backlogItemId];
+      this.fallbackFeatureDesignBranches.set(projectId, current);
+      return;
+    }
+    await this.redis.eval(
+      `
+        local raw = redis.call('HGET', KEYS[1], 'featureDesignBranches')
+        local branches = {}
+        if raw then
+          local ok, decoded = pcall(cjson.decode, raw)
+          if ok and type(decoded) == 'table' then branches = decoded end
+        end
+        if ARGV[2] ~= '' then branches[ARGV[1]] = ARGV[2] else branches[ARGV[1]] = nil end
+        redis.call('HSET', KEYS[1], 'featureDesignBranches', cjson.encode(branches))
+        return 1
+      `,
+      1,
+      ExternalProjectKeys.detail(projectId),
+      backlogItemId,
+      branch ?? '',
+    );
+  }
+
   async update(id: string, patch: Partial<CreateExternalProjectInput>): Promise<ExternalProject | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
@@ -206,6 +248,8 @@ export class ExternalProjectStore {
       await pipeline.exec();
     } else {
       this.fallbackProjects.delete(id);
+      this.fallbackFeatureWorkspaceBindings.delete(id);
+      this.fallbackFeatureDesignBranches.delete(id);
     }
     return true;
   }

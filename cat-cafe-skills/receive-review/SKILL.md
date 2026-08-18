@@ -4,7 +4,7 @@ tips_exempt: harness-internal review re-entry convention; no distinct end-user c
 description: >
   处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
   Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
-  Not for: ChatGPT multi-cat round ledger（用 chatgpt-review-rounds）、发 review 请求（用 request-review）、
+  Not for: ChatGPT callback-backed multi-cat round（用 chatgpt-review-rounds）、发 review 请求（用 request-review）、
   自检（用 quality-gate）。
   Output: 逐项修复确认 + reviewer 放行。
 triggers:
@@ -24,10 +24,9 @@ triggers:
 
 ## ChatGPT multi-cat round 分流
 
-若反馈来自 `review-notes/chatgpt/<change-id>/round-<NN>.md`，不要逐个唤醒原 reviewer，也不要为每条
-finding 再建一套 Cat Café task 真相源。改用 `chatgpt-review-rounds`：ChatGPT 只消费 recorder 已推送的
-共识 ledger，修复并提交新 code HEAD；所有 finding 的关闭与新增问题由下一轮完整的独立检视和交叉检视确认。
-历史 ledger 不得由 ChatGPT 改写。
+若反馈来自 Cat Café 的 callback-backed ReviewRound，不要逐个唤醒原 reviewer，也不要为每条 finding 再建一套
+真相源。改用 `catcafe-desktop-executor`：ChatGPT 只消费最新 Resume Packet 中的共识 findings 和精确方案提交，
+修复并提交新 code HEAD；finding 的关闭与新增问题由下一轮完整的独立检视和交叉检视确认。
 
 ## 触发入口
 

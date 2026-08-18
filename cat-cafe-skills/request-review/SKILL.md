@@ -21,8 +21,8 @@ triggers:
 
 ## ChatGPT author 专属分流
 
-当 author 是 ChatGPT 桌面 Codex，且 co-creator 已明确启用“多猫独立检视 → 交叉检视 → 指定猫写 Git
-共识 ledger”的 round 协议时，停止本 skill 的单 reviewer 路径，改用 `chatgpt-review-rounds`。这是一条
+当 author 是 ChatGPT 桌面 Codex，且 co-creator 已明确启用“多猫独立检视 → 交叉检视 → callback 共识”
+的 round 协议时，停止本 skill 的单 reviewer 路径，改用 `chatgpt-review-rounds`。这是一条
 operator 授权的窄例外；普通猫作者和其他 PR 继续使用下方风险择源规则。
 
 ## 先选验证源

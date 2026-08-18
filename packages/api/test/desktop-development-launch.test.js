@@ -10,6 +10,7 @@ describe('F289 project-scoped Desktop launch', () => {
   let snapshots;
   let sessions;
   let upsertCalls;
+  let designBranches;
   let VersionConflictError;
 
   const project = {
@@ -80,6 +81,7 @@ describe('F289 project-scoped Desktop launch', () => {
     snapshots = new Map();
     sessions = new Map();
     upsertCalls = [];
+    designBranches = { 'backlog-1': 'design/f006-workspace-capability' };
     const workflowSopStore = {
       get: async (itemId) => sops.get(itemId) ?? null,
       getManagedWorkAdmission: async (_ownerUserId, itemId) => admissions.get(itemId) ?? null,
@@ -111,7 +113,14 @@ describe('F289 project-scoped Desktop launch', () => {
       },
     };
     service = new serviceModule.DesktopDevelopmentLoopService(
-      { getById: async (id) => (id === project.id ? project : null) },
+      {
+        getById: async (id) => (id === project.id ? project : null),
+        getFeatureDesignBranches: async () => ({ ...designBranches }),
+        setFeatureDesignBranch: async (_projectId, backlogItemId, branch) => {
+          if (branch) designBranches[backlogItemId] = branch;
+          else delete designBranches[backlogItemId];
+        },
+      },
       {
         ensureForFeature: async (projectId, backlogItemId, kind) => ({
           threadId: `project-feature-${kind}:${projectId}:${backlogItemId}`,
@@ -139,6 +148,7 @@ describe('F289 project-scoped Desktop launch', () => {
       { listByUser: async () => [projectItem, malformedProjectItem, otherProjectItem] },
       workflowSopStore,
     );
+    service.designBranchResolver = async ({ branch }) => ({ branch, exactSha: 'd'.repeat(40) });
   });
 
   test('lists only the selected project and starts with create-only SOP semantics', async () => {
@@ -210,7 +220,24 @@ describe('F289 project-scoped Desktop launch', () => {
       backlogItemId: 'backlog-1',
       featureId: 'F006',
       title: '[F006] Workspace capability settings',
+      designBranch: 'design/f006-workspace-capability',
+      designExactSha: 'd'.repeat(40),
     });
+  });
+
+  test('refuses to start before a committed feature design branch is configured', async () => {
+    designBranches = {};
+    await assert.rejects(
+      () =>
+        service.startProjectWork({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: 'project-1',
+          backlogItemId: 'backlog-1',
+        }),
+      /design branch is not configured/i,
+    );
+    assert.equal(upsertCalls.length, 0);
   });
 
   test('does not overwrite an existing cat-owned workflow', async () => {

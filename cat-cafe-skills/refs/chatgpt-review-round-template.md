@@ -1,48 +1,20 @@
-# ChatGPT Multi-Cat Review Round
+# Review Hub 可见输出模板
 
-```yaml
-changeId: <PR-number-or-branch-slug>
-round: <NN>
-reviewedCodeHead: <full-commit-sha>
-reviewers:
-  - <catId>
-  - <catId>
-recorder: <co-creator-designated-catId>
-independentReviewCompleted: true
-crossReviewCompleted: true
-openFindings: <integer>
-verdict: fix_required | approved_for_merge
-```
+GPT 与 Kimi 在独立检视、交叉检视和共识整理阶段都使用以下两张 GFM Markdown 表格。不得改列、换序或用散文代替。
 
-## Input evidence
+| 项目 / 功能 | 阶段 | Review Round | Attempt | 实现提交 | 方案提交 | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `<项目 · Feature>` | `<独立检视 / 交叉检视 / 共识整理>` | `<Round ID>` | `<Attempt>` | `<exact SHA>` | `<design branch@SHA>` | `<本阶段结论>` |
 
-- Requirements / Feature Doc: `<path-or-anchor>`
-- PR / branch: `<reference>`
-- ChatGPT test evidence: `<commands-and-results>`
+| 编号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `<draftFindingId / findingId / 稳定编号>` | `<当前检视者>` | `<P1/P2/P3/—>` | `<阶段结论>` | `<具体问题或通过说明>` | `<文件、行号、测试或命令>` | `git:refs/heads/<branch>@<designExactSha><br><文件/章节>` | `<必须动作 / 无需处理 / 待用户决策>` |
 
-## Previous-round closure
+规则：
 
-| Finding | Status (`fixed` / `reopened` / `not_a_defect`) | Evidence |
-|---|---|---|
-| `<ID>` | `<status>` | `<commit/test/path>` |
-
-## Consensus findings
-
-| ID | Severity | Location / reproduction | Expected vs actual | Required closure |
-|---|---|---|---|---|
-| `R<NN>-P<N>-<N>` | `P1/P2/P3` | `<evidence>` | `<behavior>` | `<test/outcome>` |
-
-## Disposition
-
-- New findings: `<count>`
-- Open historical findings: `<count>`
-- `openFindings`: `<total>`
-- Verdict rationale: `<why fix_required or approved_for_merge>`
-
-## Provenance
-
-- Independent notes stayed private until every reviewer completed: `yes`
-- Cross-review consensus completed: `yes`
-- Git writer for this round was the operator-designated recorder: `yes`
-- `ledgerOnlyContinuity`: `yes` — `reviewedCodeHead..ledger commit` changes only this round ledger file
-- Recorder signature: `[nickname/model🐾]`
+- 每条 finding 单独一行；单元格换行使用 `<br>`，竖线转义为 `\|`，表格不放进代码块。
+- 没有 finding 时仍输出一行：级别“—”、结论“通过”、检视意见说明实际检查、处理要求“无需处理”。
+- 独立检视只展示本人内容，不泄露、推测或占位展示其他 reviewer。
+- 交叉检视对每条独立 finding 标记“成立 / 不成立 / 重复 / 待用户决策”。
+- 共识阶段标记“纳入共识 / 驳回 / 已解决 / 待用户决策”；被驳回项仍保留一行并给出依据。
+- 表格前后不再重复 findings 的纯文字清单。

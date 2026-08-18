@@ -192,7 +192,12 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
 
   async createRound(input: CreateReviewRoundInput): Promise<ReviewRound> {
     const normalized = normalizeCreate(input);
-    const roundId = deriveId('rr', [normalized.projectId, normalized.workId, normalized.exactSha]);
+    const roundId = deriveId('rr', [
+      normalized.projectId,
+      normalized.workId,
+      normalized.exactSha,
+      ...(normalized.designExactSha ? [normalized.designExactSha] : []),
+    ]);
     const creationFingerprint = createFingerprint(normalized);
     const legacyCreationFingerprint = createFingerprint({ ...normalized, reviewThreadId: undefined });
     const round: StoredRound = {
@@ -202,6 +207,9 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
       workId: normalized.workId,
       attemptId: normalized.attemptId,
       exactSha: normalized.exactSha,
+      ...(normalized.designBranch && normalized.designExactSha
+        ? { designBranch: normalized.designBranch, designExactSha: normalized.designExactSha }
+        : {}),
       author: normalized.author,
       reviewerCatIds: normalized.reviewerCatIds,
       recorderCatId: normalized.recorderCatId,
@@ -387,14 +395,26 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
   }
 }
 
-function normalizeCreate(
-  input: CreateReviewRoundInput,
-): Omit<Required<CreateReviewRoundInput>, 'reviewThreadId'> & { readonly reviewThreadId?: string } {
+function normalizeCreate(input: CreateReviewRoundInput): Omit<
+  Required<CreateReviewRoundInput>,
+  'reviewThreadId' | 'designBranch' | 'designExactSha'
+> & {
+  readonly reviewThreadId?: string;
+  readonly designBranch?: string;
+  readonly designExactSha?: string;
+} {
   assertId(input.ownerUserId, 'ownerUserId');
   assertId(input.projectId, 'projectId');
   assertId(input.workId, 'workId');
   assertId(input.attemptId, 'attemptId');
   assertFullSha(input.exactSha, 'exactSha');
+  if (Boolean(input.designBranch) !== Boolean(input.designExactSha)) {
+    throw new Error('ReviewRound design branch and design SHA must be provided together');
+  }
+  if (input.designBranch !== undefined) {
+    if (!input.designBranch.trim()) throw new Error('designBranch is invalid');
+    assertFullSha(input.designExactSha as string, 'designExactSha');
+  }
   assertActor(input.author);
   if (
     !Array.isArray(input.reviewerCatIds) ||
@@ -416,6 +436,9 @@ function normalizeCreate(
   return {
     ...input,
     exactSha: input.exactSha.toLowerCase(),
+    ...(input.designBranch && input.designExactSha
+      ? { designBranch: input.designBranch.trim(), designExactSha: input.designExactSha.toLowerCase() }
+      : {}),
     reviewerCatIds: [...input.reviewerCatIds].sort(),
     now,
   };

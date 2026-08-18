@@ -6,6 +6,9 @@ const REDIS_URL = process.env.REDIS_URL;
 const REDIS_ISOLATED = process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1';
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
+const DESIGN_SHA = 'd'.repeat(40);
+const REVISED_DESIGN_SHA = 'e'.repeat(40);
+const DESIGN_BRANCH = 'design/f289-desktop-loop';
 
 describe(
   'F289 DesktopDevelopmentLoopService',
@@ -24,6 +27,7 @@ describe(
     let desktopWakes;
     let desktopPauses;
     let backlogItems;
+    let currentDesignSha;
     let connected = false;
 
     before(async () => {
@@ -99,6 +103,7 @@ describe(
         workflowStore,
         undefined,
         async () => {},
+        async ({ branch }) => ({ branch, exactSha: currentDesignSha }),
       );
       reviewCoordinator = new ReviewRoundCoordinatorService(
         reviewRounds,
@@ -112,6 +117,8 @@ describe(
             featureId: 'F289',
             featureTitle: 'Implement the Desktop loop',
             attemptNumber: 1,
+            designBranch: DESIGN_BRANCH,
+            designExactSha: DESIGN_SHA,
           }),
         },
         sessions,
@@ -137,6 +144,7 @@ describe(
       reviewDispatches = [];
       desktopWakes = [];
       desktopPauses = [];
+      currentDesignSha = DESIGN_SHA;
       service.desktopTaskLauncher = undefined;
       backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
@@ -171,6 +179,7 @@ describe(
         tags: ['feature:F289'],
         status: 'approved',
       });
+      await externalProjects.setFeatureDesignBranch(project.id, 'backlog-1', DESIGN_BRANCH);
       return { project, bundle };
     }
 
@@ -268,10 +277,12 @@ describe(
       assert.equal(first.managedWorkVersion, 2);
       assert.equal(first.reviewRoundId, null);
       assert.deepEqual(first.nextLegalActions, ['implement_and_report_committed_sha']);
-      assert.equal(first.workflowNodes[0].id, 'implementation');
-      assert.equal(first.workflowNodes[0].status, 'active');
-      assert.equal(first.workflowNodes[0].manualAction, 'wake_desktop');
-      assert.ok(first.workflowNodes.slice(1).every((node) => node.status === 'pending'));
+      assert.equal(first.workflowNodes[0].id, 'design');
+      assert.equal(first.workflowNodes[0].status, 'completed');
+      assert.equal(first.workflowNodes[1].id, 'implementation');
+      assert.equal(first.workflowNodes[1].status, 'active');
+      assert.equal(first.workflowNodes[1].manualAction, 'wake_desktop');
+      assert.ok(first.workflowNodes.slice(2).every((node) => node.status === 'pending'));
       assert.doesNotMatch(JSON.stringify(first), /example-worktree/);
 
       const connectedProject = await service.readProject({
@@ -346,8 +357,9 @@ describe(
       assert.equal(reported.currentSha, SHA_A);
       assert.deepEqual(reported.nextLegalActions, ['wait_for_independent_review']);
       assert.deepEqual(
-        reported.workflowNodes.slice(0, 3).map((node) => [node.id, node.status, node.manualAction]),
+        reported.workflowNodes.slice(0, 4).map((node) => [node.id, node.status, node.manualAction]),
         [
+          ['design', 'completed', null],
           ['implementation', 'completed', null],
           ['independent_review', 'active', 'replay_review_stage'],
           ['cross_review', 'pending', null],
@@ -373,7 +385,8 @@ describe(
             featureId: 'F289',
             featureTitle: 'Implement the Desktop loop',
             attemptNumber: 1,
-            planThreadId: `project-feature-plan:${project.id}:backlog-1`,
+            designBranch: DESIGN_BRANCH,
+            designExactSha: DESIGN_SHA,
           },
         },
       ]);
@@ -385,6 +398,8 @@ describe(
         workId: bundle.admission.workId,
       });
       assert.equal(round.round.exactSha, SHA_A);
+      assert.equal(round.round.designBranch, DESIGN_BRANCH);
+      assert.equal(round.round.designExactSha, DESIGN_SHA);
       assert.deepEqual(round.round.reviewerCatIds, ['cat-codex', 'cat-kimi']);
       assert.equal(round.round.author.actorId, 'chatgpt-desktop-dev');
 
@@ -600,7 +615,7 @@ describe(
             title: 'Consensus P1',
             details: 'This requires a user architecture decision.',
             evidence: ['src/a.ts:1'],
-            designRefs: ['project-feature-plan:project-1:backlog-1#architecture'],
+            designRefs: [`git:refs/heads/${DESIGN_BRANCH}@${DESIGN_SHA}`],
             scope: 'architecture_decision',
           },
         ],
@@ -626,12 +641,29 @@ describe(
         packet.openFindings.map((finding) => finding.summary),
         ['Consensus P1'],
       );
-      assert.deepEqual(packet.openFindings[0].designRefs, [`project-feature-plan:${project.id}:backlog-1`]);
+      assert.deepEqual(packet.openFindings[0].designRefs, [`git:refs/heads/${DESIGN_BRANCH}@${DESIGN_SHA}`]);
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
       assert.deepEqual(packet.nextLegalActions, ['request_user_architecture_decision']);
       assert.equal(packet.phase, 'awaiting_architecture_decision');
       assert.equal(packet.architectureDecisionPending, true);
 
+      await assert.rejects(
+        () =>
+          service.recordArchitectureDecision({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            findingId: packet.openFindings[0].findingId,
+            decision: 'approve_plan_change',
+            idempotencyKey: 'architecture-decision-without-plan-commit',
+            now: 7_150,
+          }),
+        /design branch has not advanced/i,
+      );
+      currentDesignSha = REVISED_DESIGN_SHA;
       packet = await service.recordArchitectureDecision({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -640,10 +672,12 @@ describe(
         attemptId: bundle.attempt.attemptId,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         findingId: packet.openFindings[0].findingId,
-        decision: 'keep_original_plan',
+        decision: 'approve_plan_change',
         idempotencyKey: 'architecture-decision-consensus-p1',
         now: 7_200,
       });
+      assert.equal(packet.designExactSha, REVISED_DESIGN_SHA);
+      assert.equal(packet.reviewDesignExactSha, DESIGN_SHA);
       assert.equal(packet.architectureDecisionPending, false);
       assert.equal(packet.phase, 'fix_required');
       assert.deepEqual(packet.nextLegalActions, ['start_fix_attempt']);

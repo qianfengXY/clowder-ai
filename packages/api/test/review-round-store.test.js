@@ -6,6 +6,8 @@ const REDIS_URL = process.env.REDIS_URL;
 const REDIS_ISOLATED = process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1';
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
+const DESIGN_SHA_A = 'c'.repeat(40);
+const DESIGN_SHA_B = 'd'.repeat(40);
 
 describe(
   'F253 durable ReviewRound store',
@@ -131,6 +133,32 @@ describe(
       await assert.rejects(
         () => createRound({ attemptId: 'attempt-other', idempotencyKey: 'same-sha-other-attempt' }),
         /immutable round conflict/i,
+      );
+    });
+
+    test('captures the design revision and opens a distinct round when only the plan commit advances', async () => {
+      const first = await createRound({
+        designBranch: 'design/f006-workspace',
+        designExactSha: DESIGN_SHA_A,
+        idempotencyKey: 'design-a',
+      });
+      const second = await createRound({
+        designBranch: 'design/f006-workspace',
+        designExactSha: DESIGN_SHA_B,
+        idempotencyKey: 'design-b',
+      });
+      assert.notEqual(second.roundId, first.roundId);
+      assert.equal(first.designExactSha, DESIGN_SHA_A);
+      assert.equal(second.designExactSha, DESIGN_SHA_B);
+      const current = await store.readCurrentSafe({
+        ownerUserId: 'owner-1',
+        projectId: 'project-1',
+        workId: 'work-1',
+      });
+      assert.equal(current.round.roundId, second.roundId);
+      await assert.rejects(
+        () => createRound({ designBranch: 'design/f006-workspace', idempotencyKey: 'missing-design-sha' }),
+        /must be provided together/i,
       );
     });
 

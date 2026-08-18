@@ -58,6 +58,17 @@ function item(featureId = 'F006'): BacklogItem {
   };
 }
 
+function readyDesignBranch(backlogItemId = 'item-F006', featureId = 'F006') {
+  return {
+    projectId: 'project-Traqen',
+    backlogItemId,
+    featureId,
+    branch: `design/${featureId.toLowerCase()}-workspace-capability-settings`,
+    exactSha: 'a'.repeat(40),
+    status: 'ready' as const,
+  };
+}
+
 async function flush() {
   await act(async () => {
     await Promise.resolve();
@@ -92,8 +103,11 @@ describe('ExternalProjectFeatureList', () => {
 
   it('starts a project-scoped feature and reports the automatically created Desktop task', async () => {
     let launched = false;
-    apiFetchMock.mockImplementation(async (_path: string, init?: RequestInit) => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (!init) {
+        if (path.includes('/design-branches')) {
+          return { ok: true, status: 200, json: async () => ({ designBranches: [readyDesignBranch()] }) };
+        }
         return {
           ok: true,
           status: 200,
@@ -144,6 +158,70 @@ describe('ExternalProjectFeatureList', () => {
     expect(JSON.parse((postCall?.[1] as RequestInit).body as string)).toEqual({ protocolVersion: 1 });
     expect(button.textContent).toContain('已启动');
     expect(container.textContent).toContain('已在 ChatGPT Desktop 创建对应开发任务');
+  });
+
+  it('binds a committed design branch before enabling development', async () => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (init?.method === 'PUT' && path.endsWith('/design-branch')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ designBranch: readyDesignBranch() }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          path.includes('/design-branches')
+            ? { designBranches: [] }
+            : {
+                states: [
+                  {
+                    backlogItemId: 'item-F006',
+                    featureId: 'F006',
+                    title: '[F006] Workspace capability settings',
+                    status: 'available',
+                  },
+                ],
+              },
+      };
+    });
+    await act(async () => {
+      root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
+    });
+    await flush();
+
+    const start = container.querySelector('[data-testid="external-project-start-item-F006"]') as HTMLButtonElement;
+    expect(start.textContent).toContain('先配置方案分支');
+    expect(start.disabled).toBe(true);
+
+    const edit = container.querySelector(
+      '[data-testid="external-project-design-branch-item-F006"]',
+    ) as HTMLButtonElement;
+    await act(async () => edit.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    const input = container.querySelector(
+      '[data-testid="external-project-design-input-item-F006"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      valueSetter?.call(input, 'design/f006-workspace-capability-settings');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const save = container.querySelector('[data-testid="external-project-design-save-item-F006"]') as HTMLButtonElement;
+    await act(async () => {
+      save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+
+    const putCall = apiFetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
+    expect(putCall?.[0]).toContain('/features/item-F006/design-branch');
+    expect(JSON.parse((putCall?.[1] as RequestInit).body as string)).toEqual({
+      protocolVersion: 1,
+      branch: 'design/f006-workspace-capability-settings',
+    });
+    expect(container.textContent).toContain('已绑定方案分支');
   });
 
   it('opens feature-scoped plan and Review conversations', async () => {
@@ -268,8 +346,11 @@ describe('ExternalProjectFeatureList', () => {
   });
 
   it('keeps automatic Desktop launch failures retryable', async () => {
-    apiFetchMock.mockImplementation(async (_path: string, init?: RequestInit) => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (!init) {
+        if (path.includes('/design-branches')) {
+          return { ok: true, status: 200, json: async () => ({ designBranches: [readyDesignBranch()] }) };
+        }
         return {
           ok: true,
           json: async () => ({
@@ -306,20 +387,23 @@ describe('ExternalProjectFeatureList', () => {
   });
 
   it('works for any bound external project and allows a detached launch to reconnect', async () => {
-    apiFetchMock.mockResolvedValue({
+    apiFetchMock.mockImplementation(async (path: string) => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        states: [
-          {
-            backlogItemId: 'item-F120',
-            featureId: 'F120',
-            title: '[F120] Workspace capability settings',
-            status: 'ready_for_desktop',
-          },
-        ],
-      }),
-    });
+      json: async () =>
+        path.includes('/design-branches')
+          ? { designBranches: [readyDesignBranch('item-F120', 'F120')] }
+          : {
+              states: [
+                {
+                  backlogItemId: 'item-F120',
+                  featureId: 'F120',
+                  title: '[F120] Workspace capability settings',
+                  status: 'ready_for_desktop',
+                },
+              ],
+            },
+    }));
 
     await act(async () => {
       root.render(
@@ -341,20 +425,23 @@ describe('ExternalProjectFeatureList', () => {
   });
 
   it('distinguishes a cat-owned workflow from a Desktop launch', async () => {
-    apiFetchMock.mockResolvedValue({
+    apiFetchMock.mockImplementation(async (path: string) => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        states: [
-          {
-            backlogItemId: 'item-F006',
-            featureId: 'F006',
-            title: '[F006] Workspace capability settings',
-            status: 'managed_by_catcafe',
-          },
-        ],
-      }),
-    });
+      json: async () =>
+        path.includes('/design-branches')
+          ? { designBranches: [] }
+          : {
+              states: [
+                {
+                  backlogItemId: 'item-F006',
+                  featureId: 'F006',
+                  title: '[F006] Workspace capability settings',
+                  status: 'managed_by_catcafe',
+                },
+              ],
+            },
+    }));
 
     await act(async () => {
       root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
@@ -367,20 +454,23 @@ describe('ExternalProjectFeatureList', () => {
   });
 
   it('shows rejected work without calling it completed', async () => {
-    apiFetchMock.mockResolvedValue({
+    apiFetchMock.mockImplementation(async (path: string) => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        states: [
-          {
-            backlogItemId: 'item-F006',
-            featureId: 'F006',
-            title: '[F006] Workspace capability settings',
-            status: 'rejected',
-          },
-        ],
-      }),
-    });
+      json: async () =>
+        path.includes('/design-branches')
+          ? { designBranches: [] }
+          : {
+              states: [
+                {
+                  backlogItemId: 'item-F006',
+                  featureId: 'F006',
+                  title: '[F006] Workspace capability settings',
+                  status: 'rejected',
+                },
+              ],
+            },
+    }));
 
     await act(async () => {
       root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));

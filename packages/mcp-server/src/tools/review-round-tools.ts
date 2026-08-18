@@ -31,11 +31,13 @@ const findingSchema = z
       .array(z.string().min(1).max(2_000))
       .min(1)
       .max(100)
-      .describe('Required references to the approved feature plan or acceptance criteria that authorize this finding.'),
+      .describe(
+        'Required references including git:refs/heads/<designBranch>@<designExactSha> from the Review system message.',
+      ),
     scope: z
       .enum(['plan_conformance', 'architecture_decision'])
       .describe(
-        'Use plan_conformance normally. Use architecture_decision only for a serious P1 architecture conflict that needs user approval.',
+        'Use plan_conformance normally. Use architecture_decision only for a serious P1 conflict with the design branch that needs user resolution.',
       ),
   })
   .strict()

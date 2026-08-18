@@ -31,6 +31,8 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         featureId: 'F006',
         featureTitle: 'Workspace capability settings',
         attemptNumber: 3,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
       },
     };
 
@@ -53,25 +55,20 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.match(requests[0].payload.content, /Traqen · F006 Workspace capability settings/);
     assert.match(requests[0].payload.content, /阶段：独立检视/);
     assert.match(requests[0].payload.content, /仓库：qianfengXY\/Traqen/);
-    assert.match(requests[0].payload.content, /权威方案会话：project-feature-plan:project-1:backlog-1/);
-    assert.match(requests[0].payload.content, /每条 finding 必须填写非空 designRefs/);
-    assert.match(requests[0].payload.content, /禁止把个人偏好、超出方案的重构或新增需求包装成 finding/);
-    assert.match(requests[0].payload.content, /GPT 与 Kimi 共用同一模板/);
-    assert.match(
-      requests[0].payload.content,
-      /\| 编号 \| 检视者 \| 级别 \| 结论 \| 检视意见 \| 证据 \| 方案依据 \| 处理要求 \|/,
-    );
-    assert.match(requests[0].payload.content, /没有 finding 时仍必须输出一行/);
+    assert.match(requests[0].payload.content, /方案分支：design\/f006-workspace-capability/);
+    assert.match(requests[0].payload.content, new RegExp(`方案提交：${'e'.repeat(40)}`));
+    assert.match(requests[0].payload.content, /加载 chatgpt-review-rounds skill/);
+    assert.doesNotMatch(requests[0].payload.content, /每条 finding 必须填写/);
+    assert.doesNotMatch(requests[0].payload.content, /\| 编号 \| 检视者/);
     assert.match(requests[0].payload.content, /Attempt #3/);
     assert.doesNotMatch(requests[0].payload.content, /F289/);
     assert.match(requests[0].payload.content, /a{40}/);
     assert.match(requests[1].payload.content, /^@gpt\n@kimi\n/);
-    assert.match(requests[1].payload.content, /独立检视 Barrier 已开启/);
-    assert.match(requests[1].payload.content, /成立 \/ 不成立 \/ 重复 \/ 待用户决策/);
+    assert.match(requests[1].payload.content, /任务：加载 chatgpt-review-rounds skill，按“交叉检视”阶段执行一次/);
     assert.match(requests[2].payload.content, /^@gpt\n/);
     assert.doesNotMatch(requests[2].payload.content, /^@gpt\n@kimi/m);
     assert.match(requests[2].payload.content, /阶段：共识整理/);
-    assert.match(requests[2].payload.content, /纳入共识 \/ 驳回 \/ 已解决 \/ 待用户决策/);
+    assert.match(requests[2].payload.content, /任务：加载 chatgpt-review-rounds skill，按“共识整理”阶段执行一次/);
     assert.equal(new Set(requests.map((request) => request.payload.idempotencyKey)).size, 3);
     assert.equal(
       requests.every((request) =>
@@ -97,11 +94,10 @@ describe('F289 ReviewRoundStageDispatcher', () => {
       deliveryKey: 'user-consensus:round-1',
     });
     const authorizedMessage = requests.at(-1).payload.content;
-    assert.match(authorizedMessage, /【用户共识裁决授权】/);
+    assert.match(authorizedMessage, /用户裁决（owner-1/);
     assert.match(authorizedMessage, /Managed work version：60/);
     assert.match(authorizedMessage, /采纳 GPT 第 2–5 项；驳回 Kimi 第 1 项/);
-    assert.match(authorizedMessage, /不再引入新 reviewer/);
-    assert.match(authorizedMessage, /立即调用 cat_cafe_review_consensus_publish/);
+    assert.doesNotMatch(authorizedMessage, /不再引入新 reviewer/);
   });
 
   test('fails closed for unroutable cats or rejected message ingress', async () => {
@@ -124,6 +120,8 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         featureId: 'F006',
         featureTitle: 'Workspace capability settings',
         attemptNumber: 3,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
       },
     };
     await assert.rejects(
@@ -198,6 +196,8 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         featureId: 'F006',
         featureTitle: 'Workspace capability settings',
         attemptNumber: 3,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
       },
       deliveryKey: 'replay:2',
     };
@@ -265,6 +265,8 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         featureId: 'F006',
         featureTitle: 'Workspace capability settings',
         attemptNumber: 10,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
       },
     };
 
@@ -321,6 +323,8 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         featureId: 'F006',
         featureTitle: 'Workspace capability settings',
         attemptNumber: 10,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
       },
     };
 

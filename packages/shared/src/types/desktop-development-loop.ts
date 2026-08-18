@@ -9,6 +9,7 @@ export type DesktopDevelopmentProtocolVersion = typeof DESKTOP_DEVELOPMENT_PROTO
 export type DesktopDevelopmentActor = typeof CHATGPT_DESKTOP_DEVELOPMENT_ACTOR;
 export type DesktopDevelopmentMergeMode = 'manual_confirm_in_chatgpt' | 'automatic';
 export type DesktopDevelopmentPhase =
+  | 'awaiting_design_branch'
   | 'ready_for_desktop'
   | 'implementing'
   | 'implementation_ready'
@@ -25,6 +26,7 @@ export type DesktopDevelopmentPhase =
   | 'rejected';
 
 export type DesktopDevelopmentWorkflowNodeId =
+  | 'design'
   | 'implementation'
   | 'independent_review'
   | 'cross_review'
@@ -38,6 +40,7 @@ export type DesktopDevelopmentWorkflowNodeStatus = 'pending' | 'active' | 'block
 export type DesktopDevelopmentWorkflowActor = 'chatgpt_desktop' | 'reviewers' | 'review_recorder' | 'catcafe' | 'user';
 
 export type DesktopDevelopmentManualAction =
+  | 'configure_design_branch'
   | 'wake_desktop'
   | 'replay_review_stage'
   | 'record_architecture_decision'
@@ -141,6 +144,16 @@ export interface FeatureWorkspaceThreadCandidatesView {
   readonly candidates: readonly FeatureWorkspaceThreadCandidate[];
 }
 
+export interface FeatureDesignBranchView {
+  readonly projectId: string;
+  readonly backlogItemId: string;
+  readonly featureId: string;
+  readonly branch: string | null;
+  readonly exactSha: string | null;
+  readonly status: 'missing' | 'ready' | 'unavailable';
+  readonly error?: string;
+}
+
 export interface WorkspaceBinding {
   readonly repository: GitHubRepositoryIdentity;
   readonly branch: string;
@@ -193,6 +206,11 @@ export interface DesktopDevelopmentResumePacket {
   readonly projectId: string;
   readonly repository: GitHubRepositoryIdentity;
   readonly defaultBranch: string;
+  /** Per-feature design branch. Its exact commit, not a discussion thread, is the implementation authority. */
+  readonly designBranch: string | null;
+  readonly designExactSha: string | null;
+  /** Design commit captured by the current Review round. */
+  readonly reviewDesignExactSha: string | null;
   readonly workId: string;
   readonly attemptId: string;
   readonly attemptNumber: number;
@@ -268,6 +286,10 @@ export function normalizeGitHubRepository(value: string): GitHubRepositoryIdenti
 }
 
 export function assertValidDesktopDefaultBranch(value: string): void {
+  assertValidGitBranch(value, 'default branch');
+}
+
+export function assertValidGitBranch(value: string, label = 'Git branch'): void {
   const branch = value.trim();
   const invalid =
     branch.length === 0 ||
@@ -284,7 +306,7 @@ export function assertValidDesktopDefaultBranch(value: string): void {
     /[\s~^:?*[\\]/.test(branch) ||
     branch.split('/').some((segment) => segment.length === 0 || segment.startsWith('.'));
   if (invalid) {
-    throw new Error('Invalid default branch name');
+    throw new Error(`Invalid ${label} name`);
   }
 }
 

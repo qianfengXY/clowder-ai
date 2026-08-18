@@ -3,6 +3,7 @@
 import type {
   BacklogItem,
   ExternalProject,
+  FeatureDesignBranchView,
   FeatureWorkspaceThreadCandidatesView,
   FeatureWorkspaceThreadKind,
   FeatureWorkspaceThreadView,
@@ -71,21 +72,28 @@ function ExternalProjectFeatureRow({
   status,
   error,
   desktopBound,
+  designBranch,
   onStart,
   onOpenThread,
   onBindThread,
+  onEditDesignBranch,
 }: {
   item: BacklogItem;
   status: LaunchStatus;
   error?: string;
   desktopBound: boolean;
+  designBranch?: FeatureDesignBranchView;
   onStart: (item: BacklogItem) => void;
   onOpenThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
   onBindThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
+  onEditDesignBranch: (item: BacklogItem) => void;
 }) {
   const featureId = featureIdFromItem(item);
   const unavailable = !desktopBound || !featureId;
-  const disabled = unavailable || !['available', 'ready_for_desktop', 'error'].includes(status);
+  const designBranchBlocksLaunch =
+    designBranch?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
+  const disabled =
+    unavailable || designBranch?.status !== 'ready' || !['available', 'ready_for_desktop', 'error'].includes(status);
 
   return (
     <div className="rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
@@ -98,6 +106,14 @@ function ExternalProjectFeatureRow({
           <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-medium text-cafe-secondary">
             {launchStatusLabel(status)}
           </span>
+          <span className="text-micro text-cafe-secondary" data-testid={`external-project-design-ref-${item.id}`}>
+            方案分支：
+            {designBranch?.status === 'ready'
+              ? `${designBranch.branch}@${designBranch.exactSha?.slice(0, 12)}`
+              : designBranch?.branch
+                ? `${designBranch.branch}（不可用）`
+                : '未配置'}
+          </span>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <button
@@ -107,7 +123,16 @@ function ExternalProjectFeatureRow({
             className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
             data-testid={`external-project-plan-${item.id}`}
           >
-            方案
+            方案讨论
+          </button>
+          <button
+            type="button"
+            onClick={() => onEditDesignBranch(item)}
+            disabled={unavailable}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+            data-testid={`external-project-design-branch-${item.id}`}
+          >
+            方案分支
           </button>
           <button
             type="button"
@@ -143,7 +168,9 @@ function ExternalProjectFeatureRow({
             className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] disabled:bg-[var(--console-hover-bg)] disabled:text-cafe-secondary disabled:opacity-70"
             data-testid={`external-project-start-${item.id}`}
           >
-            {launchButtonLabel(status, desktopBound, featureId)}
+            {desktopBound && featureId && designBranchBlocksLaunch
+              ? '先配置方案分支'
+              : launchButtonLabel(status, desktopBound, featureId)}
           </button>
         </div>
       </div>
@@ -152,6 +179,7 @@ function ExternalProjectFeatureRow({
           {error}
         </p>
       )}
+      {designBranch?.error && <p className="mt-2 text-xs text-conn-red-text">{designBranch.error}</p>}
     </div>
   );
 }
@@ -163,6 +191,13 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   const setThreads = useChatStore((state) => state.setThreads);
   const [launchStatuses, setLaunchStatuses] = useState<Record<string, LaunchStatus>>({});
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
+  const [designBranches, setDesignBranches] = useState<Record<string, FeatureDesignBranchView>>({});
+  const [designEditor, setDesignEditor] = useState<{
+    itemId: string;
+    branch: string;
+    saving: boolean;
+    error?: string;
+  } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [launchRefreshKey, setLaunchRefreshKey] = useState(0);
   const [bindingEditor, setBindingEditor] = useState<{
@@ -177,14 +212,19 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   const startingItemsRef = useRef(new Set<string>());
 
   useEffect(() => {
+    void project.id;
     setNotice(null);
     setBindingEditor(null);
+    setDesignEditor(null);
   }, [project.id]);
 
   useEffect(() => {
+    void launchRefreshKey;
     let cancelled = false;
+    let shouldLoadDesignBranches = true;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
     setLaunchErrors({});
+    setDesignBranches({});
     setLaunchStatuses(Object.fromEntries(items.map((item) => [item.id, 'checking'])));
 
     const protocolVersion = project.desktopDevelopment?.protocolVersion;
@@ -193,11 +233,23 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
     const loadLaunchStates = async () => {
       let shouldPoll = false;
       try {
-        const response = await apiFetch(
-          `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/launch-states?protocolVersion=${protocolVersion}`,
-        );
+        const designRequest = shouldLoadDesignBranches
+          ? apiFetch(
+              `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/design-branches?protocolVersion=${protocolVersion}`,
+            )
+          : Promise.resolve(null);
+        const [response, designResponse] = await Promise.all([
+          apiFetch(
+            `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/launch-states?protocolVersion=${protocolVersion}`,
+          ),
+          designRequest,
+        ]);
         if (!response.ok) throw new Error(`状态读取失败: ${response.status}`);
+        if (designResponse && !designResponse.ok) throw new Error(`方案分支读取失败: ${designResponse.status}`);
         const body = (await response.json()) as { states: LaunchState[] };
+        const designBody = designResponse
+          ? ((await designResponse.json()) as { designBranches: FeatureDesignBranchView[] })
+          : null;
         if (cancelled) return;
         shouldPoll = body.states.some(
           (state) => state.status === 'ready_for_desktop' || state.status === 'connected_to_desktop',
@@ -212,6 +264,14 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
           ),
         );
         setLaunchErrors({});
+        if (designBody) {
+          shouldLoadDesignBranches = false;
+          setDesignBranches(
+            Object.fromEntries(
+              designBody.designBranches.map((designBranch) => [designBranch.backlogItemId, designBranch]),
+            ),
+          );
+        }
       } catch (error) {
         if (cancelled) return;
         setLaunchStatuses(
@@ -236,6 +296,37 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
       if (pollTimer) clearTimeout(pollTimer);
     };
   }, [items, launchRefreshKey, project.desktopDevelopment?.protocolVersion, project.id]);
+
+  const saveDesignBranch = async () => {
+    if (!designEditor || !project.desktopDevelopment) return;
+    setDesignEditor((current) => (current ? { ...current, saving: true, error: undefined } : current));
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(designEditor.itemId)}/design-branch`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            protocolVersion: project.desktopDevelopment.protocolVersion,
+            branch: designEditor.branch,
+          }),
+        },
+      );
+      const body = (await response.json()) as { designBranch?: FeatureDesignBranchView; error?: string };
+      if (!response.ok || !body.designBranch) throw new Error(body.error ?? '方案分支保存失败');
+      const saved = body.designBranch;
+      setDesignBranches((current) => ({ ...current, [saved.backlogItemId]: saved }));
+      setNotice(`${saved.featureId} 已绑定方案分支 ${saved.branch}@${saved.exactSha?.slice(0, 12)}。`);
+      setDesignEditor(null);
+      setLaunchRefreshKey((current) => current + 1);
+    } catch (error) {
+      setDesignEditor((current) =>
+        current
+          ? { ...current, saving: false, error: error instanceof Error ? error.message : '方案分支保存失败' }
+          : current,
+      );
+    }
+  };
 
   const startDevelopment = async (item: BacklogItem) => {
     const featureId = featureIdFromItem(item);
@@ -387,8 +478,8 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   return (
     <div className="space-y-3" data-testid="external-project-feature-list">
       <div className="rounded-xl bg-[var(--console-shell-bg)] px-4 py-3 text-xs leading-relaxed text-cafe-secondary">
-        从这里启动的功能只属于「{project.name}」。每个功能都有独立的方案与 Review 会话；启动开发后，CatCafe
-        会创建并连接对应的 ChatGPT Desktop 开发任务。
+        从这里启动的功能只属于「{project.name}」。每个功能都有独立的方案讨论与 Review 会话；启动开发后，CatCafe
+        会创建并连接对应的 ChatGPT Desktop 开发任务。方案讨论用于协作，已提交的方案分支才是实现与 Review 依据。
       </div>
       {notice && (
         <output
@@ -406,10 +497,56 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
               status={launchStatuses[item.id] ?? 'checking'}
               error={launchErrors[item.id]}
               desktopBound={Boolean(project.desktopDevelopment)}
+              designBranch={designBranches[item.id]}
               onStart={(selected) => void startDevelopment(selected)}
               onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
               onBindThread={(selected, kind) => void openBindingEditor(selected, kind)}
+              onEditDesignBranch={(selected) =>
+                setDesignEditor({
+                  itemId: selected.id,
+                  branch: designBranches[selected.id]?.branch ?? '',
+                  saving: false,
+                })
+              }
             />
+            {designEditor?.itemId === item.id && (
+              <div
+                className="rounded-xl border border-[var(--console-border)] bg-[var(--console-shell-bg)] px-4 py-3"
+                data-testid={`external-project-design-editor-${item.id}`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-cafe">绑定方案分支</span>
+                  <button type="button" onClick={() => setDesignEditor(null)} className="text-xs text-cafe-secondary">
+                    取消
+                  </button>
+                </div>
+                <p className="mb-2 text-micro text-cafe-secondary">
+                  只读取本地已提交分支，不会切换或修改工作区。分支提交更新后，CatCafe 会自动读取新的精确 SHA。
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    value={designEditor.branch}
+                    onChange={(event) =>
+                      setDesignEditor((current) => (current ? { ...current, branch: event.target.value } : current))
+                    }
+                    placeholder="design/f006-feature-name"
+                    disabled={designEditor.saving}
+                    className="min-w-72 flex-1 rounded-lg border border-[var(--console-border)] bg-[var(--console-card-bg)] px-3 py-2 text-xs text-cafe disabled:opacity-60"
+                    data-testid={`external-project-design-input-${item.id}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveDesignBranch()}
+                    disabled={designEditor.saving || !designEditor.branch.trim()}
+                    className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-50"
+                    data-testid={`external-project-design-save-${item.id}`}
+                  >
+                    {designEditor.saving ? '校验中…' : '校验并保存'}
+                  </button>
+                </div>
+                {designEditor.error && <p className="mt-2 text-xs text-conn-red-text">{designEditor.error}</p>}
+              </div>
+            )}
             {bindingEditor?.itemId === item.id && (
               <div
                 className="rounded-xl border border-[var(--console-border)] bg-[var(--console-shell-bg)] px-4 py-3"
@@ -417,7 +554,7 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
               >
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <span className="text-xs font-semibold text-cafe">
-                    绑定{bindingEditor.kind === 'plan' ? '方案' : 'Review'}会话
+                    绑定{bindingEditor.kind === 'plan' ? '方案讨论' : 'Review'}会话
                   </span>
                   <button type="button" onClick={() => setBindingEditor(null)} className="text-xs text-cafe-secondary">
                     取消

@@ -79,6 +79,8 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
     backlogItemId: 'backlog-1',
     featureId: 'F006',
     title: 'Workspace settings',
+    designBranch: 'design/f006-workspace-capability',
+    designExactSha: 'd'.repeat(40),
   };
   assert.deepEqual(await launcher.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
   assert.deepEqual(await launcher.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
@@ -126,6 +128,8 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
     backlogItemId: 'backlog-1',
     featureId: 'F006',
     title: 'Workspace settings',
+    designBranch: 'design/f006-workspace-capability',
+    designExactSha: 'd'.repeat(40),
   });
 
   assert.deepEqual(result, { status: 'created', threadId: 'native-thread-f006' });
@@ -143,6 +147,8 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
   assert.equal(goal.params.threadId, 'native-thread-f006');
   assert.equal(goal.params.status, 'paused');
   assert.match(goal.params.objective, /runtimeSessionId/);
+  assert.match(goal.params.objective, /方案分支：design\/f006-workspace-capability/);
+  assert.match(goal.params.objective, new RegExp(`方案提交：${'d'.repeat(40)}`));
   const turn = sessions[0].writes.find((message) => message.method === 'turn/start');
   assert.equal(turn.params.threadId, 'native-thread-f006');
   assert.match(turn.params.input[0].text, /runtimeSessionId/);
@@ -580,6 +586,8 @@ test('Desktop task launcher reopens an existing task without writing a new turn'
     backlogItemId: 'backlog-1',
     featureId: 'F006',
     title: 'Workspace settings',
+    designBranch: 'design/f006-workspace-capability',
+    designExactSha: 'd'.repeat(40),
   });
   assert.deepEqual(opened, ['existing-thread']);
   assert.equal(sessionCreated, false);

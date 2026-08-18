@@ -33,14 +33,14 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 
 ## Durable Invariants
 
-1. One project/work/full-SHA tuple identifies one immutable round; changing the attempt, author, roster, or recorder conflicts instead of rewriting history.
+1. One project/work/full implementation SHA/full design SHA tuple identifies one immutable round; changing the attempt, author, roster, recorder or frozen design revision conflicts instead of rewriting history.
 2. A round has at least two distinct named reviewer cats, and a cat author cannot be in its roster. ChatGPT Desktop remains a non-cat external author actor.
 3. Before every reviewer finishes independently, only a reviewer may read their own draft. Barrier-safe reads expose progress but no draft content.
 4. The independent barrier and cross-review completion use optimistic versioning plus Redis atomic writes. A concurrent duplicate gets one winner.
 5. Only the designated recorder can publish consensus, and only after every reviewer finishes cross-review.
 6. Approval requires green checks and zero open findings across the work. A new exact-SHA round makes older approval non-current without deleting history.
 7. Round, draft, receipt, index and finding records default to TTL=0. A visible thread/chat deletion never deletes them.
-8. Every consensus finding carries non-empty frozen-design references and an explicit `plan_conformance` or `architecture_decision` scope. Review cannot silently introduce out-of-plan work; serious architecture conflicts are escalated to the F289 user-decision gate.
+8. Every consensus finding carries the exact `git:refs/heads/<branch>@<full-sha>` frozen-design reference and an explicit `plan_conformance` or `architecture_decision` scope. Review cannot silently introduce out-of-plan work; serious architecture conflicts are escalated to the F289 user-decision gate and a changed design must first be committed to that branch.
 
 ## Extend By
 
