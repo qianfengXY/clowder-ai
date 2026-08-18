@@ -31,6 +31,7 @@ test('Review display context resolves the external project feature instead of th
       read: async () => ({
         admission: { producerRef: 'backlog-f006' },
         attempt: { attemptNumber: 3 },
+        state: { currentAttemptNumber: 3, currentDeliveryCycleAttemptNumber: 3 },
       }),
     },
     undefined,

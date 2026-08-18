@@ -226,6 +226,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly workId: string;
   readonly attemptId: string;
   readonly attemptNumber: number;
+  /** Delivery cycle number for an initial delivery, rejected repair, or accepted feature supplement. */
+  readonly deliveryCycleNumber: number;
   readonly phase: DesktopDevelopmentPhase;
   readonly workLifecycle: 'active' | 'accepted' | 'rejected';
   readonly managedWorkVersion: number;

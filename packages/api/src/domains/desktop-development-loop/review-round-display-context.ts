@@ -9,6 +9,7 @@ import {
   resolveDesignBranch,
   resolveDesignDocuments,
 } from './design-branch-resolver.js';
+import { deliveryCycleAttemptNumber } from './managed-work-delivery-cycle.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -114,7 +115,7 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
       backlogItemId,
       featureId,
       featureTitle: featureTitleForReview(featureId, item.title),
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       designBranch: design.branch,
       designExactSha: design.exactSha,
       designDocuments,

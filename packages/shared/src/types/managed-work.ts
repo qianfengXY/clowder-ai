@@ -49,6 +49,10 @@ export interface ManagedWorkConsumerState {
   readonly workId: string;
   readonly currentAttemptId: string;
   readonly currentAttemptNumber: number;
+  /** Monotonic user-visible delivery cycle. Legacy records default to cycle 1. */
+  readonly currentDeliveryCycleNumber?: number;
+  /** Review/fix attempt number within the current delivery cycle. Legacy records default to currentAttemptNumber. */
+  readonly currentDeliveryCycleAttemptNumber?: number;
   readonly lifecycle: ManagedWorkLifecycle;
   readonly terminalExactSha?: string;
   readonly terminalAt?: number;
@@ -96,7 +100,20 @@ export type ManagedWorkEvidenceInput =
   | { readonly kind: 'acceptance_recorded'; readonly exactSha: string; readonly accepted: boolean }
   | { readonly kind: 'work_rejected'; readonly exactSha: string; readonly reason: string };
 
-export type ManagedWorkEvidence = ManagedWorkEvidenceInput & {
+export interface ManagedWorkDeliveryCycleStartedEvidenceInput {
+  /** Explicit audit boundary when a user reopens terminal work for repair or later supplementary implementation. */
+  readonly kind: 'delivery_cycle_started';
+  readonly exactSha: string;
+  readonly deliveryCycleNumber: number;
+  readonly previousLifecycle: 'accepted' | 'rejected';
+  readonly designBranch: string;
+  readonly designExactSha: string;
+  readonly designDocuments: readonly string[];
+  readonly startedByUserId: string;
+  readonly newAttemptId: string;
+}
+
+export type ManagedWorkEvidence = (ManagedWorkEvidenceInput | ManagedWorkDeliveryCycleStartedEvidenceInput) & {
   readonly evidenceId: string;
   readonly workId: string;
   readonly attemptId: string;

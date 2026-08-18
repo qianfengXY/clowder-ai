@@ -174,6 +174,8 @@ describe(
       assert.equal(winners.length, 1);
       assert.equal(winners[0].value.attempt.attemptNumber, 2);
       assert.equal(winners[0].value.state.currentAttemptNumber, 2);
+      assert.equal(winners[0].value.state.currentDeliveryCycleNumber, 1);
+      assert.equal(winners[0].value.state.currentDeliveryCycleAttemptNumber, 2);
       assert.equal(await redis.ttl(`managed-work:attempt:${winners[0].value.attempt.attemptId}`), -1);
       assert.equal(await redis.ttl(`managed-work:consumer:${CONSUMER_ID}:state:${bundle.admission.workId}`), -1);
     });
@@ -254,6 +256,42 @@ describe(
           }),
         /managed work is terminal/i,
       );
+
+      const reopenInput = {
+        consumerId: CONSUMER_ID,
+        ownerUserId: 'owner-1',
+        workId: bundle.admission.workId,
+        fromAttemptId: bundle.attempt.attemptId,
+        executor: { kind: 'external_actor', actorId: 'chatgpt-desktop-dev' },
+        expectedVersion: rejected.version,
+        terminalExactSha: EXACT_SHA,
+        designBranch: 'product-design',
+        designExactSha: 'd'.repeat(40),
+        designDocuments: ['docs/design/F289.zh-CN.md'],
+        idempotencyKey: 'repair-delivery-cycle',
+      };
+      const reopened = await port.startNextDeliveryCycle(reopenInput);
+      assert.equal(reopened.state.lifecycle, 'active');
+      assert.equal(reopened.state.currentAttemptNumber, 2);
+      assert.equal(reopened.state.currentDeliveryCycleNumber, 2);
+      assert.equal(reopened.state.currentDeliveryCycleAttemptNumber, 1);
+      assert.equal(reopened.state.terminalExactSha, undefined);
+      assert.equal(reopened.attempt.executorActor.actorId, 'chatgpt-desktop-dev');
+      const boundary = reopened.evidence.find((item) => item.kind === 'delivery_cycle_started');
+      assert.equal(boundary.previousLifecycle, 'rejected');
+      assert.equal(boundary.newAttemptId, reopened.attempt.attemptId);
+      assert.deepEqual(await port.startNextDeliveryCycle(reopenInput), reopened);
+
+      const nextEvidence = await port.appendEvidence({
+        consumerId: CONSUMER_ID,
+        ownerUserId: 'owner-1',
+        workId: bundle.admission.workId,
+        attemptId: reopened.attempt.attemptId,
+        expectedVersion: reopened.state.version,
+        idempotencyKey: 'repair-implementation',
+        evidence: { kind: 'implementation_committed', exactSha: 'e'.repeat(40) },
+      });
+      assert.equal(nextEvidence.evidence.attemptId, reopened.attempt.attemptId);
     });
 
     test('accepts only after implementation, green review, merge, and final acceptance evidence', async () => {

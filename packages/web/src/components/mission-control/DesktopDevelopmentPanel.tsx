@@ -24,8 +24,10 @@ interface ProjectDevelopmentLaunchState {
     readonly workId: string;
     readonly attemptId: string;
     readonly attemptNumber: number;
+    readonly deliveryCycleNumber: number;
     readonly lifecycle: 'active' | 'accepted' | 'rejected';
   };
+  readonly deliveryCycleStarted?: boolean;
   readonly desktopBinding?: {
     readonly chatRef?: string;
     readonly bindingEpoch: number;
@@ -43,6 +45,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [reviewDecisionKey, setReviewDecisionKey] = useState<string | null>(null);
   const [consensusInstructions, setConsensusInstructions] = useState<Record<string, string>>({});
   const [retryingWorkId, setRetryingWorkId] = useState<string | null>(null);
+  const [startingDeliveryItemId, setStartingDeliveryItemId] = useState<string | null>(null);
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
@@ -196,12 +199,40 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       setStatus(
         accepted
           ? '最终验收已通过；本轮交付已闭环'
-          : '最终验收未通过；证据已保留，请更新并提交方案分支后开启新交付轮次',
+          : '最终验收未通过；证据已保留。可直接点击“开启修复轮次”；如果方案也需调整，请先提交方案分支。',
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法记录最终验收');
     } finally {
       setAcceptingWorkId(null);
+    }
+  };
+
+  const startNextDeliveryCycle = async (launchState: ProjectDevelopmentLaunchState) => {
+    if (!binding) return;
+    setStartingDeliveryItemId(launchState.backlogItemId);
+    setStatus(null);
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(launchState.backlogItemId)}/start`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ protocolVersion: binding.protocolVersion }),
+        },
+      );
+      const body = (await response.json()) as { state?: ProjectDevelopmentLaunchState; error?: string };
+      if (!response.ok || !body.state) throw new Error(body.error ?? '无法开启新交付轮次');
+      setStatus(
+        body.state.desktopTask?.status === 'failed'
+          ? `新交付轮次已开启，但唤醒 Desktop 失败：${body.state.desktopTask.error}`
+          : `${launchState.featureId} 已开启新交付轮次；历史证据保留，原 ChatGPT Desktop 窗口已收到继续任务。`,
+      );
+      await loadWorks();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法开启新交付轮次');
+    } finally {
+      setStartingDeliveryItemId(null);
     }
   };
 
@@ -475,7 +506,8 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
           </p>
         )}
         {launchStates.map((launchState) => {
-          const work = launchState.managedWork ? worksById.get(launchState.managedWork.workId) : undefined;
+          const candidateWork = launchState.managedWork ? worksById.get(launchState.managedWork.workId) : undefined;
+          const work = candidateWork?.attemptId === launchState.managedWork?.attemptId ? candidateWork : undefined;
           const windowRef =
             launchState.desktopBinding?.chatRef ??
             (launchState.desktopTask?.status === 'created' ? launchState.desktopTask.threadId : undefined);
@@ -515,7 +547,8 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               {work && (
                 <div className="mt-2 space-y-1 text-micro text-cafe-secondary">
                   <div>
-                    实现：{work.branch} · {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
+                    交付 #{work.deliveryCycleNumber} · 实现 #{work.attemptNumber}：{work.branch} ·{' '}
+                    {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
                   </div>
                   <div>
                     方案：
@@ -656,6 +689,26 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   >
                     验收未通过
                   </button>
+                </div>
+              )}
+              {(launchState.status === 'rejected' || launchState.status === 'completed') && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void startNextDeliveryCycle(launchState)}
+                    disabled={startingDeliveryItemId === launchState.backlogItemId}
+                    className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                    data-testid={`desktop-next-delivery-${launchState.backlogItemId}`}
+                  >
+                    {startingDeliveryItemId === launchState.backlogItemId
+                      ? '开启中...'
+                      : launchState.status === 'rejected'
+                        ? '开启修复轮次'
+                        : '发起补充实现'}
+                  </button>
+                  <span className="text-micro text-cafe-secondary">
+                    复用本功能的方案、Review 与 Desktop 窗口；上一轮证据不会被覆盖。
+                  </span>
                 </div>
               )}
             </article>

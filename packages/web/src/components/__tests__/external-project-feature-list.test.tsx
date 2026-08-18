@@ -528,26 +528,34 @@ describe('ExternalProjectFeatureList', () => {
     expect(button.disabled).toBe(true);
   });
 
-  it('shows rejected work without calling it completed', async () => {
-    apiFetchMock.mockImplementation(async (path: string) => ({
+  it('offers a new repair delivery cycle for rejected work', async () => {
+    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () =>
-        path.includes('/design-authority')
+        init?.method === 'POST'
           ? {
-              authority: { projectId: 'project-Traqen', branch: null, exactSha: null, status: 'missing' },
-              features: [],
+              state: {
+                backlogItemId: 'item-F006',
+                featureId: 'F006',
+                title: '[F006] Workspace capability settings',
+                status: 'ready_for_desktop',
+                deliveryCycleStarted: true,
+                desktopTask: { status: 'created', threadId: 'codex-thread-f006' },
+              },
             }
-          : {
-              states: [
-                {
-                  backlogItemId: 'item-F006',
-                  featureId: 'F006',
-                  title: '[F006] Workspace capability settings',
-                  status: 'rejected',
-                },
-              ],
-            },
+          : path.includes('/design-authority')
+            ? { authority: readyDesignAuthority(), features: [readyDesignDocuments()] }
+            : {
+                states: [
+                  {
+                    backlogItemId: 'item-F006',
+                    featureId: 'F006',
+                    title: '[F006] Workspace capability settings',
+                    status: 'rejected',
+                  },
+                ],
+              },
     }));
 
     await act(async () => {
@@ -556,9 +564,15 @@ describe('ExternalProjectFeatureList', () => {
     await flush();
 
     const button = container.querySelector('[data-testid="external-project-start-item-F006"]') as HTMLButtonElement;
-    expect(button.textContent).toContain('验收未通过');
+    expect(button.textContent).toContain('开启修复轮次');
     expect(button.textContent).not.toContain('已完成');
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(container.textContent).toContain('已开启新的交付轮次');
   });
 
   it('does not offer a launch when the external project has no Desktop binding', async () => {

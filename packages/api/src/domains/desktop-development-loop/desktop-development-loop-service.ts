@@ -43,6 +43,13 @@ import {
   resolveDesignDocuments,
 } from './design-branch-resolver.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import {
+  currentDeliveryCycleEvidence,
+  currentDeliveryCycleReview,
+  currentDeliveryCycleSnapshot,
+  deliveryCycleAttemptNumber,
+  deliveryCycleNumber,
+} from './managed-work-delivery-cycle.js';
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import { featureTitleForReview } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
@@ -202,8 +209,11 @@ export interface DesktopDevelopmentLaunchState {
     readonly workId: string;
     readonly attemptId: string;
     readonly attemptNumber: number;
+    readonly deliveryCycleNumber: number;
     readonly lifecycle: ManagedWorkLifecycle;
   };
+  readonly deliveryCycleStarted?: boolean;
+  readonly previousLifecycle?: 'accepted' | 'rejected';
   readonly desktopBinding?: {
     readonly chatRef?: string;
     readonly bindingEpoch: number;
@@ -356,10 +366,10 @@ export class DesktopDevelopmentLoopService {
     const lockToken = await this.backlogStore.tryAcquireDispatchLock?.(item.id);
     if (lockToken === false) throw new Error('Project backlog item launch is already in progress');
     try {
-      const state = await this.startProjectWorkLocked(input.ownerUserId, input.projectId, item);
+      const state = await this.startProjectWorkLocked(input.ownerUserId, input.projectId, item, design);
       if (state.status !== 'ready_for_desktop' || !this.desktopTaskLauncher) return state;
       try {
-        const desktopTask = await this.desktopTaskLauncher.launch({
+        const launchInput = {
           projectId: project.id,
           projectName: project.name,
           repository: project.desktopDevelopment.repository.fullName,
@@ -370,7 +380,21 @@ export class DesktopDevelopmentLoopService {
           designBranch: design.branch,
           designExactSha: design.exactSha,
           designDocuments: design.documents,
-        });
+        } as const;
+        const desktopTask =
+          state.deliveryCycleStarted &&
+          state.previousLifecycle &&
+          state.managedWork &&
+          this.desktopTaskLauncher.resumeDeliveryCycle
+            ? await this.desktopTaskLauncher.resumeDeliveryCycle({
+                ...launchInput,
+                workId: state.managedWork.workId,
+                attemptId: state.managedWork.attemptId,
+                attemptNumber: state.managedWork.attemptNumber,
+                deliveryCycleNumber: state.managedWork.deliveryCycleNumber,
+                previousLifecycle: state.previousLifecycle,
+              })
+            : await this.desktopTaskLauncher.launch(launchInput);
         return { ...state, desktopTask };
       } catch (error) {
         return {
@@ -390,10 +414,45 @@ export class DesktopDevelopmentLoopService {
     ownerUserId: string,
     projectId: string,
     item: BacklogItem,
+    design: ResolvedDesignAuthority,
   ): Promise<DesktopDevelopmentLaunchState> {
     const current = await this.classifyProjectLaunchState(ownerUserId, projectId, item);
     if (current.status === 'ready_for_desktop') {
       return this.reserveProjectWorkForDesktop(ownerUserId, projectId, item);
+    }
+    if (current.status === 'completed' || current.status === 'rejected') {
+      if (!current.managedWork) throw new Error('Terminal managed work is unavailable');
+      const previousLifecycle = current.managedWork.lifecycle as 'accepted' | 'rejected';
+      let snapshot = await this.managedWork.read({
+        consumerId: CONSUMER_ID,
+        ownerUserId,
+        workId: current.managedWork.workId,
+        attemptId: current.managedWork.attemptId,
+      });
+      if (snapshot.state.currentAttemptId !== snapshot.attempt.attemptId) {
+        snapshot = await this.managedWork.read({
+          consumerId: CONSUMER_ID,
+          ownerUserId,
+          workId: snapshot.state.workId,
+          attemptId: snapshot.state.currentAttemptId,
+        });
+      }
+      if (!snapshot.state.terminalExactSha) throw new Error('Terminal managed work is missing its exact SHA');
+      await this.managedWork.startNextDeliveryCycle({
+        consumerId: CONSUMER_ID,
+        ownerUserId,
+        workId: snapshot.state.workId,
+        fromAttemptId: snapshot.attempt.attemptId,
+        executor: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
+        expectedVersion: snapshot.state.version,
+        terminalExactSha: snapshot.state.terminalExactSha,
+        designBranch: design.branch,
+        designExactSha: design.exactSha,
+        designDocuments: design.documents,
+        idempotencyKey: `desktop-delivery-cycle:${item.id}:${snapshot.state.version}`,
+      });
+      const reopened = await this.classifyProjectLaunchState(ownerUserId, projectId, item);
+      return { ...reopened, deliveryCycleStarted: true, previousLifecycle };
     }
     if (current.status !== 'available') return current;
 
@@ -498,13 +557,24 @@ export class DesktopDevelopmentLoopService {
     }
     const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
     const sessionMatchesAttempt = session?.attemptId === snapshot.attempt.attemptId;
+    const deliveryCycleStart = currentDeliveryCycleEvidence(snapshot).find(
+      (evidence) =>
+        evidence.kind === 'delivery_cycle_started' && evidence.newAttemptId === snapshot.attempt.attemptId,
+    );
     const workContext = {
       managedWork: {
         workId: snapshot.state.workId,
         attemptId: snapshot.attempt.attemptId,
-        attemptNumber: snapshot.attempt.attemptNumber,
+        attemptNumber: deliveryCycleAttemptNumber(snapshot),
+        deliveryCycleNumber: deliveryCycleNumber(snapshot),
         lifecycle: snapshot.state.lifecycle,
       },
+      ...(snapshot.state.lifecycle === 'active' && deliveryCycleStart?.kind === 'delivery_cycle_started'
+        ? {
+            deliveryCycleStarted: true,
+            previousLifecycle: deliveryCycleStart.previousLifecycle,
+          }
+        : {}),
       ...(sessionMatchesAttempt && session
         ? {
             desktopBinding: {
@@ -619,7 +689,7 @@ export class DesktopDevelopmentLoopService {
             backlogStatus: item.status,
             workId: bundle.admission.workId,
             attemptId: snapshot.attempt.attemptId,
-            attemptNumber: snapshot.attempt.attemptNumber,
+            attemptNumber: deliveryCycleAttemptNumber(snapshot),
             lifecycle: snapshot.state.lifecycle,
             managedWorkVersion: snapshot.state.version,
             connected: sessionMatchesAttempt,
@@ -638,7 +708,7 @@ export class DesktopDevelopmentLoopService {
     await this.assertWorkspaceBinding(project, input.workspace);
 
     const identity = this.managedIdentity(input);
-    let snapshot = await this.managedWork.read(identity);
+    let snapshot = currentDeliveryCycleSnapshot(await this.managedWork.read(identity));
     const review = await this.reviewRounds.readCurrentSafe({
       ownerUserId: input.ownerUserId,
       projectId: input.projectId,
@@ -651,10 +721,10 @@ export class DesktopDevelopmentLoopService {
       review.consensus?.verdict === 'changes_requested';
     if (startsFixAttempt) {
       const gate = deriveReviewLoopGate({
-        attemptNumber: snapshot.attempt.attemptNumber,
+        attemptNumber: deliveryCycleAttemptNumber(snapshot),
         exactSha: review.round.exactSha,
         findings: review.findings,
-        evidence: snapshot.evidence,
+        evidence: currentDeliveryCycleEvidence(snapshot),
       });
       if (!canContinueReviewLoop(gate)) {
         throw new Error(
@@ -829,7 +899,7 @@ export class DesktopDevelopmentLoopService {
         backlogItemId: backlogItem.id,
         featureId,
         featureTitle: featureTitleForReview(featureId, backlogItem.title),
-        attemptNumber: managed.attempt.attemptNumber,
+        attemptNumber: deliveryCycleAttemptNumber(managed),
         designBranch: design.branch,
         designExactSha: design.exactSha,
         designDocuments: design.documents,
@@ -874,7 +944,7 @@ export class DesktopDevelopmentLoopService {
       }),
     ]);
     this.assertApprovedGreenReview(exactSha, managed, review);
-    const existing = managed.evidence.find(
+    const existing = currentDeliveryCycleEvidence(managed).find(
       (evidence) =>
         evidence.kind === 'merge_confirmed' &&
         evidence.exactSha === exactSha &&
@@ -917,7 +987,9 @@ export class DesktopDevelopmentLoopService {
     ]);
     this.assertApprovedGreenReview(exactSha, managed, review);
 
-    const existing = managed.evidence.find((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha);
+    const existing = currentDeliveryCycleEvidence(managed).find(
+      (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
+    );
     if (existing?.kind === 'merged') {
       if (existing.mergeCommitSha !== mergeCommitSha) {
         throw new Error('Merge receipt conflicts with the existing merge commit SHA');
@@ -926,7 +998,7 @@ export class DesktopDevelopmentLoopService {
     }
 
     if (project.desktopDevelopment.mergeMode !== 'automatic') {
-      const currentConfirmation = managed.evidence.some(
+      const currentConfirmation = currentDeliveryCycleEvidence(managed).some(
         (evidence) =>
           evidence.kind === 'merge_confirmed' &&
           evidence.exactSha === exactSha &&
@@ -961,7 +1033,11 @@ export class DesktopDevelopmentLoopService {
       workId: input.workId,
     });
     this.assertApprovedGreenReview(exactSha, managed, review);
-    if (!managed.evidence.some((evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha)) {
+    if (
+      !currentDeliveryCycleEvidence(managed).some(
+        (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
+      )
+    ) {
       throw new Error('Final acceptance requires a matching merge receipt');
     }
 
@@ -1007,15 +1083,15 @@ export class DesktopDevelopmentLoopService {
     ]);
     this.assertReviewDecisionTarget(input.attemptId, managed, review);
     const gate = deriveReviewLoopGate({
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       exactSha: review.round.exactSha,
       findings: review.findings,
-      evidence: managed.evidence,
+      evidence: currentDeliveryCycleEvidence(managed),
     });
     if (!gate.continuationPending) {
       return this.readWork(input, managed.state.version);
     }
-    const approvedThroughAttemptNumber = managed.attempt.attemptNumber + DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT;
+    const approvedThroughAttemptNumber = deliveryCycleAttemptNumber(managed) + DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT;
     const appended = await this.managedWork.appendEvidence({
       ...identity,
       expectedVersion: input.expectedManagedWorkVersion,
@@ -1057,7 +1133,7 @@ export class DesktopDevelopmentLoopService {
         candidate.scope === 'architecture_decision',
     );
     if (!finding) throw new Error('Open architecture decision finding not found');
-    const existing = managed.evidence.find(
+    const existing = currentDeliveryCycleEvidence(managed).find(
       (evidence) =>
         evidence.kind === 'architecture_decision_recorded' &&
         evidence.findingId === input.findingId &&
@@ -1112,7 +1188,7 @@ export class DesktopDevelopmentLoopService {
     const now = input.now ?? Date.now();
     const instruction = input.instruction.trim();
     if (!instruction) throw new Error('Review consensus authorization instruction is required');
-    const [managed, session, review] = await Promise.all([
+    const [rawManaged, session, rawReview] = await Promise.all([
       this.managedWork.read(identity),
       this.sessions.getCurrent(input.projectId, input.workId, now),
       this.reviewRounds.readCurrentSafe({
@@ -1121,6 +1197,8 @@ export class DesktopDevelopmentLoopService {
         workId: input.workId,
       }),
     ]);
+    const managed = currentDeliveryCycleSnapshot(rawManaged);
+    const review = currentDeliveryCycleReview(managed, rawReview);
     if (managed.state.version !== input.expectedManagedWorkVersion) {
       throw new Error(
         `Managed-work version conflict: expected ${input.expectedManagedWorkVersion}, actual ${managed.state.version}`,
@@ -1237,7 +1315,7 @@ export class DesktopDevelopmentLoopService {
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const identity = this.managedIdentity(input);
-    const [managed, session, review] = await Promise.all([
+    const [rawManaged, session, rawReview] = await Promise.all([
       this.managedWork.read(identity),
       this.sessions.getCurrent(input.projectId, input.workId, now),
       this.reviewRounds.readCurrentSafe({
@@ -1246,6 +1324,8 @@ export class DesktopDevelopmentLoopService {
         workId: input.workId,
       }),
     ]);
+    const managed = currentDeliveryCycleSnapshot(rawManaged);
+    const review = currentDeliveryCycleReview(managed, rawReview);
     if (!session || session.attemptId !== input.attemptId) {
       throw new Error('Desktop session binding not found for this work attempt');
     }
@@ -1288,7 +1368,7 @@ export class DesktopDevelopmentLoopService {
       }));
     const exactSha = session.workspace.currentSha;
     const reviewGate = deriveReviewLoopGate({
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       exactSha: review?.round.exactSha ?? exactSha,
       findings: review?.findings ?? [],
       evidence: managed.evidence,
@@ -1321,7 +1401,8 @@ export class DesktopDevelopmentLoopService {
       reviewDesignDocuments: preferChineseDesignDocuments(review?.round.designDocuments ?? []),
       workId: managed.state.workId,
       attemptId: managed.attempt.attemptId,
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
+      deliveryCycleNumber: deliveryCycleNumber(managed),
       phase: derived.phase,
       workLifecycle: managed.state.lifecycle,
       managedWorkVersion: knownManagedVersion ?? managed.state.version,
@@ -1477,7 +1558,7 @@ export class DesktopDevelopmentLoopService {
       backlogItemId: item.id,
       featureId,
       featureTitle: featureTitleForReview(featureId, item.title),
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       designBranch: design.branch,
       designExactSha: design.exactSha,
       designDocuments: design.documents,
@@ -1529,10 +1610,10 @@ export class DesktopDevelopmentLoopService {
     review: ReviewRoundSafeView,
   ): Promise<void> {
     const gate = deriveReviewLoopGate({
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       exactSha: review.round.exactSha,
       findings: review.findings,
-      evidence: managed.evidence,
+      evidence: currentDeliveryCycleEvidence(managed),
     });
     if (!canContinueReviewLoop(gate) || !this.desktopTaskLauncher) return;
     const session = await this.sessions.getCurrent(input.projectId, input.workId);
@@ -1545,7 +1626,7 @@ export class DesktopDevelopmentLoopService {
     const featureId = featureIdForItem(item);
     if (!featureId) throw new Error('Review display context feature id is unavailable');
     const design = await this.requireFeatureDesignAuthority(project, item);
-    const operatorDecisions = managed.evidence
+    const operatorDecisions = currentDeliveryCycleEvidence(managed)
       .filter(
         (evidence) =>
           evidence.kind === 'architecture_decision_recorded' &&
@@ -1563,7 +1644,7 @@ export class DesktopDevelopmentLoopService {
         projectName: project.name,
         featureId,
         featureTitle: featureTitleForReview(featureId, item.title),
-        attemptNumber: managed.attempt.attemptNumber,
+        attemptNumber: deliveryCycleAttemptNumber(managed),
         projectId: input.projectId,
         workId: input.workId,
         attemptId: input.attemptId,
@@ -1768,7 +1849,7 @@ export class DesktopDevelopmentLoopService {
       review.consensus.checksPassed &&
       review.consensus.openFindingCount === 0 &&
       !review.findings.some((finding) => finding.status === 'open');
-    const canonicalEvidence = managed.evidence.some(
+    const canonicalEvidence = currentDeliveryCycleEvidence(managed).some(
       (evidence) =>
         evidence.kind === 'review_completed' &&
         evidence.exactSha === exactSha &&
@@ -2144,7 +2225,7 @@ function deriveCompletedReviewState(input: DesktopDevelopmentStateInput): Deskto
   if (!review || review.round.phase !== 'complete') return workspaceImplementationState(input.session.workspace);
   if (review.consensus?.verdict === 'changes_requested') {
     const gate = deriveReviewLoopGate({
-      attemptNumber: input.managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(input.managed),
       exactSha: review.round.exactSha,
       findings: review.findings,
       evidence: input.managed.evidence,

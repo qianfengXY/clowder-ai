@@ -67,6 +67,8 @@ describe('F289 project-scoped Desktop launch', () => {
         workId: bundle.admission.workId,
         currentAttemptId: bundle.attempt.attemptId,
         currentAttemptNumber: 1,
+        currentDeliveryCycleNumber: 1,
+        currentDeliveryCycleAttemptNumber: 1,
         lifecycle: 'active',
         version: 1,
       },
@@ -146,6 +148,46 @@ describe('F289 project-scoped Desktop launch', () => {
           current.attempt.executorBoundAt = 2;
           current.state.version += 1;
           return current;
+        },
+        startNextDeliveryCycle: async (input) => {
+          const current = snapshots.get(input.workId);
+          assert.equal(current.state.version, input.expectedVersion);
+          assert.equal(current.state.lifecycle, 'rejected');
+          const previousAttemptId = current.attempt.attemptId;
+          const nextAttempt = {
+            ...current.attempt,
+            attemptId: `${previousAttemptId}-cycle-2`,
+            attemptNumber: current.state.currentAttemptNumber + 1,
+            executorActor: input.executor,
+            executorBoundAt: 3,
+          };
+          const next = {
+            ...current,
+            attempt: nextAttempt,
+            state: {
+              ...current.state,
+              currentAttemptId: nextAttempt.attemptId,
+              currentAttemptNumber: nextAttempt.attemptNumber,
+              currentDeliveryCycleNumber: 2,
+              currentDeliveryCycleAttemptNumber: 1,
+              lifecycle: 'active',
+              terminalExactSha: undefined,
+              terminalAt: undefined,
+              version: current.state.version + 1,
+            },
+            evidence: [
+              ...current.evidence,
+              {
+                kind: 'delivery_cycle_started',
+                exactSha: input.terminalExactSha,
+                deliveryCycleNumber: 2,
+                previousLifecycle: 'rejected',
+                newAttemptId: nextAttempt.attemptId,
+              },
+            ],
+          };
+          snapshots.set(input.workId, next);
+          return next;
         },
       },
       {},
@@ -369,6 +411,7 @@ describe('F289 project-scoped Desktop launch', () => {
       workId: 'work-backlog-1',
       attemptId: 'attempt-backlog-1',
       attemptNumber: 1,
+      deliveryCycleNumber: 1,
       lifecycle: 'active',
     });
 
@@ -418,5 +461,54 @@ describe('F289 project-scoped Desktop launch', () => {
     } finally {
       projectItem.status = 'open';
     }
+  });
+
+  test('reopens rejected work as a new delivery cycle and wakes the original Desktop task', async () => {
+    const bundle = admission('backlog-1');
+    sops.set('backlog-1', {
+      featureId: 'F006',
+      stage: 'completion',
+      batonHolder: 'chatgpt-desktop-dev',
+    });
+    admissions.set('backlog-1', bundle);
+    const terminal = snapshot(bundle, { kind: 'external_actor', actorId: 'chatgpt-desktop-dev' });
+    terminal.state.lifecycle = 'rejected';
+    terminal.state.terminalExactSha = 'a'.repeat(40);
+    terminal.state.terminalAt = 2;
+    snapshots.set(bundle.admission.workId, terminal);
+    sessions.set(bundle.admission.workId, {
+      attemptId: bundle.attempt.attemptId,
+      status: 'active',
+      chatRef: 'chat-f006',
+      bindingEpoch: 3,
+    });
+    let resumeInput;
+    service.desktopTaskLauncher = {
+      get: async () => ({ status: 'created', threadId: 'chat-f006' }),
+      launch: async () => ({ status: 'created', threadId: 'chat-f006' }),
+      resumeDeliveryCycle: async (input) => {
+        resumeInput = input;
+        return { status: 'created', threadId: 'chat-f006' };
+      },
+    };
+
+    const result = await service.startProjectWork({
+      protocolVersion: 1,
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      backlogItemId: 'backlog-1',
+    });
+
+    assert.equal(result.status, 'ready_for_desktop');
+    assert.equal(result.deliveryCycleStarted, true);
+    assert.equal(result.previousLifecycle, 'rejected');
+    assert.equal(result.managedWork.workId, bundle.admission.workId);
+    assert.equal(result.managedWork.attemptNumber, 1);
+    assert.equal(result.managedWork.deliveryCycleNumber, 2);
+    assert.equal(result.managedWork.lifecycle, 'active');
+    assert.equal(resumeInput.workId, bundle.admission.workId);
+    assert.equal(resumeInput.attemptId, result.managedWork.attemptId);
+    assert.equal(resumeInput.previousLifecycle, 'rejected');
+    assert.deepEqual(resumeInput.designDocuments, ['docs/design/f006-workspace-capability.md']);
   });
 });

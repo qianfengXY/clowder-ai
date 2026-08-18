@@ -14,6 +14,7 @@ import type {
 import { buildReviewCompletionObjective, type DesktopTaskActivator } from './codex-desktop-task-launcher.js';
 import { preferChineseDesignDocuments } from './design-branch-resolver.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
+import { currentDeliveryCycleEvidence, deliveryCycleAttemptNumber } from './managed-work-delivery-cycle.js';
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import type { IReviewRoundDisplayContextResolver } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
@@ -209,10 +210,10 @@ export class ReviewRoundCoordinatorService {
       attemptId: before.round.attemptId,
     });
     const gate = deriveReviewLoopGate({
-      attemptNumber: managed.attempt.attemptNumber,
+      attemptNumber: deliveryCycleAttemptNumber(managed),
       exactSha: completed.round.exactSha,
       findings: completed.findings,
-      evidence: managed.evidence,
+      evidence: currentDeliveryCycleEvidence(managed),
     });
     if (completed.consensus?.verdict === 'approved' || canContinueReviewLoop(gate)) {
       await this.wakeBoundDesktopTask({

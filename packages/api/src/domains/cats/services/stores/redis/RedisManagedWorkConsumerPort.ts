@@ -18,6 +18,7 @@ import type {
   IManagedWorkConsumerPort,
   ManagedWorkEvidenceAppendResult,
   ManagedWorkIdentityInput,
+  StartNextManagedWorkDeliveryCycleInput,
   TransitionManagedWorkInput,
 } from '../ports/ManagedWorkConsumerPort.js';
 import { deriveManagedWorkAttemptId, ManagedWorkKeys } from '../redis-keys/managed-work-keys.js';
@@ -103,11 +104,61 @@ local existingNext = redis.call('GET', KEYS[4])
 if existingNext then return 'ATTEMPT_ALREADY_EXISTS' end
 state.currentAttemptId = nextAttempt.attemptId
 state.currentAttemptNumber = nextAttempt.attemptNumber
+state.currentDeliveryCycleNumber = tonumber(state.currentDeliveryCycleNumber) or 1
+state.currentDeliveryCycleAttemptNumber = (tonumber(state.currentDeliveryCycleAttemptNumber) or tonumber(state.currentAttemptNumber) - 1) + 1
 state.version = tonumber(state.version) + 1
 redis.call('SET', KEYS[4], cjson.encode(nextAttempt))
 redis.call('SET', KEYS[3], cjson.encode(state))
 local result = { admission = admission, attempt = nextAttempt, state = state, evidence = {} }
 redis.call('SET', KEYS[5], cjson.encode({ fingerprint = ARGV[1], result = result }))
+return 'OK:' .. cjson.encode(result)
+`;
+
+const START_NEXT_DELIVERY_CYCLE_LUA = `
+local receiptJson = redis.call('GET', KEYS[6])
+if receiptJson then
+  local receipt = cjson.decode(receiptJson)
+  if receipt.fingerprint ~= ARGV[1] then return 'IDEMPOTENCY_CONFLICT' end
+  return 'OK:' .. cjson.encode(receipt.result)
+end
+
+local admissionJson = redis.call('GET', KEYS[1])
+local fromAttemptJson = redis.call('GET', KEYS[2])
+local stateJson = redis.call('GET', KEYS[3])
+if not admissionJson or not fromAttemptJson or not stateJson then return 'NOT_FOUND' end
+local admission = cjson.decode(admissionJson)
+local fromAttempt = cjson.decode(fromAttemptJson)
+local state = cjson.decode(stateJson)
+if admission.ownerUserId ~= ARGV[2] or admission.workId ~= ARGV[3] then return 'NOT_FOUND' end
+if fromAttempt.workId ~= ARGV[3] or fromAttempt.attemptId ~= ARGV[4] then return 'NOT_FOUND' end
+if state.consumerId ~= ARGV[5] or state.workId ~= ARGV[3] then return 'STATE_INVALID' end
+if state.lifecycle ~= 'accepted' and state.lifecycle ~= 'rejected' then return 'NOT_TERMINAL' end
+if state.currentAttemptId ~= ARGV[4] then return 'STALE_ATTEMPT:' .. state.currentAttemptId end
+if tonumber(state.version) ~= tonumber(ARGV[6]) then return 'VERSION_CONFLICT:' .. tostring(state.version) end
+if not state.terminalExactSha or string.lower(state.terminalExactSha) ~= string.lower(ARGV[7]) then
+  return 'TERMINAL_SHA_CONFLICT'
+end
+
+local nextAttempt = cjson.decode(ARGV[8])
+local expectedNumber = tonumber(state.currentAttemptNumber) + 1
+if tonumber(nextAttempt.attemptNumber) ~= expectedNumber then return 'ATTEMPT_ORDER_CONFLICT' end
+if redis.call('GET', KEYS[4]) then return 'ATTEMPT_ALREADY_EXISTS' end
+
+local evidence = cjson.decode(ARGV[9])
+if redis.call('HEXISTS', KEYS[5], evidence.evidenceId) == 1 then return 'EVIDENCE_CONFLICT' end
+state.currentAttemptId = nextAttempt.attemptId
+state.currentAttemptNumber = nextAttempt.attemptNumber
+state.currentDeliveryCycleNumber = (tonumber(state.currentDeliveryCycleNumber) or 1) + 1
+state.currentDeliveryCycleAttemptNumber = 1
+state.lifecycle = 'active'
+state.terminalExactSha = nil
+state.terminalAt = nil
+state.version = tonumber(state.version) + 1
+redis.call('SET', KEYS[4], cjson.encode(nextAttempt))
+redis.call('HSET', KEYS[5], evidence.evidenceId, cjson.encode(evidence))
+redis.call('SET', KEYS[3], cjson.encode(state))
+local result = { admission = admission, attempt = nextAttempt, state = state, evidence = { evidence } }
+redis.call('SET', KEYS[6], cjson.encode({ fingerprint = ARGV[1], result = result }))
 return 'OK:' .. cjson.encode(result)
 `;
 
@@ -221,6 +272,8 @@ export class RedisManagedWorkConsumerPort implements IManagedWorkConsumerPort {
         workId: normalized.workId,
         currentAttemptId: admission.initialAttemptId,
         currentAttemptNumber: 1,
+        currentDeliveryCycleNumber: 1,
+        currentDeliveryCycleAttemptNumber: 1,
         lifecycle: 'active',
         version: 1,
       };
@@ -297,6 +350,81 @@ export class RedisManagedWorkConsumerPort implements IManagedWorkConsumerPort {
       JSON.stringify(attempt),
     );
     return parseSnapshotResult(raw);
+  }
+
+  async startNextDeliveryCycle(input: StartNextManagedWorkDeliveryCycleInput): Promise<ManagedWorkConsumerSnapshot> {
+    const normalized = normalizeNextDeliveryCycle(input);
+    const current = await this.read({
+      consumerId: normalized.consumerId,
+      ownerUserId: normalized.ownerUserId,
+      workId: normalized.workId,
+      attemptId: normalized.fromAttemptId,
+    });
+    const attemptNumber = current.state.currentAttemptNumber + 1;
+    const deliveryCycleNumber = (current.state.currentDeliveryCycleNumber ?? 1) + 1;
+    const attemptId = deriveManagedWorkAttemptId(normalized.workId, attemptNumber);
+    const attempt: WorkAttempt = {
+      attemptId,
+      workId: normalized.workId,
+      attemptNumber,
+      executorCatId: normalized.executor.kind === 'cat' ? normalized.executor.catId : null,
+      executorActor: normalized.executor,
+      createdAt: normalized.now,
+      executorBoundAt: normalized.now,
+    };
+    const evidence: ManagedWorkEvidence = {
+      kind: 'delivery_cycle_started',
+      exactSha: normalized.terminalExactSha,
+      deliveryCycleNumber,
+      previousLifecycle: current.state.lifecycle as 'accepted' | 'rejected',
+      designBranch: normalized.designBranch,
+      designExactSha: normalized.designExactSha,
+      designDocuments: normalized.designDocuments,
+      startedByUserId: normalized.ownerUserId,
+      newAttemptId: attemptId,
+      evidenceId: deriveEvidenceId(
+        normalized.consumerId,
+        normalized.workId,
+        normalized.fromAttemptId,
+        normalized.idempotencyKey,
+      ),
+      workId: normalized.workId,
+      attemptId: normalized.fromAttemptId,
+      consumerId: normalized.consumerId,
+      recordedAt: normalized.now,
+    };
+    const fingerprint = operationFingerprint(normalized);
+    const raw = await this.redis.eval(
+      START_NEXT_DELIVERY_CYCLE_LUA,
+      6,
+      ManagedWorkKeys.admission(normalized.workId),
+      ManagedWorkKeys.attempt(normalized.fromAttemptId),
+      ManagedWorkKeys.consumerState(normalized.consumerId, normalized.workId),
+      ManagedWorkKeys.attempt(attemptId),
+      ManagedWorkKeys.consumerEvidence(normalized.consumerId, normalized.workId),
+      ManagedWorkKeys.consumerReceipt(
+        normalized.consumerId,
+        normalized.workId,
+        'next-delivery-cycle',
+        normalized.idempotencyKey,
+      ),
+      fingerprint,
+      normalized.ownerUserId,
+      normalized.workId,
+      normalized.fromAttemptId,
+      normalized.consumerId,
+      String(normalized.expectedVersion),
+      normalized.terminalExactSha,
+      JSON.stringify(attempt),
+      JSON.stringify(evidence),
+    );
+    const snapshot = parseSnapshotResult(raw);
+    return this.read({
+      consumerId: normalized.consumerId,
+      ownerUserId: normalized.ownerUserId,
+      workId: normalized.workId,
+      attemptId: snapshot.attempt.attemptId,
+    });
   }
 
   async appendEvidence(input: AppendManagedWorkEvidenceInput): Promise<ManagedWorkEvidenceAppendResult> {
@@ -407,6 +535,38 @@ function normalizeNextAttempt(input: CreateNextManagedWorkAttemptInput): Require
   const now = input.now ?? Date.now();
   assertTimestamp(now);
   return { ...input, now };
+}
+
+function normalizeNextDeliveryCycle(
+  input: StartNextManagedWorkDeliveryCycleInput,
+): Required<StartNextManagedWorkDeliveryCycleInput> {
+  assertConsumer(input.consumerId);
+  assertId(input.ownerUserId, 'ownerUserId');
+  assertId(input.workId, 'workId');
+  assertId(input.fromAttemptId, 'fromAttemptId');
+  assertExecutor(input.executor);
+  assertPositiveInteger(input.expectedVersion, 'expectedVersion');
+  assertFullSha(input.terminalExactSha, 'terminalExactSha');
+  assertOpaqueString(input.designBranch, 'designBranch');
+  assertFullSha(input.designExactSha, 'designExactSha');
+  if (!Array.isArray(input.designDocuments) || input.designDocuments.length === 0) {
+    throw new Error('designDocuments is invalid');
+  }
+  const designDocuments = input.designDocuments.map((documentPath) => {
+    assertOpaqueString(documentPath, 'designDocument');
+    return documentPath.trim();
+  });
+  assertId(input.idempotencyKey, 'idempotencyKey');
+  const now = input.now ?? Date.now();
+  assertTimestamp(now);
+  return {
+    ...input,
+    terminalExactSha: input.terminalExactSha.toLowerCase(),
+    designBranch: input.designBranch.trim(),
+    designExactSha: input.designExactSha.toLowerCase(),
+    designDocuments,
+    now,
+  };
 }
 
 function normalizeEvidenceAppend(input: AppendManagedWorkEvidenceInput): Required<AppendManagedWorkEvidenceInput> {
@@ -527,15 +687,17 @@ function parseState(raw: string | null, consumerId: ManagedWorkConsumerId, workI
   if (state.consumerId !== consumerId || state.workId !== workId) {
     throw new Error('Managed-work consumer state is invalid');
   }
-  return state;
+  return normalizeParsedState(state);
 }
 
 function parseSnapshotResult(raw: unknown): ManagedWorkConsumerSnapshot {
-  return parseTaggedResult<ManagedWorkConsumerSnapshot>(raw);
+  const snapshot = parseTaggedResult<ManagedWorkConsumerSnapshot>(raw);
+  return { ...snapshot, state: normalizeParsedState(snapshot.state) };
 }
 
 function parseEvidenceResult(raw: unknown): ManagedWorkEvidenceAppendResult {
-  return parseTaggedResult<ManagedWorkEvidenceAppendResult>(raw);
+  const result = parseTaggedResult<ManagedWorkEvidenceAppendResult>(raw);
+  return { ...result, state: normalizeParsedState(result.state) };
 }
 
 function parseStateResult(raw: unknown, consumerId: ManagedWorkConsumerId, workId: string): ManagedWorkConsumerState {
@@ -543,7 +705,15 @@ function parseStateResult(raw: unknown, consumerId: ManagedWorkConsumerId, workI
   if (state.consumerId !== consumerId || state.workId !== workId) {
     throw new Error('Managed-work consumer state is invalid');
   }
-  return state;
+  return normalizeParsedState(state);
+}
+
+function normalizeParsedState(state: ManagedWorkConsumerState): ManagedWorkConsumerState {
+  return {
+    ...state,
+    currentDeliveryCycleNumber: state.currentDeliveryCycleNumber ?? 1,
+    currentDeliveryCycleAttemptNumber: state.currentDeliveryCycleAttemptNumber ?? state.currentAttemptNumber,
+  };
 }
 
 function parseTaggedResult<T>(raw: unknown): T {
@@ -559,6 +729,8 @@ function parseTaggedResult<T>(raw: unknown): T {
   if (raw === 'EVIDENCE_CONFLICT') throw new Error('Managed-work evidence conflict');
   if (raw === 'ACCEPTANCE_EVIDENCE_INCOMPLETE') throw new Error('Managed-work acceptance evidence incomplete');
   if (raw === 'REJECTION_EVIDENCE_INCOMPLETE') throw new Error('Managed-work rejection evidence incomplete');
+  if (raw === 'NOT_TERMINAL') throw new Error('Managed work is not terminal');
+  if (raw === 'TERMINAL_SHA_CONFLICT') throw new Error('Managed-work terminal SHA conflict');
   if (raw.startsWith('VERSION_CONFLICT:')) {
     throw new Error(`Managed-work version conflict: actual ${raw.slice('VERSION_CONFLICT:'.length)}`);
   }

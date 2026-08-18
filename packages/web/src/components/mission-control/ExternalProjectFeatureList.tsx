@@ -28,6 +28,8 @@ interface LaunchState {
   featureId: string;
   title: string;
   status: ServerLaunchStatus;
+  deliveryCycleStarted?: boolean;
+  previousLifecycle?: 'accepted' | 'rejected';
   desktopTask?: { status: 'created'; threadId: string } | { status: 'failed'; error: string };
 }
 
@@ -50,8 +52,8 @@ function launchButtonLabel(status: LaunchStatus, desktopBound: boolean, featureI
   if (status === 'ready_for_desktop') return '已启动 · 等待 Desktop';
   if (status === 'connected_to_desktop') return 'Desktop 执行中';
   if (status === 'managed_by_catcafe') return 'CatCafe 流程处理中';
-  if (status === 'rejected') return '验收未通过';
-  if (status === 'completed') return '已完成';
+  if (status === 'rejected') return '开启修复轮次';
+  if (status === 'completed') return '发起补充实现';
   if (status === 'error') return '重试启动';
   return '启动开发闭环';
 }
@@ -94,14 +96,16 @@ function ExternalProjectFeatureRow({
   const featureId = featureIdFromItem(item);
   const unavailable = !desktopBound || !featureId;
   const designBranchBlocksLaunch =
-    designAuthority?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
+    designAuthority?.status !== 'ready' &&
+    ['available', 'ready_for_desktop', 'rejected', 'completed', 'error'].includes(status);
   const designDocumentsBlockLaunch =
-    designDocuments?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
+    designDocuments?.status !== 'ready' &&
+    ['available', 'ready_for_desktop', 'rejected', 'completed', 'error'].includes(status);
   const disabled =
     unavailable ||
     designAuthority?.status !== 'ready' ||
     designDocuments?.status !== 'ready' ||
-    !['available', 'ready_for_desktop', 'error'].includes(status);
+    !['available', 'ready_for_desktop', 'rejected', 'completed', 'error'].includes(status);
 
   return (
     <div className="rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
@@ -413,7 +417,11 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
       if (body.state.desktopTask?.status === 'created') {
         setLaunchStatuses((current) => ({ ...current, [item.id]: body.state.status }));
         setLaunchRefreshKey((current) => current + 1);
-        setNotice(`${featureId} 已进入开发闭环，并已在 ChatGPT Desktop 创建对应开发任务。`);
+        setNotice(
+          body.state.deliveryCycleStarted
+            ? `${featureId} 已开启新的交付轮次，并已唤醒原 ChatGPT Desktop 开发窗口。`
+            : `${featureId} 已进入开发闭环，并已在 ChatGPT Desktop 创建对应开发任务。`,
+        );
       } else if (body.state.desktopTask?.status === 'failed') {
         setLaunchStatuses((current) => ({ ...current, [item.id]: 'error' }));
         setNotice(`${featureId} 已进入开发闭环；Desktop 任务自动创建失败，可稍后重试：${body.state.desktopTask.error}`);

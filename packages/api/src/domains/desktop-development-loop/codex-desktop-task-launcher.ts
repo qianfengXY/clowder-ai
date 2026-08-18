@@ -40,6 +40,14 @@ export interface DesktopTaskLaunchResult {
   readonly threadId: string;
 }
 
+export interface DesktopDeliveryCycleResumeInput extends DesktopTaskLaunchInput {
+  readonly workId: string;
+  readonly attemptId: string;
+  readonly attemptNumber: number;
+  readonly deliveryCycleNumber: number;
+  readonly previousLifecycle: 'accepted' | 'rejected';
+}
+
 export interface DesktopTaskActivationInput {
   readonly threadId: string;
   readonly sourcePath: string;
@@ -61,6 +69,8 @@ export interface DesktopTaskGoalController extends DesktopTaskActivator {
 
 export interface DesktopTaskLauncher extends DesktopTaskGoalController {
   launch(input: DesktopTaskLaunchInput): Promise<DesktopTaskLaunchResult>;
+  /** Reuse and wake the feature's original task when terminal work starts a new delivery cycle. */
+  resumeDeliveryCycle?(input: DesktopDeliveryCycleResumeInput): Promise<DesktopTaskLaunchResult>;
   get(projectId: string, backlogItemId: string): Promise<DesktopTaskLaunchResult | null>;
 }
 
@@ -180,6 +190,23 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     const launch = this.launchOrReuse(input).finally(() => this.active.delete(key));
     this.active.set(key, launch);
     return launch;
+  }
+
+  async resumeDeliveryCycle(input: DesktopDeliveryCycleResumeInput): Promise<DesktopTaskLaunchResult> {
+    const previous = await this.get(input.projectId, input.backlogItemId);
+    const task = await this.launch(input);
+    // A replacement task already receives buildInitialObjective in its first
+    // turn. Only an existing original task needs an explicit one-shot wake.
+    if (previous?.threadId === task.threadId) {
+      const record = await this.readRecord(input.projectId, input.backlogItemId);
+      if (!record?.runtimeSessionId) throw new Error('Bound ChatGPT Desktop task is missing its runtimeSessionId');
+      await this.activate({
+        threadId: task.threadId,
+        sourcePath: input.sourcePath,
+        objective: buildDeliveryCycleObjective(input, record.runtimeSessionId),
+      });
+    }
+    return task;
   }
 
   activate(input: DesktopTaskActivationInput): Promise<void> {
@@ -739,6 +766,26 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
     '读取最新 Resume Packet，只执行本轮 nextLegalActions。提交 implementation report 后立即结束当前 turn；Cat Café Review 在后台独立完成，不要等待或轮询。',
     '收到 implementation report 的 Review 系统停止消息后，调用 update_goal 将当前 Goal 标为 complete；不得让 Goal 自动续跑。',
     '后续从原绑定窗口继续时重新读取最新 Resume Packet，再处理修复或合入确认；不要创建替代窗口。',
+  ].join('\n');
+}
+
+export function buildDeliveryCycleObjective(input: DesktopDeliveryCycleResumeInput, runtimeSessionId: string): string {
+  const action = input.previousLifecycle === 'rejected' ? '验收未通过后的修复交付' : '已验收功能的补充实现';
+  return [
+    `[开发闭环系统消息] ${input.projectName} · ${input.featureId} · ${input.title}`,
+    `用户已开启第 ${input.deliveryCycleNumber} 个交付轮次：${action}。`,
+    `Cat Café projectId：${input.projectId}`,
+    `backlogItemId：${input.backlogItemId}`,
+    `workId：${input.workId}`,
+    `新 attemptId：${input.attemptId}`,
+    `本交付轮次实现序号：${input.attemptNumber}`,
+    `方案分支：${input.designBranch}`,
+    `方案提交：${input.designExactSha}`,
+    `设计文档：${input.designDocuments.join('、')}`,
+    `继续复用 runtimeSessionId：${runtimeSessionId}。`,
+    '使用 catcafe-desktop-executor 技能在这个原绑定窗口读取并连接唯一匹配的新活跃 attempt。',
+    '实现必须以当前方案提交中的所列中文设计文档为准；旧交付轮次只作为历史证据，不能充当本轮完成证据。',
+    '完成实现、测试与精确提交后报告 implementation，然后结束当前 turn；不要轮询 Review，也不要创建替代窗口。',
   ].join('\n');
 }
 

@@ -107,6 +107,70 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
   });
 });
 
+test('new delivery cycles wake the original Desktop task with current design authority', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map([
+    [
+      'desktop-development:feature-task:project-1:backlog-1',
+      JSON.stringify({ status: 'created', threadId: 'codex-thread-f006', runtimeSessionId: 'runtime-f006' }),
+    ],
+  ]);
+  const sets = new Map();
+  const delivered = [];
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const current = sets.get(key) ?? new Set();
+      current.add(value);
+      sets.set(key, current);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async (threadId, objective) => delivered.push({ threadId, objective }),
+    openThread: async () => {},
+  });
+  launcher.threadExists = async () => true;
+
+  const result = await launcher.resumeDeliveryCycle({
+    projectId: 'project-1',
+    projectName: 'Traqen',
+    repository: 'owner/traqen',
+    sourcePath: '/work/traqen',
+    backlogItemId: 'backlog-1',
+    featureId: 'F006',
+    title: 'Workspace settings',
+    designBranch: 'design/shared-specs',
+    designExactSha: 'd'.repeat(40),
+    designDocuments: ['docs/design/f006.zh-CN.md'],
+    workId: 'work-f006',
+    attemptId: 'attempt-f006-2',
+    attemptNumber: 1,
+    deliveryCycleNumber: 2,
+    previousLifecycle: 'rejected',
+  });
+
+  assert.deepEqual(result, { status: 'created', threadId: 'codex-thread-f006' });
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].threadId, 'codex-thread-f006');
+  assert.match(delivered[0].objective, /第 2 个交付轮次/);
+  assert.match(delivered[0].objective, /验收未通过后的修复交付/);
+  assert.match(delivered[0].objective, /新 attemptId：attempt-f006-2/);
+  assert.match(delivered[0].objective, /方案分支：design\/shared-specs/);
+  assert.match(delivered[0].objective, /继续复用 runtimeSessionId：runtime-f006/);
+});
+
 test('Desktop task launcher starts the visible turn through the durable ChatGPT daemon', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
