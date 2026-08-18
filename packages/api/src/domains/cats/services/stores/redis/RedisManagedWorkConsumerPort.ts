@@ -458,6 +458,11 @@ function normalizeEvidence(input: ManagedWorkEvidenceInput): ManagedWorkEvidence
       }
       assertId(input.decidedByUserId, 'decidedByUserId');
       return { ...input, exactSha };
+    case 'review_consensus_authorized':
+      assertId(input.reviewRoundId, 'reviewRoundId');
+      assertOpaqueString(input.instruction, 'instruction');
+      assertId(input.authorizedByUserId, 'authorizedByUserId');
+      return { ...input, exactSha, instruction: input.instruction.trim() };
     case 'merged':
       assertFullSha(input.mergeCommitSha, 'mergeCommitSha');
       return { ...input, exactSha, mergeCommitSha: input.mergeCommitSha.toLowerCase() };

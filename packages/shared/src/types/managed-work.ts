@@ -83,6 +83,13 @@ export type ManagedWorkEvidenceInput =
       readonly decision: 'keep_original_plan' | 'approve_plan_change';
       readonly decidedByUserId: string;
     }
+  | {
+      readonly kind: 'review_consensus_authorized';
+      readonly exactSha: string;
+      readonly reviewRoundId: string;
+      readonly instruction: string;
+      readonly authorizedByUserId: string;
+    }
   | { readonly kind: 'merged'; readonly exactSha: string; readonly mergeCommitSha: string }
   | { readonly kind: 'acceptance_recorded'; readonly exactSha: string; readonly accepted: boolean }
   | { readonly kind: 'work_rejected'; readonly exactSha: string; readonly reason: string };

@@ -226,6 +226,21 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         calls.push(['recordArchitectureDecision', input]);
         return { ...packet, architectureDecisionPending: false };
       },
+      authorizeReviewConsensus: async (input) => {
+        calls.push(['authorizeReviewConsensus', input]);
+        return {
+          ...packet,
+          reviewRoundId: input.reviewRoundId,
+          reviewPhase: 'consensus_ready',
+          consensusAuthorization: {
+            reviewRoundId: input.reviewRoundId,
+            exactSha: packet.currentSha,
+            instruction: input.instruction,
+            authorizedByUserId: input.ownerUserId,
+            authorizedAt: 1_000,
+          },
+        };
+      },
       retryCurrentStage: async (input) => {
         calls.push(['retryCurrentStage', input]);
         return { work: packet, action: 'wake_desktop', target: 'ChatGPT Desktop 原绑定窗口' };
@@ -483,6 +498,43 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           idempotencyKey: 'architecture-finding-1',
           findingId: 'finding-1',
           decision: 'keep_original_plan',
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
+        },
+      ],
+    ]);
+  });
+
+  test('records a user consensus ruling only through the authenticated Cat Cafe surface', async () => {
+    const { app, calls } = await createApp();
+    const payload = {
+      protocolVersion: 1,
+      attemptId: 'attempt-20',
+      expectedManagedWorkVersion: 59,
+      reviewRoundId: 'round-20',
+      instruction: '采纳 GPT 第 2–5 项，驳回 Kimi 第 1 项。',
+      idempotencyKey: 'consensus-authorization-round-20',
+    };
+    let response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/consensus-authorization',
+      payload,
+    });
+    assert.equal(response.statusCode, 401);
+    response = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/consensus-authorization',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().consensusAuthorization.instruction, payload.instruction);
+    assert.deepEqual(calls, [
+      [
+        'authorizeReviewConsensus',
+        {
+          ...payload,
           projectId: 'project-1',
           workId: 'work-1',
           ownerUserId: 'operator-1',

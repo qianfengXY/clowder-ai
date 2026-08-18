@@ -5,6 +5,12 @@ import type { ReviewRoundDisplayContext } from './review-round-display-context.j
 
 export type ReviewRoundDispatchStage = 'independent' | 'cross_review' | 'consensus';
 
+export interface ReviewConsensusAuthorizationContext {
+  readonly instruction: string;
+  readonly authorizedByUserId: string;
+  readonly authorizedAt: number;
+}
+
 export interface ReviewRoundDispatchInput {
   readonly stage: ReviewRoundDispatchStage;
   readonly ownerUserId: string;
@@ -19,6 +25,10 @@ export interface ReviewRoundDispatchInput {
   readonly completedReviewerCatIds?: readonly CatId[];
   readonly recorderCatId: CatId;
   readonly displayContext?: ReviewRoundDisplayContext;
+  /** Current F275 version to use when publishing consensus after an evidence mutation. */
+  readonly managedWorkVersion?: number;
+  /** Explicit user ruling for a consensus stage that could not otherwise converge. */
+  readonly consensusAuthorization?: ReviewConsensusAuthorizationContext;
   /** Server-derived retry identity. Omitted for the first canonical delivery. */
   readonly deliveryKey?: string;
 }
@@ -269,12 +279,28 @@ function buildStageMessage(
     `权威方案会话：${planThreadId}`,
     `实现尝试：Attempt #${context.attemptNumber}`,
     `精确提交：${input.exactSha}`,
+    ...(input.managedWorkVersion === undefined ? [] : [`Managed work version：${input.managedWorkVersion}`]),
     progressLine(input.stage, completedCount, roster.length),
     '',
     '本阶段参与者：',
     participants,
   ].join('\n');
-  return `${routing}\n${identity}\n\n${stageInstructions(input.stage)}\n\nReview Round：${input.roundId}`;
+  const authorization = input.consensusAuthorization
+    ? [
+        '【用户共识裁决授权】',
+        `授权人：${input.consensusAuthorization.authorizedByUserId}`,
+        `授权时间：${new Date(input.consensusAuthorization.authorizedAt).toISOString()}`,
+        '裁决意见：',
+        input.consensusAuthorization.instruction,
+        '',
+        '执行规则：',
+        '1. 用户已介入并授权你以此裁决解决本轮 reviewer 分歧。',
+        '2. 不再引入新 reviewer，不再等待 drafts 自行收敛。',
+        '3. 直接将用户裁决映射为最终 findings/verdict，并立即调用 cat_cafe_review_consensus_publish。',
+        '4. 仍须绑定本消息中的 Review Round、精确 SHA 与权威方案；不得修改代码、合并、推送或部署。',
+      ].join('\n')
+    : null;
+  return `${routing}\n${identity}\n\n${authorization ? `${authorization}\n\n` : ''}${stageInstructions(input.stage, Boolean(authorization))}\n\nReview Round：${input.roundId}`;
 }
 
 function stageTitle(stage: ReviewRoundDispatchStage): string {
@@ -325,7 +351,7 @@ const VISIBLE_REVIEW_REPORT_CONTRACT = [
   '8. 表格前后不得再重复输出 findings 的纯文字清单；必要说明写入对应表格单元格。',
 ].join('\n');
 
-function stageInstructions(stage: ReviewRoundDispatchStage): string {
+function stageInstructions(stage: ReviewRoundDispatchStage, userAuthorized = false): string {
   const planBoundary = [
     '方案边界（强制）：',
     '1. 先读取上方“权威方案会话”的已确认设计与验收条件；所有 finding 必须服务于该方案的正确实现。',
@@ -367,7 +393,10 @@ function stageInstructions(stage: ReviewRoundDispatchStage): string {
     '你是系统指定的共识记录者。请读取 barrier-safe Review 结果：',
     '1. 核验并合并仍然成立的 findings。',
     '2. 使用 cat_cafe_review_consensus_publish 发布该精确提交的最终 verdict。',
-    '3. 不要发布 Issue，也不要修改代码、合并、推送或部署。',
+    userAuthorized
+      ? '3. 用户裁决是本轮 reviewer 分歧的最终依据；不得再次等待、索要或新增 reviewer。'
+      : '3. 如 reviewer 无法形成共识，不要新增 reviewer；保留本轮在 consensus_ready，清楚列出分歧并等待用户在 Mission Hub 介入。',
+    '4. 不要发布 Issue，也不要修改代码、合并、推送或部署。',
     '',
     VISIBLE_REVIEW_REPORT_CONTRACT,
   ].join('\n');
@@ -431,6 +460,15 @@ function assertDisplayContext(
 function assertDispatchInput(value: ReviewRoundDispatchInput): void {
   if (!value || !value.roundId || !value.reviewHubThreadId || !Array.isArray(value.reviewerCatIds)) {
     throw new Error('Invalid pending Review stage dispatch record');
+  }
+  if (
+    value.consensusAuthorization &&
+    (!value.consensusAuthorization.instruction.trim() ||
+      !value.consensusAuthorization.authorizedByUserId.trim() ||
+      !Number.isInteger(value.consensusAuthorization.authorizedAt) ||
+      value.consensusAuthorization.authorizedAt < 1)
+  ) {
+    throw new Error('Invalid Review consensus authorization context');
   }
   assertDisplayContext(value.displayContext);
 }

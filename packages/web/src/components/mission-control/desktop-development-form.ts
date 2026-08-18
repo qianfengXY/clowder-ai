@@ -50,3 +50,33 @@ export function buildDesktopAcceptanceRequest(work: AcceptanceResumePacket, acce
     idempotencyKey: `acceptance:${work.workId}:${work.currentSha}:${accepted ? 'accepted' : 'rejected'}`,
   };
 }
+
+type ConsensusAuthorizationResumePacket = Pick<
+  DesktopDevelopmentResumePacket,
+  | 'protocolVersion'
+  | 'workId'
+  | 'attemptId'
+  | 'managedWorkVersion'
+  | 'currentSha'
+  | 'reviewRoundId'
+  | 'reviewPhase'
+>;
+
+export function buildDesktopConsensusAuthorizationRequest(
+  work: ConsensusAuthorizationResumePacket,
+  instruction: string,
+) {
+  const normalizedInstruction = instruction.trim();
+  if (work.reviewPhase !== 'consensus_ready' || !work.reviewRoundId) {
+    throw new Error('Work is not awaiting Review consensus');
+  }
+  if (!normalizedInstruction) throw new Error('请输入你的最终裁决意见');
+  return {
+    protocolVersion: work.protocolVersion,
+    attemptId: work.attemptId,
+    expectedManagedWorkVersion: work.managedWorkVersion,
+    reviewRoundId: work.reviewRoundId,
+    instruction: normalizedInstruction,
+    idempotencyKey: `consensus-authorization:${work.reviewRoundId}:${work.currentSha}`,
+  };
+}

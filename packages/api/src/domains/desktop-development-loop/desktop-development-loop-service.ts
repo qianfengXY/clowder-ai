@@ -10,6 +10,7 @@ import {
   type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
   type DesktopDevelopmentWorkflowNode,
+  type DesktopReviewConsensusAuthorization,
   type DesktopSessionBinding,
   type ManagedWorkConsumerSnapshot,
   type ManagedWorkLifecycle,
@@ -124,6 +125,11 @@ export interface ApproveReviewContinuationInput {
 export interface RecordArchitectureDecisionInput extends ApproveReviewContinuationInput {
   readonly findingId: string;
   readonly decision: 'keep_original_plan' | 'approve_plan_change';
+}
+
+export interface AuthorizeReviewConsensusInput extends ApproveReviewContinuationInput {
+  readonly reviewRoundId: string;
+  readonly instruction: string;
 }
 
 export interface RetryDesktopDevelopmentStageInput extends ApproveReviewContinuationInput {}
@@ -972,6 +978,86 @@ export class DesktopDevelopmentLoopService {
     return this.readWork(input, appended.state.version);
   }
 
+  async authorizeReviewConsensus(input: AuthorizeReviewConsensusInput): Promise<DesktopDevelopmentResumePacket> {
+    this.assertProtocol(input.protocolVersion);
+    await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const identity = this.managedIdentity(input);
+    const now = input.now ?? Date.now();
+    const instruction = input.instruction.trim();
+    if (!instruction) throw new Error('Review consensus authorization instruction is required');
+    const [managed, session, review] = await Promise.all([
+      this.managedWork.read(identity),
+      this.sessions.getCurrent(input.projectId, input.workId, now),
+      this.reviewRounds.readCurrentSafe({
+        ownerUserId: input.ownerUserId,
+        projectId: input.projectId,
+        workId: input.workId,
+      }),
+    ]);
+    if (managed.state.version !== input.expectedManagedWorkVersion) {
+      throw new Error(
+        `Managed-work version conflict: expected ${input.expectedManagedWorkVersion}, actual ${managed.state.version}`,
+      );
+    }
+    if (
+      managed.state.lifecycle !== 'active' ||
+      managed.attempt.attemptId !== input.attemptId ||
+      managed.state.currentAttemptId !== input.attemptId ||
+      !session ||
+      session.attemptId !== input.attemptId ||
+      !review ||
+      !review.currentForWork ||
+      review.round.attemptId !== input.attemptId ||
+      review.round.roundId !== input.reviewRoundId ||
+      review.round.phase !== 'consensus_ready' ||
+      review.round.exactSha !== session.workspace.currentSha
+    ) {
+      throw new Error('User consensus authorization requires the current consensus-ready Review round and SHA');
+    }
+    const existing = consensusAuthorizationForReview(managed, review);
+    if (existing) {
+      if (existing.instruction !== instruction) {
+        throw new Error('Review consensus already has a different user authorization');
+      }
+      return this.readWork(input, managed.state.version);
+    }
+    const appended = await this.managedWork.appendEvidence({
+      ...identity,
+      expectedVersion: input.expectedManagedWorkVersion,
+      idempotencyKey: `${input.idempotencyKey}:consensus-authorization`,
+      evidence: {
+        kind: 'review_consensus_authorized',
+        exactSha: review.round.exactSha,
+        reviewRoundId: review.round.roundId,
+        instruction,
+        authorizedByUserId: input.ownerUserId,
+      },
+      now,
+    });
+    const context = await this.resolveWorkflowDisplayContext(input.ownerUserId, input.projectId, managed);
+    await this.reviewDispatcher.dispatch({
+      stage: 'consensus',
+      ownerUserId: review.round.ownerUserId,
+      projectId: review.round.projectId,
+      reviewHubThreadId: review.round.reviewThreadId ?? buildProjectReviewHubId(review.round.projectId),
+      roundId: review.round.roundId,
+      exactSha: review.round.exactSha,
+      reviewerCatIds: [review.round.recorderCatId],
+      allReviewerCatIds: review.round.reviewerCatIds,
+      completedReviewerCatIds: review.round.reviewerCatIds,
+      recorderCatId: review.round.recorderCatId,
+      displayContext: context,
+      managedWorkVersion: appended.state.version,
+      consensusAuthorization: {
+        instruction,
+        authorizedByUserId: input.ownerUserId,
+        authorizedAt: now,
+      },
+      deliveryKey: `user-consensus:${input.idempotencyKey}`,
+    });
+    return this.readWork(input, appended.state.version);
+  }
+
   async retryCurrentStage(input: RetryDesktopDevelopmentStageInput): Promise<RetryDesktopDevelopmentStageResult> {
     this.assertProtocol(input.protocolVersion);
     const work = await this.readWork(input);
@@ -1086,6 +1172,7 @@ export class DesktopDevelopmentLoopService {
       managed,
       mergeMode: project.desktopDevelopment.mergeMode,
     });
+    const consensusAuthorization = review ? consensusAuthorizationForReview(managed, review) : undefined;
     return {
       protocolVersion: DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
       projectId: project.id,
@@ -1115,6 +1202,7 @@ export class DesktopDevelopmentLoopService {
       reviewPhase: review?.round.phase ?? null,
       reviewRoundVersion: review?.round.version ?? null,
       reviewCurrentForWork: review?.currentForWork ?? false,
+      ...(consensusAuthorization ? { consensusAuthorization } : {}),
       openFindings,
       reviewAttemptLimit: DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
       reviewContinuationApprovedThroughAttempt: reviewGate.approvedThroughAttempt,
@@ -1140,6 +1228,7 @@ export class DesktopDevelopmentLoopService {
     if (review.round.phase === 'complete') throw new Error('Completed Review cannot be replayed as an active stage');
 
     const context = await this.resolveWorkflowDisplayContext(input.ownerUserId, input.projectId, managed);
+    const consensusAuthorization = consensusAuthorizationForReview(managed, review);
     const stage = review.round.phase === 'consensus_ready' ? 'consensus' : review.round.phase;
     const completedReviewerCatIds =
       stage === 'independent'
@@ -1166,6 +1255,16 @@ export class DesktopDevelopmentLoopService {
       completedReviewerCatIds,
       recorderCatId: review.round.recorderCatId,
       displayContext: context,
+      managedWorkVersion: managed.state.version,
+      ...(consensusAuthorization
+        ? {
+            consensusAuthorization: {
+              instruction: consensusAuthorization.instruction,
+              authorizedByUserId: consensusAuthorization.authorizedByUserId,
+              authorizedAt: consensusAuthorization.authorizedAt,
+            },
+          }
+        : {}),
       deliveryKey: `manual:${input.idempotencyKey}`,
     });
     return stage === 'consensus'
@@ -1689,8 +1788,31 @@ function deriveDesktopDevelopmentState(input: DesktopDevelopmentStateInput): Des
     case 'cross_review':
       return { phase: 'cross_review', nextLegalActions: ['wait_for_cross_review'] };
     case 'consensus_ready':
-      return { phase: 'cross_review', nextLegalActions: ['wait_for_consensus'] };
+      return consensusAuthorizationForReview(input.managed, input.review)
+        ? { phase: 'cross_review', nextLegalActions: ['wait_for_authorized_consensus'] }
+        : { phase: 'cross_review', nextLegalActions: ['wait_for_consensus', 'authorize_review_consensus'] };
   }
+}
+
+function consensusAuthorizationForReview(
+  managed: ManagedWorkConsumerSnapshot,
+  review: ReviewRoundSafeView,
+): DesktopReviewConsensusAuthorization | undefined {
+  const matching = managed.evidence.filter(
+    (evidence) =>
+      evidence.kind === 'review_consensus_authorized' &&
+      evidence.reviewRoundId === review.round.roundId &&
+      evidence.exactSha === review.round.exactSha,
+  );
+  const latest = matching.at(-1);
+  if (!latest || latest.kind !== 'review_consensus_authorized') return undefined;
+  return {
+    reviewRoundId: latest.reviewRoundId,
+    exactSha: latest.exactSha,
+    instruction: latest.instruction,
+    authorizedByUserId: latest.authorizedByUserId,
+    authorizedAt: latest.recordedAt,
+  };
 }
 
 function workspaceImplementationState(workspace: WorkspaceBinding): DesktopDevelopmentDerivedState {

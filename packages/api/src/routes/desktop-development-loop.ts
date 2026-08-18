@@ -120,6 +120,12 @@ const architectureDecisionSchema = reviewContinuationSchema
     decision: z.enum(['keep_original_plan', 'approve_plan_change']),
   })
   .strict();
+const consensusAuthorizationSchema = reviewContinuationSchema
+  .extend({
+    reviewRoundId: idSchema,
+    instruction: z.string().trim().min(1).max(2_000),
+  })
+  .strict();
 
 export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopmentLoopRoutesOptions> = async (
   app,
@@ -483,6 +489,31 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
       try {
         return reply.send(
           await desktopDevelopmentLoopService.recordArchitectureDecision({
+            ...params.data,
+            ...body.data,
+            ownerUserId,
+          }),
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/external-projects/:projectId/development-loop/works/:workId/consensus-authorization',
+    async (request, reply) => {
+      const ownerUserId = requireUserId(request, reply);
+      if (!ownerUserId) return;
+      if (!desktopDevelopmentLoopService) {
+        return reply.status(503).send({ error: 'Desktop development loop is unavailable' });
+      }
+      const params = z.object({ projectId: idSchema, workId: idSchema }).strict().safeParse(request.params);
+      const body = consensusAuthorizationSchema.safeParse(request.body);
+      if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+      try {
+        return reply.send(
+          await desktopDevelopmentLoopService.authorizeReviewConsensus({
             ...params.data,
             ...body.data,
             ownerUserId,

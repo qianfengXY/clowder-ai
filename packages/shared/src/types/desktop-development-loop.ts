@@ -180,6 +180,14 @@ export interface BarrierSafeReviewFinding {
   readonly status: 'open' | 'closed';
 }
 
+export interface DesktopReviewConsensusAuthorization {
+  readonly reviewRoundId: string;
+  readonly exactSha: string;
+  readonly instruction: string;
+  readonly authorizedByUserId: string;
+  readonly authorizedAt: number;
+}
+
 export interface DesktopDevelopmentResumePacket {
   readonly protocolVersion: DesktopDevelopmentProtocolVersion;
   readonly projectId: string;
@@ -211,6 +219,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly reviewPhase: 'independent' | 'cross_review' | 'consensus_ready' | 'complete' | null;
   readonly reviewRoundVersion: number | null;
   readonly reviewCurrentForWork: boolean;
+  /** Durable user ruling for an otherwise non-converging consensus stage. */
+  readonly consensusAuthorization?: DesktopReviewConsensusAuthorization;
   readonly openFindings: readonly BarrierSafeReviewFinding[];
   readonly reviewAttemptLimit: number;
   readonly reviewContinuationApprovedThroughAttempt: number;

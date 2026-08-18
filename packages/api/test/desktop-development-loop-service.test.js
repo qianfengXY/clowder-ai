@@ -909,6 +909,53 @@ describe(
       assert.equal(reviewDispatches.at(-1).stage, 'consensus');
       assert.deepEqual(reviewDispatches.at(-1).reviewerCatIds, ['cat-codex', 'cat-kimi']);
       assert.equal(reviewDispatches.at(-1).recorderCatId, 'cat-kimi');
+      packet = await service.authorizeReviewConsensus({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        reviewRoundId: roundId,
+        instruction: '采纳现有通过结论并提交最终共识。',
+        idempotencyKey: 'authorize-consensus-flow',
+        now: 6_500,
+      });
+      assert.equal(packet.managedWorkVersion, 4);
+      assert.equal(packet.consensusAuthorization.reviewRoundId, roundId);
+      assert.equal(packet.consensusAuthorization.instruction, '采纳现有通过结论并提交最终共识。');
+      assert.deepEqual(packet.nextLegalActions, ['wait_for_authorized_consensus']);
+      assert.equal(reviewDispatches.at(-1).stage, 'consensus');
+      assert.equal(reviewDispatches.at(-1).managedWorkVersion, 4);
+      assert.equal(reviewDispatches.at(-1).consensusAuthorization.authorizedByUserId, 'owner-1');
+      const replay = await service.retryCurrentStage({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: 'replay-authorized-consensus-flow',
+        now: 6_550,
+      });
+      assert.equal(replay.action, 'replay_review_stage');
+      assert.equal(reviewDispatches.at(-1).consensusAuthorization.instruction, '采纳现有通过结论并提交最终共识。');
+      await assert.rejects(
+        () =>
+          service.authorizeReviewConsensus({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            reviewRoundId: roundId,
+            instruction: '改成另一套裁决。',
+            idempotencyKey: 'authorize-consensus-conflict',
+            now: 6_600,
+          }),
+        /different user authorization/i,
+      );
       const completed = await reviewCoordinator.publishConsensus({
         ownerUserId: 'owner-1',
         threadId: hubThreadId,

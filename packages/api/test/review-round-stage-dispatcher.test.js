@@ -84,6 +84,24 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.notEqual(requests[0].payload.idempotencyKey, requests[3].payload.idempotencyKey);
     await dispatcher.dispatch({ ...base, stage: 'independent', deliveryKey: 'replay:1' });
     assert.equal(requests[3].payload.idempotencyKey, requests[4].payload.idempotencyKey);
+
+    await dispatcher.dispatch({
+      ...base,
+      stage: 'consensus',
+      managedWorkVersion: 60,
+      consensusAuthorization: {
+        instruction: '采纳 GPT 第 2–5 项；驳回 Kimi 第 1 项。',
+        authorizedByUserId: 'owner-1',
+        authorizedAt: 8_000,
+      },
+      deliveryKey: 'user-consensus:round-1',
+    });
+    const authorizedMessage = requests.at(-1).payload.content;
+    assert.match(authorizedMessage, /【用户共识裁决授权】/);
+    assert.match(authorizedMessage, /Managed work version：60/);
+    assert.match(authorizedMessage, /采纳 GPT 第 2–5 项；驳回 Kimi 第 1 项/);
+    assert.match(authorizedMessage, /不再引入新 reviewer/);
+    assert.match(authorizedMessage, /立即调用 cat_cafe_review_consensus_publish/);
   });
 
   test('fails closed for unroutable cats or rejected message ingress', async () => {

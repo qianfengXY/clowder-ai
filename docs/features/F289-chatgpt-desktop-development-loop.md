@@ -30,6 +30,7 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 10. 验收不通过时，同一项目和功能 Review 会话开启新的 delivery cycle，保留上一轮证据，不重建整个上下文。
 11. Mission Hub 为每个功能展示当前 Attempt 的完整链路：Desktop 实现、独立检视、交叉检视、共识、修复交接/合入、最终验收；只有服务端确认状态迁移后节点才显示完成。
 12. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过 exact-SHA Review、架构决策、15 轮续审或最终验收，也不得创建平行 work/attempt/round。
+13. 当现有 reviewer 无法形成共识时，不引入第三 reviewer。用户可在 Mission Hub 给出最终裁决，并授权原共识记录猫在同一 round、同一 exact SHA 上提交最终检视意见。
 
 ## 角色边界
 
@@ -37,7 +38,7 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 |---|---|---|
 | Cat Café 猫猫 | 需求/方案、Feature Doc/ADR、只读代码检视、运行既有检查、独立 finding、交叉共识 | 代替 Desktop 实现产品代码；作者自审；独立阶段互看草稿 |
 | ChatGPT Desktop developer | worktree、实现/测试、commit/push/PR、修复 finding、满足 gate 后合入 | 作为自身代码 reviewer；改写猫猫私有草稿；绕过 exact-SHA gate |
-| 用户 | 绑定项目、配置自动化、前两次合入确认、最终验收、必要时重新绑定会话 | 被迫手工搬运每轮 Review 的文本或重复创建窗口 |
+| 用户 | 绑定项目、配置自动化、裁决无法收敛的 Review 分歧、前两次合入确认、最终验收、必要时重新绑定会话 | 被迫手工搬运每轮 Review 的文本或重复创建窗口 |
 
 Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop-dev`），它永远不具备 reviewer 资格。
 
@@ -74,6 +75,7 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 - 严重架构问题只能作为 P1 `architecture_decision` finding 提交。Cat Café 暂停自动投递并要求用户选择“保持原方案”或“批准方案变更”；决定作为 managed-work evidence 持久化后才可继续。
 - 初始允许 attempt 1–15。第 15 次 Review 后仍有 open finding 时，Cat Café 进入 `awaiting_review_continuation`，由用户批准后再开放下一组 15 次；禁止后台无限唤醒 Desktop。
 - 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取，并把该功能实际绑定的方案会话作为唯一补充 `designRef`；不把旧 P1 追溯解释为架构变更授权，也不从 Review 证据猜测设计。
+- 两名 reviewer 在交叉检视后仍无法收敛时，round 保持 `consensus_ready`。用户裁决以 append-only `review_consensus_authorized` 证据绑定 `reviewRoundId + exactSha`；原 recorder 只能据此整理并发布共识，不得新增 reviewer。该授权只解决分歧，不绕过 merge confirmation 或 final acceptance。
 
 ## Stateful Object Census
 
@@ -132,6 +134,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 9. 协议版本或 capability 不兼容时写操作 fail closed；只读状态与恢复指引仍可返回。
 10. Cat Café 或 ChatGPT 可见窗口删除不等于 work/ReviewRound/证据删除。
 11. Review finding 必须引用冻结方案；未由用户决定的严重架构冲突和每 15 次循环边界均阻断下一次 Desktop 投递。
+12. Reviewer 无法形成共识时只接受当前用户的显式裁决授权；不得自动多数表决、追加 reviewer 或从聊天文字猜测授权。授权一经记录不可静默改写。
 
 ## MCP 合同
 
@@ -184,6 +187,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-R5: finding 必须携带方案引用与范围；严重架构冲突在 Cat Café 等待用户决策，不能被 Review 建议暗中改写方案。（`review-round-callback-routes.test.js`、`review-round-tools.test.ts`、`review-loop-policy.test.js`）
 - [x] AC-R6: 第 15 次及之后每组 15 次 Review 未清零时等待用户续审批准；Desktop IPC 只有在任务实际出现该轮消息后才清除 durable outbox。（`review-loop-policy.test.js`、`codex-desktop-task-launcher.test.js`）
 - [x] AC-R7: Mission Hub 展示服务端推导的完整 Attempt 链路、负责人、Review 进度与迁移时间；当前 Desktop/Review 节点可由用户幂等重投，过期 version 被拒绝，人工门禁不可被通用重试绕过。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`DesktopDevelopmentPanel.tsx`）
+- [x] AC-R8: 共识无法收敛时，用户可为当前 round + exact SHA 写入不可变裁决授权；服务端重投原 recorder 并暴露授权状态，不新增 reviewer，也不放宽合入与验收门禁。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`review-round-stage-dispatcher.test.js`、`desktop-development-form.test.ts`）
 
 ### Merge / acceptance
 

@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
-import { buildDesktopAcceptanceRequest } from './desktop-development-form';
+import {
+  buildDesktopAcceptanceRequest,
+  buildDesktopConsensusAuthorizationRequest,
+} from './desktop-development-form';
 
 type DevelopmentLaunchStatus =
   | 'available'
@@ -41,6 +44,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
   const [reviewDecisionKey, setReviewDecisionKey] = useState<string | null>(null);
+  const [consensusInstructions, setConsensusInstructions] = useState<Record<string, string>>({});
   const [retryingWorkId, setRetryingWorkId] = useState<string | null>(null);
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
@@ -299,6 +303,31 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     }
   };
 
+  const authorizeReviewConsensus = async (work: DesktopDevelopmentResumePacket) => {
+    const instruction = consensusInstructions[work.workId] ?? '';
+    setReviewDecisionKey(`${work.workId}:consensus`);
+    setStatus(null);
+    try {
+      const response = await apiFetch(
+        `/api/external-projects/${project.id}/development-loop/works/${work.workId}/consensus-authorization`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildDesktopConsensusAuthorizationRequest(work, instruction)),
+        },
+      );
+      const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
+      if (!response.ok || body.error) throw new Error(body.error ?? '无法授权提交最终检视意见');
+      setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
+      setConsensusInstructions((current) => ({ ...current, [work.workId]: '' }));
+      setStatus('已授权共识记录猫按你的裁决提交最终检视意见');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法授权提交最终检视意见');
+    } finally {
+      setReviewDecisionKey(null);
+    }
+  };
+
   if (!binding) {
     return (
       <section className="rounded-xl bg-[var(--console-card-bg)] p-5">
@@ -552,6 +581,53 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   </button>
                 </div>
               )}
+              {work?.reviewPhase === 'consensus_ready' && (
+                <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
+                  <p className="text-xs font-medium text-cafe">Review 共识需要时可由你裁决</p>
+                  {work.consensusAuthorization ? (
+                    <>
+                      <p className="text-xs text-cafe-secondary">
+                        你已介入并授权，当前正在等待原共识记录猫提交最终检视意见；不会新增 reviewer。
+                      </p>
+                      <div className="whitespace-pre-wrap rounded-lg bg-[var(--console-shell-bg)] px-3 py-2 text-xs text-cafe">
+                        {work.consensusAuthorization.instruction}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs leading-relaxed text-cafe-secondary">
+                        仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round 与精确提交；不会绕过后续合入确认和最终验收。
+                      </p>
+                      <label className="block">
+                        <span className="text-micro font-medium text-cafe-secondary">你的最终裁决意见</span>
+                        <textarea
+                          value={consensusInstructions[work.workId] ?? ''}
+                          onChange={(event) =>
+                            setConsensusInstructions((current) => ({
+                              ...current,
+                              [work.workId]: event.target.value,
+                            }))
+                          }
+                          maxLength={2000}
+                          rows={4}
+                          placeholder="例如：采纳 GPT 的第 2–5 项；驳回 Kimi 的第 1 项，理由是……"
+                          className="mt-1 w-full resize-y rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-shell-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void authorizeReviewConsensus(work)}
+                        disabled={
+                          reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()
+                        }
+                        className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                      >
+                        授权记录猫按此提交
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               {work?.acceptancePending && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -621,7 +697,11 @@ function describeWorkState(work: DesktopDevelopmentResumePacket): string {
     case 'awaiting_architecture_decision':
       return '重大架构问题，等待你决策';
     case 'cross_review':
-      return work.reviewPhase === 'consensus_ready' ? '等待共识' : '交叉检视中';
+      return work.reviewPhase === 'consensus_ready'
+        ? work.consensusAuthorization
+          ? '已授权，等待共识提交'
+          : '等待共识，可由你裁决'
+        : '交叉检视中';
     case 'independent_review':
       return '独立检视中';
     case 'ready_for_desktop':

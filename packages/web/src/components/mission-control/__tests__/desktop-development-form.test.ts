@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildDesktopAcceptanceRequest, buildDesktopDevelopmentCreateInput } from '../desktop-development-form';
+import {
+  buildDesktopAcceptanceRequest,
+  buildDesktopConsensusAuthorizationRequest,
+  buildDesktopDevelopmentCreateInput,
+} from '../desktop-development-form';
 
 describe('F289 desktop development project form', () => {
   it('omits the optional binding when the loop is disabled', () => {
@@ -123,5 +127,45 @@ describe('F289 desktop development project form', () => {
         true,
       ),
     ).toThrow(/not awaiting final acceptance/i);
+  });
+
+  it('builds a round-and-SHA-bound user consensus authorization', () => {
+    expect(
+      buildDesktopConsensusAuthorizationRequest(
+        {
+          protocolVersion: 1,
+          workId: 'work-1',
+          attemptId: 'attempt-20',
+          managedWorkVersion: 59,
+          currentSha: 'c'.repeat(40),
+          reviewRoundId: 'round-20',
+          reviewPhase: 'consensus_ready',
+        },
+        '  采纳第 2–5 项，驳回第 1 项。  ',
+      ),
+    ).toEqual({
+      protocolVersion: 1,
+      attemptId: 'attempt-20',
+      expectedManagedWorkVersion: 59,
+      reviewRoundId: 'round-20',
+      instruction: '采纳第 2–5 项，驳回第 1 项。',
+      idempotencyKey: `consensus-authorization:round-20:${'c'.repeat(40)}`,
+    });
+  });
+
+  it('refuses consensus authorization outside consensus_ready or without an instruction', () => {
+    const work = {
+      protocolVersion: 1 as const,
+      workId: 'work-1',
+      attemptId: 'attempt-1',
+      managedWorkVersion: 3,
+      currentSha: 'd'.repeat(40),
+      reviewRoundId: 'round-1',
+      reviewPhase: 'cross_review' as const,
+    };
+    expect(() => buildDesktopConsensusAuthorizationRequest(work, '以用户意见为准')).toThrow(/not awaiting/i);
+    expect(() =>
+      buildDesktopConsensusAuthorizationRequest({ ...work, reviewPhase: 'consensus_ready' }, '   '),
+    ).toThrow(/最终裁决意见/i);
   });
 });

@@ -137,6 +137,12 @@ export class ReviewRoundCoordinatorService {
       ...(input.now === undefined ? {} : { now: input.now }),
     });
     if (round.phase === 'consensus_ready') {
+      const managed = await this.managedWork.read({
+        consumerId: CONSUMER_ID,
+        ownerUserId: round.ownerUserId,
+        workId: round.workId,
+        attemptId: round.attemptId,
+      });
       await this.reviewDispatcher.dispatch({
         stage: 'consensus',
         ownerUserId: round.ownerUserId,
@@ -149,6 +155,7 @@ export class ReviewRoundCoordinatorService {
         completedReviewerCatIds: round.reviewerCatIds,
         recorderCatId: round.recorderCatId,
         displayContext,
+        managedWorkVersion: managed.state.version,
       });
     }
     return round;

@@ -135,6 +135,12 @@ Legacy findings written before `designRefs` became mandatory are projected with 
 thread as their sole inferred design anchor. The write path stays strict, and no review evidence is promoted into a
 design decision.
 
+Consensus non-convergence does not create another reviewer or another round. The authenticated user may append one
+`review_consensus_authorized` ruling scoped to the current `reviewRoundId + exactSha`. The designated recorder is then
+re-dispatched with that ruling and the current managed-work version, and must publish the final structured consensus.
+An identical authorization is idempotent; a conflicting replacement is rejected. This evidence decides only the
+reviewer disagreement and cannot satisfy merge confirmation or final acceptance.
+
 The same read builds an ordered `workflowNodes` projection for Mission Hub. Each node carries a semantic node ID,
 server-derived `pending / active / blocked / completed` status, responsible actor, timestamps, optional reviewer
 progress and one legal manual action. It is deliberately not persisted: F275 evidence, F253 ReviewRound progress and
@@ -146,6 +152,9 @@ Desktop implementation/fix/merge retries wake the same permanent task; Review re
 participants (or the designated consensus recorder) with a new deterministic delivery key. Architecture choice,
 15-attempt continuation and final acceptance remain dedicated user decisions and are rejected by the generic retry
 route. Terminal or stale attempts cannot be replayed.
+While a round is `consensus_ready`, Mission Hub additionally exposes the dedicated user-ruling action. Before a ruling,
+generic replay may only remind the existing recorder; after a ruling, replay carries the same durable instruction and
+never asks for a third reviewer.
 
 Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
 the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible
@@ -224,6 +233,7 @@ Every write validates:
 | ReviewRound | private drafts persist | barrier race atomic | latest safe projection | author/self/cross-project denied |
 | Pilot gate | accepted evidence persists | duplicate acceptance increments once; second success flips policy once | rejection starts new cycle | auto-merge before 2 denied |
 | Review-loop gate | continuation/architecture evidence persists | duplicate decisions are idempotent; conflicts rejected | next 15-attempt block resumes same work/task | attempt 16/31/... and undecided architecture change denied |
+| Consensus ruling | round + SHA scoped evidence persists | identical replay idempotent; conflicting rewrite rejected | original recorder receives the same ruling | new reviewer, stale round/SHA, merge/acceptance bypass denied |
 
 ## Human activation boundary
 
