@@ -40,8 +40,23 @@ export function checkChatgptReviewRoundLanguage(source) {
     '不得修改代码或 Git',
     '`scope=architecture_decision`',
     '保持 `consensus_ready`',
+    '仅用于展示的短序号',
+    '完整 ID，禁止把可见短序号当作 callback 标识',
     '每个系统消息只执行一次对应阶段',
   ]);
+}
+
+export function checkChatgptReviewRoundTemplate(source) {
+  const errors = requireTokens(source, 'chatgpt-review-rounds visible template', [
+    '| 序号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |',
+    '按当前表格行顺序填写 `1`、`2`、`3`',
+    '完整 ID 只用于 callback',
+    '短序号不得作为 callback 标识',
+  ]);
+  if (/\|\s*`?<draftFindingId\s*\/\s*findingId/i.test(source)) {
+    errors.push('chatgpt-review-rounds visible template exposes a full internal finding ID in the table.');
+  }
+  return errors;
 }
 
 export function checkReviewRoutingSurfaces({
@@ -49,6 +64,7 @@ export function checkReviewRoutingSurfaces({
   requestReviewSkill,
   receiveReviewSkill,
   chatgptReviewRoundsSkill,
+  chatgptReviewRoundsTemplate,
   mergeGateSkill,
   ironLaw,
   inboundPrReference,
@@ -94,6 +110,7 @@ export function checkReviewRoutingSurfaces({
       'reviewReentry',
     ]),
     ...checkChatgptReviewRoundLanguage(chatgptReviewRoundsSkill),
+    ...checkChatgptReviewRoundTemplate(chatgptReviewRoundsTemplate),
     ...requireTokens(mergeGateSkill, 'merge-gate review provenance convention', [
       'reviewReentry',
       'already-consumed exact-HEAD review',

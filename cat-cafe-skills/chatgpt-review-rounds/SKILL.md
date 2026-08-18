@@ -89,6 +89,10 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 [`refs/chatgpt-review-round-template.md`](../refs/chatgpt-review-round-template.md)。GPT 与 Kimi 使用同一模板。
 表格之外不重复输出 findings 的纯文字清单。
 
+明细表首列是仅用于展示的短序号：按当前表格顺序填写 `1`、`2`、`3`……，不得展示
+`draftFindingId`、`findingId` 或其他完整内部 ID。交叉检视和共识整理应尽量保留独立检视中的行顺序；新增项追加编号。
+callback 仍必须使用服务端返回的完整 ID，禁止把可见短序号当作 callback 标识。
+
 ## 停止条件
 
 - 每个系统消息只执行一次对应阶段；完成 callback 后结束，不轮询、不持续刷新。
@@ -107,4 +111,5 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 | Review 中顺手重设计 | 提交 `architecture_decision` P1 并暂停给用户 |
 | 共识卡住就增加 reviewer | 保持 `consensus_ready`，等待用户裁决 |
 | 只说“通过” | 即使无 finding 也输出模板规定的通过行 |
+| 在可见表格展示完整 finding ID | 只显示从 `1` 开始的短序号；完整 ID 仅用于 callback |
 | callback 后继续等待下一阶段 | 结束当前 turn，由 Cat Café 投递下一条系统消息 |

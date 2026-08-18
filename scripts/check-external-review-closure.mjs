@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { checkReviewEntryMode, evaluateReviewEntryFixtureScenario, reviewModeFor } from './review-entry-mode.mjs';
 import {
   checkChatgptReviewRoundLanguage,
+  checkChatgptReviewRoundTemplate,
   checkReviewContinuityLanguage,
   checkReviewRoutingSurfaces,
 } from './review-routing-surface-guard.mjs';
 
-export { checkChatgptReviewRoundLanguage, checkReviewContinuityLanguage };
+export { checkChatgptReviewRoundLanguage, checkChatgptReviewRoundTemplate, checkReviewContinuityLanguage };
 
 const EXTERNAL_REVIEW = /(?:external|外部).{0,20}(?:pull request|pr|review|复审)|github.{0,20}(?:review|复审)/is;
 const VERDICT = /\b(?:approve|approved|block|blocked|changes.requested|p[012])\b|放行|退回|结论/is;
@@ -308,6 +309,7 @@ export function runExternalReviewClosureCheck(root = process.cwd()) {
   const requestReviewSkill = read('cat-cafe-skills/request-review/SKILL.md');
   const receiveReviewSkill = read('cat-cafe-skills/receive-review/SKILL.md');
   const chatgptReviewRoundsSkill = read('cat-cafe-skills/chatgpt-review-rounds/SKILL.md');
+  const chatgptReviewRoundsTemplate = read('cat-cafe-skills/refs/chatgpt-review-round-template.md');
   const errors = [
     ...boundary.errors,
     ...checkReviewRoutingSurfaces({
@@ -315,6 +317,7 @@ export function runExternalReviewClosureCheck(root = process.cwd()) {
       requestReviewSkill,
       receiveReviewSkill,
       chatgptReviewRoundsSkill,
+      chatgptReviewRoundsTemplate,
       mergeGateSkill: read('cat-cafe-skills/merge-gate/SKILL.md'),
       ironLaw: read('assets/prompt-templates/l4-iron-laws.md'),
       // The inbound maintainer playbook is deliberately home-only. Keep checking

@@ -131,7 +131,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 
 1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源；项目级共用方案分支的精确提交与该功能选中的设计文档共同构成实现和 Review 的方案真相源。
 2. 一个项目只有一个方案分支绑定；一个导入功能有一组设计文档、一个方案讨论会话和一个 Review 会话。一个实现 exact SHA + 方案 exact SHA + 文档清单组合只有一个 active immutable ReviewRound。
-3. 每个 Review 阶段面向用户的回复统一采用同一份双表格协议：阶段摘要表 + 检视意见明细表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
+3. 每个 Review 阶段面向用户的回复统一采用同一份双表格协议：阶段摘要表 + 检视意见明细表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。明细表只显示从 `1` 开始的短序号，完整 finding ID 仅用于 callback。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
 4. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
 5. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
 6. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过且历史共识 finding 全关闭。
@@ -197,6 +197,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-R7: Mission Hub 展示服务端推导的完整 Attempt 链路、负责人、Review 进度与迁移时间；当前 Desktop/Review 节点可由用户幂等重投，过期 version 被拒绝，人工门禁不可被通用重试绕过。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`DesktopDevelopmentPanel.tsx`）
 - [x] AC-R8: 共识无法收敛时，用户可为当前 round + exact SHA 写入不可变裁决授权；服务端重投原 recorder 并暴露授权状态，不新增 reviewer，也不放宽合入与验收门禁。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`review-round-stage-dispatcher.test.js`、`desktop-development-form.test.ts`）
 - [x] AC-R9: Review 系统消息保持短小，只投递准确身份/阶段/双 SHA 并加载统一 skill；模板与稳定强制约束不重复嵌入每条消息。（`review-round-stage-dispatcher.test.js`、`chatgpt-review-rounds/SKILL.md`）
+- [x] AC-R10: 可见 Review 明细表只显示短序号，完整 finding ID 保留在 callback carrier 中且不得作为表格宽列泄露。（`check-external-review-closure.test.mjs`、`chatgpt-review-round-template.md`）
 
 ### Merge / acceptance
 

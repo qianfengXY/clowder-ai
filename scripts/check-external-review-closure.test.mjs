@@ -28,6 +28,7 @@ describe('review completion dual-route hard guard', () => {
       \`cat_cafe_review_cross_finish\` 和 \`cat_cafe_review_consensus_publish\`。
       全程不得修改代码或 Git；重大分歧使用 \`scope=architecture_decision\`。
       无法共识时保持 \`consensus_ready\`；每个系统消息只执行一次对应阶段。
+      可见表格首列使用仅用于展示的短序号；完整 ID，禁止把可见短序号当作 callback 标识。
     `);
     assert.deepEqual(valid, []);
 
@@ -39,6 +40,27 @@ describe('review completion dual-route hard guard', () => {
     assert.match(invalid.join('\n'), /cat_cafe_review_consensus_publish/);
     assert.match(invalid.join('\n'), /consensus_ready/);
     assert.match(invalid.join('\n'), /中文权威文档/);
+    assert.match(invalid.join('\n'), /短序号/);
+  });
+
+  it('keeps full finding IDs out of the visible Review table', () => {
+    assert.equal(typeof reviewGuard.checkChatgptReviewRoundTemplate, 'function');
+    if (typeof reviewGuard.checkChatgptReviewRoundTemplate !== 'function') return;
+
+    const valid = reviewGuard.checkChatgptReviewRoundTemplate(`
+      | 序号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | 1 | GPT | P2 | 成立 | 示例 | 文件 | 方案 | 修复 |
+      按当前表格行顺序填写 \`1\`、\`2\`、\`3\`。完整 ID 只用于 callback，短序号不得作为 callback 标识。
+    `);
+    assert.deepEqual(valid, []);
+
+    const invalid = reviewGuard.checkChatgptReviewRoundTemplate(`
+      | 编号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |
+      | \`<draftFindingId / findingId / 稳定编号>\` | GPT | P2 | 成立 | 示例 | 文件 | 方案 | 修复 |
+    `);
+    assert.match(invalid.join('\n'), /序号/);
+    assert.match(invalid.join('\n'), /full internal finding ID/);
   });
 
   it('rejects active guidance that turns every SHA change or every diff into mandatory re-review', () => {
