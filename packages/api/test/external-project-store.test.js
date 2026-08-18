@@ -190,18 +190,27 @@ describe('ExternalProjectStore', () => {
     assert.equal(second.desktopDevelopment.mergeMode, 'automatic');
   });
 
-  test('stores one design branch per feature independently from discussion threads', async () => {
+  test('stores one shared project design branch plus feature-specific documents', async () => {
     const created = await store.create('user1', { name: 'bound', description: '', sourcePath: '/bound' });
-    await store.setFeatureDesignBranch(created.id, 'backlog-f006', 'design/f006-workspace');
-    await store.setFeatureDesignBranch(created.id, 'backlog-f007', 'design/f007-import');
-    assert.deepEqual(await store.getFeatureDesignBranches(created.id), {
-      'backlog-f006': 'design/f006-workspace',
-      'backlog-f007': 'design/f007-import',
+    await store.setProjectDesignBranch(created.id, 'design/shared-specs');
+    await store.setFeatureDesignDocuments(created.id, 'backlog-f006', ['docs/design/f006.md']);
+    await store.setFeatureDesignDocuments(created.id, 'backlog-f007', ['docs/design/f007.md', 'docs/adr/007.md']);
+    assert.equal(await store.getProjectDesignBranch(created.id), 'design/shared-specs');
+    assert.deepEqual(await store.getFeatureDesignDocuments(created.id), {
+      'backlog-f006': ['docs/design/f006.md'],
+      'backlog-f007': ['docs/design/f007.md', 'docs/adr/007.md'],
     });
-    await store.setFeatureDesignBranch(created.id, 'backlog-f006', null);
-    assert.deepEqual(await store.getFeatureDesignBranches(created.id), {
-      'backlog-f007': 'design/f007-import',
+    await store.setFeatureDesignDocuments(created.id, 'backlog-f006', []);
+    assert.deepEqual(await store.getFeatureDesignDocuments(created.id), {
+      'backlog-f007': ['docs/design/f007.md', 'docs/adr/007.md'],
     });
+  });
+
+  test('migrates one unique legacy feature branch into the shared branch read', async () => {
+    const created = await store.create('user1', { name: 'legacy', description: '', sourcePath: '/legacy' });
+    await store.setFeatureDesignBranch(created.id, 'backlog-f006', 'design/shared-specs');
+    await store.setFeatureDesignBranch(created.id, 'backlog-f007', 'design/shared-specs');
+    assert.equal(await store.getProjectDesignBranch(created.id), 'design/shared-specs');
   });
 
   test('update() returns null for nonexistent id', async () => {

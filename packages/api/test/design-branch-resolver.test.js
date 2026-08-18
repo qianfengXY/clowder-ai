@@ -58,3 +58,17 @@ test('resolves an exact local design commit only when path and origin identity a
     /does not exist as a local committed branch/i,
   );
 });
+
+test('validates feature design documents against the frozen design commit', async () => {
+  const { resolveDesignDocuments } = await import('../dist/domains/desktop-development-loop/design-branch-resolver.js');
+  const exactSha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryPath })).stdout.trim();
+  assert.deepEqual(await resolveDesignDocuments(repositoryPath, exactSha, ['README.md']), ['README.md']);
+  await assert.rejects(
+    () => resolveDesignDocuments(repositoryPath, exactSha, ['docs/missing.md']),
+    /does not exist in design commit/i,
+  );
+  await assert.rejects(
+    () => resolveDesignDocuments(repositoryPath, exactSha, ['../outside.md']),
+    /invalid repository-relative/i,
+  );
+});

@@ -58,13 +58,21 @@ function item(featureId = 'F006'): BacklogItem {
   };
 }
 
-function readyDesignBranch(backlogItemId = 'item-F006', featureId = 'F006') {
+function readyDesignAuthority() {
+  return {
+    projectId: 'project-Traqen',
+    branch: 'design/shared-specs',
+    exactSha: 'a'.repeat(40),
+    status: 'ready' as const,
+  };
+}
+
+function readyDesignDocuments(backlogItemId = 'item-F006', featureId = 'F006') {
   return {
     projectId: 'project-Traqen',
     backlogItemId,
     featureId,
-    branch: `design/${featureId.toLowerCase()}-workspace-capability-settings`,
-    exactSha: 'a'.repeat(40),
+    documents: [`docs/design/${featureId.toLowerCase()}-workspace-capability-settings.md`],
     status: 'ready' as const,
   };
 }
@@ -105,8 +113,12 @@ describe('ExternalProjectFeatureList', () => {
     let launched = false;
     apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (!init) {
-        if (path.includes('/design-branches')) {
-          return { ok: true, status: 200, json: async () => ({ designBranches: [readyDesignBranch()] }) };
+        if (path.includes('/design-authority')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ authority: readyDesignAuthority(), features: [readyDesignDocuments()] }),
+          };
         }
         return {
           ok: true,
@@ -160,21 +172,36 @@ describe('ExternalProjectFeatureList', () => {
     expect(container.textContent).toContain('已在 ChatGPT Desktop 创建对应开发任务');
   });
 
-  it('binds a committed design branch before enabling development', async () => {
+  it('binds one shared design branch and feature-specific documents before enabling development', async () => {
     apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (init?.method === 'PUT' && path.endsWith('/design-branch')) {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ designBranch: readyDesignBranch() }),
+          json: async () => ({ designAuthority: readyDesignAuthority() }),
+        };
+      }
+      if (init?.method === 'PUT' && path.endsWith('/design-documents')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ designDocuments: readyDesignDocuments() }),
         };
       }
       return {
         ok: true,
         status: 200,
         json: async () =>
-          path.includes('/design-branches')
-            ? { designBranches: [] }
+          path.includes('/design-authority')
+            ? {
+                authority: {
+                  projectId: 'project-Traqen',
+                  branch: null,
+                  exactSha: null,
+                  status: 'missing',
+                },
+                features: [],
+              }
             : {
                 states: [
                   {
@@ -196,32 +223,61 @@ describe('ExternalProjectFeatureList', () => {
     expect(start.textContent).toContain('先配置方案分支');
     expect(start.disabled).toBe(true);
 
-    const edit = container.querySelector(
-      '[data-testid="external-project-design-branch-item-F006"]',
-    ) as HTMLButtonElement;
+    const edit = container.querySelector('[data-testid="external-project-design-branch"]') as HTMLButtonElement;
     await act(async () => edit.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    const input = container.querySelector(
-      '[data-testid="external-project-design-input-item-F006"]',
-    ) as HTMLInputElement;
+    const input = container.querySelector('[data-testid="external-project-design-input"]') as HTMLInputElement;
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      valueSetter?.call(input, 'design/f006-workspace-capability-settings');
+      valueSetter?.call(input, 'design/shared-specs');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const save = container.querySelector('[data-testid="external-project-design-save-item-F006"]') as HTMLButtonElement;
+    const save = container.querySelector('[data-testid="external-project-design-save"]') as HTMLButtonElement;
     await act(async () => {
       save.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
     await flush();
 
-    const putCall = apiFetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
-    expect(putCall?.[0]).toContain('/features/item-F006/design-branch');
-    expect(JSON.parse((putCall?.[1] as RequestInit).body as string)).toEqual({
+    const branchPutCall = apiFetchMock.mock.calls.find(
+      ([path, init]) => (init as RequestInit | undefined)?.method === 'PUT' && String(path).endsWith('/design-branch'),
+    );
+    expect(branchPutCall?.[0]).toContain('/development-loop/design-branch');
+    expect(JSON.parse((branchPutCall?.[1] as RequestInit).body as string)).toEqual({
       protocolVersion: 1,
-      branch: 'design/f006-workspace-capability-settings',
+      branch: 'design/shared-specs',
     });
-    expect(container.textContent).toContain('已绑定方案分支');
+    expect(container.textContent).toContain('已绑定共用方案分支');
+
+    const editDocuments = container.querySelector(
+      '[data-testid="external-project-design-documents-item-F006"]',
+    ) as HTMLButtonElement;
+    await act(async () => editDocuments.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    const documentsInput = container.querySelector(
+      '[data-testid="external-project-design-input-item-F006"]',
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      valueSetter?.call(documentsInput, 'docs/design/f006-workspace-capability-settings.md');
+      documentsInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const saveDocuments = container.querySelector(
+      '[data-testid="external-project-design-save-item-F006"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      saveDocuments.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flush();
+    const documentsPutCall = apiFetchMock.mock.calls.find(
+      ([path, init]) =>
+        (init as RequestInit | undefined)?.method === 'PUT' && String(path).endsWith('/design-documents'),
+    );
+    expect(documentsPutCall?.[0]).toContain('/features/item-F006/design-documents');
+    expect(JSON.parse((documentsPutCall?.[1] as RequestInit).body as string)).toEqual({
+      protocolVersion: 1,
+      documents: ['docs/design/f006-workspace-capability-settings.md'],
+    });
+    expect(container.textContent).toContain('已指定 1 份设计文档');
   });
 
   it('opens feature-scoped plan and Review conversations', async () => {
@@ -244,9 +300,15 @@ describe('ExternalProjectFeatureList', () => {
       }
       return {
         ok: true,
-        json: async () => ({
-          states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
-        }),
+        json: async () =>
+          path.includes('/design-authority')
+            ? {
+                authority: { projectId: 'project-Traqen', branch: null, exactSha: null, status: 'missing' },
+                features: [],
+              }
+            : {
+                states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
+              },
       };
     });
     await act(async () => {
@@ -306,9 +368,15 @@ describe('ExternalProjectFeatureList', () => {
       }
       return {
         ok: true,
-        json: async () => ({
-          states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
-        }),
+        json: async () =>
+          path.includes('/design-authority')
+            ? {
+                authority: { projectId: 'project-Traqen', branch: null, exactSha: null, status: 'missing' },
+                features: [],
+              }
+            : {
+                states: [{ backlogItemId: 'item-F006', featureId: 'F006', title: 'Feature', status: 'available' }],
+              },
       };
     });
     await act(async () => {
@@ -348,8 +416,12 @@ describe('ExternalProjectFeatureList', () => {
   it('keeps automatic Desktop launch failures retryable', async () => {
     apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (!init) {
-        if (path.includes('/design-branches')) {
-          return { ok: true, status: 200, json: async () => ({ designBranches: [readyDesignBranch()] }) };
+        if (path.includes('/design-authority')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ authority: readyDesignAuthority(), features: [readyDesignDocuments()] }),
+          };
         }
         return {
           ok: true,
@@ -391,8 +463,8 @@ describe('ExternalProjectFeatureList', () => {
       ok: true,
       status: 200,
       json: async () =>
-        path.includes('/design-branches')
-          ? { designBranches: [readyDesignBranch('item-F120', 'F120')] }
+        path.includes('/design-authority')
+          ? { authority: readyDesignAuthority(), features: [readyDesignDocuments('item-F120', 'F120')] }
           : {
               states: [
                 {
@@ -429,8 +501,11 @@ describe('ExternalProjectFeatureList', () => {
       ok: true,
       status: 200,
       json: async () =>
-        path.includes('/design-branches')
-          ? { designBranches: [] }
+        path.includes('/design-authority')
+          ? {
+              authority: { projectId: 'project-Traqen', branch: null, exactSha: null, status: 'missing' },
+              features: [],
+            }
           : {
               states: [
                 {
@@ -458,8 +533,11 @@ describe('ExternalProjectFeatureList', () => {
       ok: true,
       status: 200,
       json: async () =>
-        path.includes('/design-branches')
-          ? { designBranches: [] }
+        path.includes('/design-authority')
+          ? {
+              authority: { projectId: 'project-Traqen', branch: null, exactSha: null, status: 'missing' },
+              features: [],
+            }
           : {
               states: [
                 {

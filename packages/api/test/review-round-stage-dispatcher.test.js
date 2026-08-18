@@ -33,6 +33,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         attemptNumber: 3,
         designBranch: 'design/f006-workspace-capability',
         designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
       },
     };
 
@@ -122,6 +123,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         attemptNumber: 3,
         designBranch: 'design/f006-workspace-capability',
         designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
       },
     };
     await assert.rejects(
@@ -198,6 +200,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         attemptNumber: 3,
         designBranch: 'design/f006-workspace-capability',
         designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
       },
       deliveryKey: 'replay:2',
     };
@@ -267,6 +270,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         attemptNumber: 10,
         designBranch: 'design/f006-workspace-capability',
         designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
       },
     };
 
@@ -325,6 +329,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
         attemptNumber: 10,
         designBranch: 'design/f006-workspace-capability',
         designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
       },
     };
 

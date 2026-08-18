@@ -1097,7 +1097,7 @@ export type {
   ReviewSeverity,
 } from './review-round.js';
 // F253/F289: durable exact-SHA independent review rounds
-export { buildReviewDesignRef } from './review-round.js';
+export { buildReviewDesignDocumentRef, buildReviewDesignRef } from './review-round.js';
 // Rich block types (F22 Rich Blocks 富消息系统)
 export type {
   InteractiveOption,

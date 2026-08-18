@@ -264,6 +264,7 @@ function buildStageMessage(input: ReviewRoundDispatchInput, routingHandles: read
     `实现提交：${input.exactSha}`,
     `方案分支：${context.designBranch}`,
     `方案提交：${context.designExactSha}`,
+    `设计文档：${context.designDocuments.length > 0 ? context.designDocuments.join('、') : '未指定（历史轮次按整个方案提交）'}`,
     `Review Round：${input.roundId}`,
     ...(input.managedWorkVersion === undefined ? [] : [`Managed work version：${input.managedWorkVersion}`]),
     progressLine(input.stage, completedCount, roster.length),
@@ -279,7 +280,7 @@ function buildStageMessage(input: ReviewRoundDispatchInput, routingHandles: read
     identity,
     ...(authorization ? [authorization] : []),
     `任务：加载 chatgpt-review-rounds skill，按“${stageTitle(input.stage)}”阶段执行一次并调用对应 Review callback。`,
-    '实现与检视必须以本消息的方案分支精确提交为准。可见输出使用 skill 中的统一表格模板。',
+    '实现与检视必须以本消息的方案分支精确提交及所列设计文档为准。可见输出使用 skill 中的统一表格模板。',
   ].join('\n');
 }
 
@@ -344,6 +345,8 @@ function assertDisplayContext(
     !value.featureTitle.trim() ||
     !value.designBranch.trim() ||
     !/^[0-9a-f]{40,64}$/i.test(value.designExactSha) ||
+    !Array.isArray(value.designDocuments) ||
+    value.designDocuments.some((documentPath) => !documentPath.trim()) ||
     !Number.isInteger(value.attemptNumber) ||
     value.attemptNumber < 1
   ) {

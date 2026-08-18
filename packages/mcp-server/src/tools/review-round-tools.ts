@@ -32,7 +32,7 @@ const findingSchema = z
       .min(1)
       .max(100)
       .describe(
-        'Required references including git:refs/heads/<designBranch>@<designExactSha> from the Review system message.',
+        'Required references including the exact shared design commit and at least one configured feature design-document ref from the Review system message.',
       ),
     scope: z
       .enum(['plan_conformance', 'architecture_decision'])

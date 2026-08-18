@@ -140,11 +140,13 @@ describe(
       const first = await createRound({
         designBranch: 'design/f006-workspace',
         designExactSha: DESIGN_SHA_A,
+        designDocuments: ['docs/design/f006.md'],
         idempotencyKey: 'design-a',
       });
       const second = await createRound({
         designBranch: 'design/f006-workspace',
         designExactSha: DESIGN_SHA_B,
+        designDocuments: ['docs/design/f006.md'],
         idempotencyKey: 'design-b',
       });
       assert.notEqual(second.roundId, first.roundId);

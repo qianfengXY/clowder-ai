@@ -340,7 +340,7 @@ skills:
     category: "开发流程"
     description: >
       Execute one callback-backed independent, cross-review, or consensus stage for ChatGPT-authored Cat Café work.
-      Use when: a compact Review system message supplies a Review Round, exact code SHA, and exact design-branch SHA.
+      Use when: a compact Review system message supplies a Review Round, exact code SHA, shared design-branch SHA, and feature design documents.
       Not for: ordinary cat-authored review, implementation, Git writes, merge, push, deploy, or inventing a plan beyond the design branch.
       Output: durable Review callbacks plus the shared two-table user-visible report; pause for user resolution on design disagreement.
     triggers:

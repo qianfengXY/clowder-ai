@@ -3,7 +3,7 @@ name: chatgpt-review-rounds
 tips_exempt: harness-internal operator-approved review protocol; no standalone end-user capability surface
 description: >
   Execute one callback-backed independent, cross-review, or consensus stage for ChatGPT-authored Cat Café work.
-  Use when: a compact Review system message supplies a Review Round, exact code SHA, and exact design-branch SHA.
+  Use when: a compact Review system message supplies a Review Round, exact code SHA, shared design-branch SHA, and feature design documents.
   Not for: ordinary cat-authored review, implementation, Git writes, merge, push, deploy, or inventing a plan beyond the design branch.
   Output: durable Review callbacks plus the shared two-table user-visible report; pause for user resolution on design disagreement.
 triggers:
@@ -26,18 +26,22 @@ triggers:
 - 实现提交 `exactSha`
 - `方案分支`
 - `方案提交 designExactSha`
+- 当前功能的 `设计文档` 清单
 - 当前阶段、reviewer/recorder 身份与 callback 版本
 
-代码只能按 `exactSha` 检视。方案只能按 `designExactSha` 检视；方案分支之后移动不会改变正在进行的本轮依据。
+代码只能按 `exactSha` 检视。项目只保留一个共用方案分支；当前功能只按消息列出的设计文档检视。方案只能按
+`designExactSha` 检视；方案分支之后移动不会改变正在进行的本轮依据。
 方案讨论会话可以提供背景，但不是权威方案，不能用聊天中的未提交想法覆盖方案提交。
 
 每条 finding 的 `designRefs` 必须包含：
 
 ```text
 git:refs/heads/<方案分支>@<完整 designExactSha>
+git:refs/heads/<方案分支>@<完整 designExactSha>:<适用设计文档路径>
 ```
 
-需要更精确时，再附方案文件与章节。缺少该精确 Git ref 的 finding 不得提交。
+第一条证明方案提交，第二条从本功能已配置的文档中至少选择一份；需要更精确时再附章节。缺少任一依据的
+finding 不得提交。禁止引用其他功能文档来扩张本轮范围。
 
 ## 方案边界
 
@@ -49,7 +53,9 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 - 只有会迫使权威方案发生重大架构改变的真实 P1 冲突，才使用 `scope=architecture_decision`。
 - 对方案分歧只写“冲突事实、影响、证据和待用户决策点”，不得越权给出并推进新方案。
 
-共识发布后，`architecture_decision` finding 会让开发链路暂停。用户可以保持当前方案，或与猫猫修改方案并把结果提交到同一方案分支；只有 Cat Café 验证方案 SHA 后才恢复 Desktop 实现。
+共识发布后，`architecture_decision` finding 会让开发链路暂停。用户可以保持当前方案，或与猫猫修改方案并把
+结果提交到同一个项目方案分支；新增或替换文档时还要在功能列表更新该功能的设计文档清单。只有 Cat Café 验证
+新方案 SHA 与文档后才恢复 Desktop 实现。
 
 ## 阶段执行
 
@@ -91,7 +97,8 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 
 | 错误 | 正确处理 |
 |---|---|
-| 把方案讨论会话当最终方案 | 只认系统消息中的方案分支与精确 SHA |
+| 把方案讨论会话当最终方案 | 只认系统消息中的共用方案分支、精确 SHA 与设计文档清单 |
+| 为每个功能再创建方案分支 | 项目只保留一个共用方案分支；功能只选择文档 |
 | 把模板和约束复制进系统消息 | 加载本技能与引用模板 |
 | Review 中顺手重设计 | 提交 `architecture_decision` P1 并暂停给用户 |
 | 共识卡住就增加 reviewer | 保持 `consensus_ready`，等待用户裁决 |

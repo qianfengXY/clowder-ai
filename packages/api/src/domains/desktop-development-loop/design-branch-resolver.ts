@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { assertValidGitBranch, type GitHubRepositoryIdentity, normalizeGitHubRepository } from '@cat-cafe/shared';
 
@@ -17,10 +17,19 @@ export interface ResolvedDesignBranch {
   readonly exactSha: string;
 }
 
+export interface ResolvedDesignAuthority extends ResolvedDesignBranch {
+  readonly documents: readonly string[];
+}
+
 export type DesignBranchResolver = (input: ResolveDesignBranchInput) => Promise<ResolvedDesignBranch>;
+export type DesignDocumentsResolver = (
+  sourcePath: string,
+  exactSha: string,
+  documents: readonly string[],
+) => Promise<readonly string[]>;
 
 /**
- * Resolves a local per-feature design branch without checking it out or mutating
+ * Resolves a local project-wide design branch without checking it out or mutating
  * the repository. The configured path, Git top-level and origin identity must
  * all agree before a commit is accepted as plan authority.
  */
@@ -72,3 +81,50 @@ export const resolveDesignBranch: DesignBranchResolver = async (input) => {
     throw new Error(`Design branch ${branch} does not exist as a local committed branch`);
   }
 };
+
+export const resolveDesignDocuments: DesignDocumentsResolver = async (
+  sourcePath: string,
+  exactSha: string,
+  documents: readonly string[],
+): Promise<readonly string[]> => {
+  const normalized = normalizeDesignDocuments(documents);
+  await Promise.all(
+    normalized.map(async (documentPath) => {
+      try {
+        await execFileAsync('git', ['cat-file', '-e', `${exactSha}:${documentPath}`], {
+          cwd: sourcePath,
+          timeout: 5_000,
+        });
+      } catch {
+        throw new Error(`Design document ${documentPath} does not exist in design commit ${exactSha}`);
+      }
+    }),
+  );
+  return normalized;
+};
+
+export function normalizeDesignDocuments(documents: readonly string[]): readonly string[] {
+  if (!Array.isArray(documents) || documents.length === 0 || documents.length > 20) {
+    throw new Error('Select between 1 and 20 design documents for this feature');
+  }
+  const normalized = documents.map((value) => {
+    const trimmed = value.trim().replaceAll('\\', '/');
+    const path = posix.normalize(trimmed);
+    if (
+      !trimmed ||
+      trimmed.startsWith('/') ||
+      path === '.' ||
+      path === '..' ||
+      path.startsWith('../') ||
+      path.includes('/../') ||
+      path.startsWith('.git/') ||
+      path === '.git' ||
+      path.includes(':') ||
+      path.length > 1_000
+    ) {
+      throw new Error(`Invalid repository-relative design document path: ${value}`);
+    }
+    return path;
+  });
+  return [...new Set(normalized)];
+}

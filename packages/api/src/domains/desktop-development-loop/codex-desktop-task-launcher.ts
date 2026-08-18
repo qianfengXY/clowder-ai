@@ -32,6 +32,7 @@ export interface DesktopTaskLaunchInput {
   readonly title: string;
   readonly designBranch: string;
   readonly designExactSha: string;
+  readonly designDocuments: readonly string[];
 }
 
 export interface DesktopTaskLaunchResult {
@@ -729,7 +730,8 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
     `功能：${input.featureId} — ${input.title}`,
     `方案分支：${input.designBranch}`,
     `方案提交：${input.designExactSha}`,
-    '实现必须以这个方案提交为准；方案讨论会话只用于讨论，不是实现依据。',
+    `设计文档：${input.designDocuments.join('、')}`,
+    '实现必须以这个方案提交中的所列设计文档为准；方案讨论会话只用于讨论，不是实现依据。',
     `Cat Café projectId：${input.projectId}`,
     `backlogItemId：${input.backlogItemId}`,
     `本任务的 runtimeSessionId：${runtimeSessionId}。连接与后续 heartbeat/report 必须复用这个值。`,
@@ -752,6 +754,7 @@ export function buildReviewCompletionObjective(input: {
   readonly exactSha: string;
   readonly designBranch: string;
   readonly designExactSha: string;
+  readonly designDocuments: readonly string[];
   readonly runtimeSessionId: string;
   readonly operatorDecisions?: readonly string[];
 }): string {
@@ -765,12 +768,13 @@ export function buildReviewCompletionObjective(input: {
     `被检视的精确 SHA：${input.exactSha}`,
     `当前方案分支：${input.designBranch}`,
     `当前方案提交：${input.designExactSha}`,
+    `本功能设计文档：${input.designDocuments.join('、')}`,
     `继续复用 runtimeSessionId：${input.runtimeSessionId}。`,
     ...(input.operatorDecisions?.length
       ? ['用户已在 Cat Café 作出的架构决策：', ...input.operatorDecisions.map((decision) => `- ${decision}`)]
       : []),
     '使用 catcafe-desktop-executor 技能读取最新 Resume Packet，只执行其中的 nextLegalActions。',
-    '所有修复和继续实现都必须以 Resume Packet 中的方案分支精确提交为准；不要用方案讨论会话替代方案提交。',
+    '所有修复和继续实现都必须以 Resume Packet 中的方案分支精确提交及所列设计文档为准；不要用方案讨论会话替代方案提交。',
     '若需要修复，先在这个原窗口取得递增的新 attempt，再完成修复、测试、提交和报告；若已通过，则向用户展示下一项合法动作。',
     '这是一个单次通知 turn，durable Goal 保持非 active；本轮结束前将 Goal 标为 complete，禁止自动等待或续跑。',
     '本消息由 Cat Café 通过 ChatGPT Desktop 窗口 IPC 投递到原绑定窗口；禁止创建替代窗口或启动第二个 app-server。',

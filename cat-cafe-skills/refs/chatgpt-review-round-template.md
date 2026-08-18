@@ -2,13 +2,13 @@
 
 GPT 与 Kimi 在独立检视、交叉检视和共识整理阶段都使用以下两张 GFM Markdown 表格。不得改列、换序或用散文代替。
 
-| 项目 / 功能 | 阶段 | Review Round | Attempt | 实现提交 | 方案提交 | Verdict |
-| --- | --- | --- | --- | --- | --- | --- |
-| `<项目 · Feature>` | `<独立检视 / 交叉检视 / 共识整理>` | `<Round ID>` | `<Attempt>` | `<exact SHA>` | `<design branch@SHA>` | `<本阶段结论>` |
+| 项目 / 功能 | 阶段 | Review Round | Attempt | 实现提交 | 方案提交 | 设计文档 | Verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `<项目 · Feature>` | `<独立检视 / 交叉检视 / 共识整理>` | `<Round ID>` | `<Attempt>` | `<exact SHA>` | `<共用 design branch@SHA>` | `<当前功能的文档路径；多项用 HTML 换行>` | `<本阶段结论>` |
 
 | 编号 | 检视者 | 级别 | 结论 | 检视意见 | 证据 | 方案依据 | 处理要求 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `<draftFindingId / findingId / 稳定编号>` | `<当前检视者>` | `<P1/P2/P3/—>` | `<阶段结论>` | `<具体问题或通过说明>` | `<文件、行号、测试或命令>` | `git:refs/heads/<branch>@<designExactSha><br><文件/章节>` | `<必须动作 / 无需处理 / 待用户决策>` |
+| `<draftFindingId / findingId / 稳定编号>` | `<当前检视者>` | `<P1/P2/P3/—>` | `<阶段结论>` | `<具体问题或通过说明>` | `<文件、行号、测试或命令>` | `git:refs/heads/<branch>@<designExactSha><br>git:refs/heads/<branch>@<designExactSha>:<设计文档路径><br><章节>` | `<必须动作 / 无需处理 / 待用户决策>` |
 
 规则：
 

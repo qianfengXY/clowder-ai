@@ -3,10 +3,11 @@
 import type {
   BacklogItem,
   ExternalProject,
-  FeatureDesignBranchView,
+  FeatureDesignDocumentsView,
   FeatureWorkspaceThreadCandidatesView,
   FeatureWorkspaceThreadKind,
   FeatureWorkspaceThreadView,
+  ProjectDesignAuthorityView,
 } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -72,28 +73,35 @@ function ExternalProjectFeatureRow({
   status,
   error,
   desktopBound,
-  designBranch,
+  designAuthority,
+  designDocuments,
   onStart,
   onOpenThread,
   onBindThread,
-  onEditDesignBranch,
+  onEditDesignDocuments,
 }: {
   item: BacklogItem;
   status: LaunchStatus;
   error?: string;
   desktopBound: boolean;
-  designBranch?: FeatureDesignBranchView;
+  designAuthority?: ProjectDesignAuthorityView;
+  designDocuments?: FeatureDesignDocumentsView;
   onStart: (item: BacklogItem) => void;
   onOpenThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
   onBindThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
-  onEditDesignBranch: (item: BacklogItem) => void;
+  onEditDesignDocuments: (item: BacklogItem) => void;
 }) {
   const featureId = featureIdFromItem(item);
   const unavailable = !desktopBound || !featureId;
   const designBranchBlocksLaunch =
-    designBranch?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
+    designAuthority?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
+  const designDocumentsBlockLaunch =
+    designDocuments?.status !== 'ready' && ['available', 'ready_for_desktop', 'error'].includes(status);
   const disabled =
-    unavailable || designBranch?.status !== 'ready' || !['available', 'ready_for_desktop', 'error'].includes(status);
+    unavailable ||
+    designAuthority?.status !== 'ready' ||
+    designDocuments?.status !== 'ready' ||
+    !['available', 'ready_for_desktop', 'error'].includes(status);
 
   return (
     <div className="rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
@@ -107,11 +115,11 @@ function ExternalProjectFeatureRow({
             {launchStatusLabel(status)}
           </span>
           <span className="text-micro text-cafe-secondary" data-testid={`external-project-design-ref-${item.id}`}>
-            方案分支：
-            {designBranch?.status === 'ready'
-              ? `${designBranch.branch}@${designBranch.exactSha?.slice(0, 12)}`
-              : designBranch?.branch
-                ? `${designBranch.branch}（不可用）`
+            设计文档：
+            {designDocuments?.status === 'ready'
+              ? designDocuments.documents.join('、')
+              : designDocuments?.documents.length
+                ? `${designDocuments.documents.length} 份（不可用）`
                 : '未配置'}
           </span>
         </div>
@@ -127,12 +135,12 @@ function ExternalProjectFeatureRow({
           </button>
           <button
             type="button"
-            onClick={() => onEditDesignBranch(item)}
+            onClick={() => onEditDesignDocuments(item)}
             disabled={unavailable}
             className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
-            data-testid={`external-project-design-branch-${item.id}`}
+            data-testid={`external-project-design-documents-${item.id}`}
           >
-            方案分支
+            设计文档
           </button>
           <button
             type="button"
@@ -170,7 +178,9 @@ function ExternalProjectFeatureRow({
           >
             {desktopBound && featureId && designBranchBlocksLaunch
               ? '先配置方案分支'
-              : launchButtonLabel(status, desktopBound, featureId)}
+              : desktopBound && featureId && designDocumentsBlockLaunch
+                ? '先配置设计文档'
+                : launchButtonLabel(status, desktopBound, featureId)}
           </button>
         </div>
       </div>
@@ -179,7 +189,7 @@ function ExternalProjectFeatureRow({
           {error}
         </p>
       )}
-      {designBranch?.error && <p className="mt-2 text-xs text-conn-red-text">{designBranch.error}</p>}
+      {designDocuments?.error && <p className="mt-2 text-xs text-conn-red-text">{designDocuments.error}</p>}
     </div>
   );
 }
@@ -191,10 +201,13 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   const setThreads = useChatStore((state) => state.setThreads);
   const [launchStatuses, setLaunchStatuses] = useState<Record<string, LaunchStatus>>({});
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
-  const [designBranches, setDesignBranches] = useState<Record<string, FeatureDesignBranchView>>({});
+  const [designAuthority, setDesignAuthority] = useState<ProjectDesignAuthorityView>();
+  const [designDocuments, setDesignDocuments] = useState<Record<string, FeatureDesignDocumentsView>>({});
   const [designEditor, setDesignEditor] = useState<{
-    itemId: string;
+    kind: 'branch' | 'documents';
+    itemId?: string;
     branch: string;
+    documents: string;
     saving: boolean;
     error?: string;
   } | null>(null);
@@ -221,10 +234,11 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   useEffect(() => {
     void launchRefreshKey;
     let cancelled = false;
-    let shouldLoadDesignBranches = true;
+    let shouldLoadDesignAuthority = true;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
     setLaunchErrors({});
-    setDesignBranches({});
+    setDesignAuthority(undefined);
+    setDesignDocuments({});
     setLaunchStatuses(Object.fromEntries(items.map((item) => [item.id, 'checking'])));
 
     const protocolVersion = project.desktopDevelopment?.protocolVersion;
@@ -233,9 +247,9 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
     const loadLaunchStates = async () => {
       let shouldPoll = false;
       try {
-        const designRequest = shouldLoadDesignBranches
+        const designRequest = shouldLoadDesignAuthority
           ? apiFetch(
-              `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/design-branches?protocolVersion=${protocolVersion}`,
+              `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/design-authority?protocolVersion=${protocolVersion}`,
             )
           : Promise.resolve(null);
         const [response, designResponse] = await Promise.all([
@@ -245,10 +259,13 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
           designRequest,
         ]);
         if (!response.ok) throw new Error(`状态读取失败: ${response.status}`);
-        if (designResponse && !designResponse.ok) throw new Error(`方案分支读取失败: ${designResponse.status}`);
+        if (designResponse && !designResponse.ok) throw new Error(`方案依据读取失败: ${designResponse.status}`);
         const body = (await response.json()) as { states: LaunchState[] };
         const designBody = designResponse
-          ? ((await designResponse.json()) as { designBranches: FeatureDesignBranchView[] })
+          ? ((await designResponse.json()) as {
+              authority: ProjectDesignAuthorityView;
+              features: FeatureDesignDocumentsView[];
+            })
           : null;
         if (cancelled) return;
         shouldPoll = body.states.some(
@@ -265,11 +282,10 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
         );
         setLaunchErrors({});
         if (designBody) {
-          shouldLoadDesignBranches = false;
-          setDesignBranches(
-            Object.fromEntries(
-              designBody.designBranches.map((designBranch) => [designBranch.backlogItemId, designBranch]),
-            ),
+          shouldLoadDesignAuthority = false;
+          setDesignAuthority(designBody.authority);
+          setDesignDocuments(
+            Object.fromEntries(designBody.features.map((feature) => [feature.backlogItemId, feature])),
           );
         }
       } catch (error) {
@@ -298,11 +314,11 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
   }, [items, launchRefreshKey, project.desktopDevelopment?.protocolVersion, project.id]);
 
   const saveDesignBranch = async () => {
-    if (!designEditor || !project.desktopDevelopment) return;
+    if (!designEditor || designEditor.kind !== 'branch' || !project.desktopDevelopment) return;
     setDesignEditor((current) => (current ? { ...current, saving: true, error: undefined } : current));
     try {
       const response = await apiFetch(
-        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(designEditor.itemId)}/design-branch`,
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/design-branch`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -312,17 +328,51 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
           }),
         },
       );
-      const body = (await response.json()) as { designBranch?: FeatureDesignBranchView; error?: string };
-      if (!response.ok || !body.designBranch) throw new Error(body.error ?? '方案分支保存失败');
-      const saved = body.designBranch;
-      setDesignBranches((current) => ({ ...current, [saved.backlogItemId]: saved }));
-      setNotice(`${saved.featureId} 已绑定方案分支 ${saved.branch}@${saved.exactSha?.slice(0, 12)}。`);
+      const body = (await response.json()) as { designAuthority?: ProjectDesignAuthorityView; error?: string };
+      if (!response.ok || !body.designAuthority) throw new Error(body.error ?? '方案分支保存失败');
+      const saved = body.designAuthority;
+      setDesignAuthority(saved);
+      setNotice(`项目已绑定共用方案分支 ${saved.branch}@${saved.exactSha?.slice(0, 12)}。`);
       setDesignEditor(null);
       setLaunchRefreshKey((current) => current + 1);
     } catch (error) {
       setDesignEditor((current) =>
         current
           ? { ...current, saving: false, error: error instanceof Error ? error.message : '方案分支保存失败' }
+          : current,
+      );
+    }
+  };
+
+  const saveDesignDocuments = async () => {
+    if (!designEditor || designEditor.kind !== 'documents' || !designEditor.itemId || !project.desktopDevelopment) {
+      return;
+    }
+    setDesignEditor((current) => (current ? { ...current, saving: true, error: undefined } : current));
+    try {
+      const documents = designEditor.documents
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const response = await apiFetch(
+        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(designEditor.itemId)}/design-documents`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ protocolVersion: project.desktopDevelopment.protocolVersion, documents }),
+        },
+      );
+      const body = (await response.json()) as { designDocuments?: FeatureDesignDocumentsView; error?: string };
+      if (!response.ok || !body.designDocuments) throw new Error(body.error ?? '设计文档保存失败');
+      const saved = body.designDocuments;
+      setDesignDocuments((current) => ({ ...current, [saved.backlogItemId]: saved }));
+      setNotice(`${saved.featureId} 已指定 ${saved.documents.length} 份设计文档。`);
+      setDesignEditor(null);
+      setLaunchRefreshKey((current) => current + 1);
+    } catch (error) {
+      setDesignEditor((current) =>
+        current
+          ? { ...current, saving: false, error: error instanceof Error ? error.message : '设计文档保存失败' }
           : current,
       );
     }
@@ -479,8 +529,74 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
     <div className="space-y-3" data-testid="external-project-feature-list">
       <div className="rounded-xl bg-[var(--console-shell-bg)] px-4 py-3 text-xs leading-relaxed text-cafe-secondary">
         从这里启动的功能只属于「{project.name}」。每个功能都有独立的方案讨论与 Review 会话；启动开发后，CatCafe
-        会创建并连接对应的 ChatGPT Desktop 开发任务。方案讨论用于协作，已提交的方案分支才是实现与 Review 依据。
+        会创建并连接对应的 ChatGPT Desktop 开发任务。项目共用一个已提交方案分支，每个功能从中指定自己的设计文档。
       </div>
+      <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-card-bg)] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold text-cafe">项目共用方案分支</p>
+            <p className="mt-1 text-micro text-cafe-secondary" data-testid="external-project-design-authority-ref">
+              {designAuthority?.status === 'ready'
+                ? `${designAuthority.branch}@${designAuthority.exactSha?.slice(0, 12)}`
+                : designAuthority?.branch
+                  ? `${designAuthority.branch}（不可用）`
+                  : '未配置'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setDesignEditor({
+                kind: 'branch',
+                branch: designAuthority?.branch ?? '',
+                documents: '',
+                saving: false,
+              })
+            }
+            disabled={!project.desktopDevelopment}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+            data-testid="external-project-design-branch"
+          >
+            配置方案分支
+          </button>
+        </div>
+        {designAuthority?.error && <p className="mt-2 text-xs text-conn-red-text">{designAuthority.error}</p>}
+      </div>
+      {designEditor?.kind === 'branch' && (
+        <div className="rounded-xl border border-[var(--console-border)] bg-[var(--console-shell-bg)] px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-cafe">绑定项目共用方案分支</span>
+            <button type="button" onClick={() => setDesignEditor(null)} className="text-xs text-cafe-secondary">
+              取消
+            </button>
+          </div>
+          <p className="mb-2 text-micro text-cafe-secondary">
+            只读取本地已提交分支，不切换工作区。所有功能共用这一分支；开发分支仍可共用或各自创建。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={designEditor.branch}
+              onChange={(event) =>
+                setDesignEditor((current) => (current ? { ...current, branch: event.target.value } : current))
+              }
+              placeholder="design/specs"
+              disabled={designEditor.saving}
+              className="min-w-72 flex-1 rounded-lg border border-[var(--console-border)] bg-[var(--console-card-bg)] px-3 py-2 text-xs text-cafe disabled:opacity-60"
+              data-testid="external-project-design-input"
+            />
+            <button
+              type="button"
+              onClick={() => void saveDesignBranch()}
+              disabled={designEditor.saving || !designEditor.branch.trim()}
+              className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-50"
+              data-testid="external-project-design-save"
+            >
+              {designEditor.saving ? '校验中…' : '校验并保存'}
+            </button>
+          </div>
+          {designEditor.error && <p className="mt-2 text-xs text-conn-red-text">{designEditor.error}</p>}
+        </div>
+      )}
       {notice && (
         <output
           className="rounded-xl bg-[var(--semantic-success-surface)] px-4 py-3 text-xs text-[var(--semantic-success-text)]"
@@ -497,51 +613,55 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
               status={launchStatuses[item.id] ?? 'checking'}
               error={launchErrors[item.id]}
               desktopBound={Boolean(project.desktopDevelopment)}
-              designBranch={designBranches[item.id]}
+              designAuthority={designAuthority}
+              designDocuments={designDocuments[item.id]}
               onStart={(selected) => void startDevelopment(selected)}
               onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
               onBindThread={(selected, kind) => void openBindingEditor(selected, kind)}
-              onEditDesignBranch={(selected) =>
+              onEditDesignDocuments={(selected) =>
                 setDesignEditor({
+                  kind: 'documents',
                   itemId: selected.id,
-                  branch: designBranches[selected.id]?.branch ?? '',
+                  branch: '',
+                  documents: designDocuments[selected.id]?.documents.join('\n') ?? '',
                   saving: false,
                 })
               }
             />
-            {designEditor?.itemId === item.id && (
+            {designEditor?.kind === 'documents' && designEditor.itemId === item.id && (
               <div
                 className="rounded-xl border border-[var(--console-border)] bg-[var(--console-shell-bg)] px-4 py-3"
                 data-testid={`external-project-design-editor-${item.id}`}
               >
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-cafe">绑定方案分支</span>
+                  <span className="text-xs font-semibold text-cafe">指定本功能的设计文档</span>
                   <button type="button" onClick={() => setDesignEditor(null)} className="text-xs text-cafe-secondary">
                     取消
                   </button>
                 </div>
                 <p className="mb-2 text-micro text-cafe-secondary">
-                  只读取本地已提交分支，不会切换或修改工作区。分支提交更新后，CatCafe 会自动读取新的精确 SHA。
+                  每行一个仓库相对路径。Review 会冻结共用方案分支的精确提交，并只按这些文档检视本功能。
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    value={designEditor.branch}
+                <div className="flex flex-wrap items-start gap-2">
+                  <textarea
+                    value={designEditor.documents}
                     onChange={(event) =>
-                      setDesignEditor((current) => (current ? { ...current, branch: event.target.value } : current))
+                      setDesignEditor((current) => (current ? { ...current, documents: event.target.value } : current))
                     }
-                    placeholder="design/f006-feature-name"
+                    placeholder={'docs/design/feature-a.md\ndocs/adr/012-feature-a.md'}
                     disabled={designEditor.saving}
+                    rows={3}
                     className="min-w-72 flex-1 rounded-lg border border-[var(--console-border)] bg-[var(--console-card-bg)] px-3 py-2 text-xs text-cafe disabled:opacity-60"
                     data-testid={`external-project-design-input-${item.id}`}
                   />
                   <button
                     type="button"
-                    onClick={() => void saveDesignBranch()}
-                    disabled={designEditor.saving || !designEditor.branch.trim()}
+                    onClick={() => void saveDesignDocuments()}
+                    disabled={designEditor.saving || !designEditor.documents.trim()}
                     className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-50"
                     data-testid={`external-project-design-save-${item.id}`}
                   >
-                    {designEditor.saving ? '校验中…' : '校验并保存'}
+                    {designEditor.saving ? '校验中…' : '校验并保存文档'}
                   </button>
                 </div>
                 {designEditor.error && <p className="mt-2 text-xs text-conn-red-text">{designEditor.error}</p>}

@@ -14,9 +14,11 @@ export interface ReviewRound {
   readonly workId: string;
   readonly attemptId: string;
   readonly exactSha: string;
-  /** Per-feature plan revision reviewed alongside exactSha. Absent only on legacy rounds. */
+  /** Project-wide plan revision reviewed alongside exactSha. Absent only on legacy rounds. */
   readonly designBranch?: string;
   readonly designExactSha?: string;
+  /** Feature-specific repository-relative design documents frozen for this round. */
+  readonly designDocuments?: readonly string[];
   readonly author: ManagedWorkExecutorActor;
   readonly reviewerCatIds: readonly CatId[];
   readonly recorderCatId: CatId;
@@ -33,6 +35,14 @@ export interface ReviewRound {
 
 export function buildReviewDesignRef(designBranch: string, designExactSha: string): string {
   return `git:refs/heads/${designBranch.trim()}@${designExactSha.trim().toLowerCase()}`;
+}
+
+export function buildReviewDesignDocumentRef(
+  designBranch: string,
+  designExactSha: string,
+  documentPath: string,
+): string {
+  return `${buildReviewDesignRef(designBranch, designExactSha)}:${documentPath.trim()}`;
 }
 
 export interface ReviewDraftFinding {

@@ -74,7 +74,7 @@ approval stale，必须开新 round。
 | `headChangeCause` | `local-gate` / `cloud-finding` / `ci-fix` / `rebase` / `pr-meta` |
 | `nextGateOwner` | `local-peer` / `cloud` / `ci` / `author` / `guardian` |
 
-ChatGPT round 追加记录：`reviewRound`、`reviewedCodeHead`、`designBranch`、`designExactSha`、
+ChatGPT round 追加记录：`reviewRound`、`reviewedCodeHead`、`designBranch`、`designExactSha`、`designDocuments`、
 `roundVerdict`、`openFindings` 与 `recorderCatId`。缺任一项不得消费 `approved`。
 
 **判定规则**：

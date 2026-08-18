@@ -1,7 +1,7 @@
 ---
 cell_id: desktop-development-loop
 title: Desktop Development Loop
-summary: F289-owned project binding, per-feature authoritative design branch and discussion/review views, Desktop task/session projection, and guarded merge rollout over existing managed-work and review truth.
+summary: F289-owned project binding, one shared authoritative design branch plus per-feature design documents and discussion/review views, Desktop task/session projection, and guarded merge rollout over existing managed-work and review truth.
 description: Project-scoped bridge between Cat Café design/review and ChatGPT Desktop implementation, without becoming a second workflow engine.
 description_source: model
 description_author: cat-idwxwjba
@@ -26,7 +26,7 @@ doc_anchors:
   - docs/features/F289-chatgpt-desktop-development-loop.md
   - docs/design/F289-chatgpt-desktop-development-loop.md
   - feature-specs/2026-08-05-chatgpt-desktop-development-loop.md
-static_scan_hints: [DesktopDevelopmentProjectBinding, FeatureDesignBranchView, ProjectReviewHub, chatgpt-desktop-dev, successfulManualPilotCount, desktop:development-loop, ReviewRound]
+static_scan_hints: [DesktopDevelopmentProjectBinding, ProjectDesignAuthorityView, FeatureDesignDocumentsView, ProjectReviewHub, chatgpt-desktop-dev, successfulManualPilotCount, desktop:development-loop, ReviewRound]
 cited_by:
   - {feature: F289, date: 2026-08-07, delta: "new project binding and deterministic one-Review-Hub foundation"}
 ---
@@ -43,7 +43,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 ## Durable Invariants
 
-1. A project has at most one Desktop development binding; each imported backlog feature has one authoritative local committed design branch, one deterministic discussion thread and one deterministic Review thread.
+1. A project has at most one Desktop development binding and one authoritative local committed design branch; each imported backlog feature selects one or more design documents from it and has one deterministic discussion thread and one deterministic Review thread.
 2. Feature-thread soft deletion restores the same identity; a code SHA or delivery cycle never creates another visible Review thread for that feature. The legacy project Review Hub remains callback-compatible for historical in-flight rounds only.
 3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works, and the second accepted pilot atomically enables it.
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
@@ -52,7 +52,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 7. Missing F275/F253/F286 capabilities fail closed at their mutation boundary; F289 does not invent fallback identities or ledgers, and never falls through to F211 by impersonating a Cat session.
 8. A changes-requested round cannot start attempt 16/31/... without the matching user continuation evidence, and cannot pass an unresolved architecture-decision finding without a persisted user decision.
 9. A Desktop wake remains in the durable outbox until the deterministic delivery ID or objective is observable in an actual bound-task turn; IPC acknowledgement or goal metadata alone is insufficient. A dormant binding is opened in place with bounded owner-discovery retry and is never replaced.
-10. Every implementation and Review wake carries the exact design branch commit. A serious design disagreement pauses the loop; continuing with a changed design requires that branch SHA to advance, while keeping the original requires the reviewed SHA to remain current.
+10. Every implementation and Review wake carries the exact shared design-branch commit plus the feature's selected design documents. A serious design disagreement pauses the loop; continuing with a changed design requires that branch SHA to advance, while keeping the original requires the reviewed SHA to remain current.
 
 ## Extend By
 
@@ -71,4 +71,4 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 ## Static Scan Hints
 
-Watch for `DesktopDevelopmentProjectBinding`, `FeatureDesignBranchView`, `designExactSha`, `project-feature-plan:`, `project-feature-review:`, legacy `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `review_continuation_approved`, `architecture_decision_recorded`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.
+Watch for `DesktopDevelopmentProjectBinding`, `ProjectDesignAuthorityView`, `FeatureDesignDocumentsView`, `designExactSha`, `project-feature-plan:`, `project-feature-review:`, legacy `project-review-hub:`, `chatgpt-desktop-dev`, `successfulManualPilotCount`, `review_continuation_approved`, `architecture_decision_recorded`, `ReviewRound`, `ResumePacket`, new work/job identity fields, local path leakage, and any code that creates a Review thread per SHA.

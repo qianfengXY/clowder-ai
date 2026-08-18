@@ -144,12 +144,21 @@ export interface FeatureWorkspaceThreadCandidatesView {
   readonly candidates: readonly FeatureWorkspaceThreadCandidate[];
 }
 
-export interface FeatureDesignBranchView {
+/** One committed design branch shared by every feature in an external project. */
+export interface ProjectDesignAuthorityView {
+  readonly projectId: string;
+  readonly branch: string | null;
+  readonly exactSha: string | null;
+  readonly status: 'missing' | 'ready' | 'unavailable';
+  readonly error?: string;
+}
+
+/** Repository-relative design documents selected for one feature. */
+export interface FeatureDesignDocumentsView {
   readonly projectId: string;
   readonly backlogItemId: string;
   readonly featureId: string;
-  readonly branch: string | null;
-  readonly exactSha: string | null;
+  readonly documents: readonly string[];
   readonly status: 'missing' | 'ready' | 'unavailable';
   readonly error?: string;
 }
@@ -206,11 +215,14 @@ export interface DesktopDevelopmentResumePacket {
   readonly projectId: string;
   readonly repository: GitHubRepositoryIdentity;
   readonly defaultBranch: string;
-  /** Per-feature design branch. Its exact commit, not a discussion thread, is the implementation authority. */
+  /** Project-wide shared design branch. Its exact commit, not a discussion thread, is implementation authority. */
   readonly designBranch: string | null;
   readonly designExactSha: string | null;
+  /** Feature-specific documents read from designExactSha. */
+  readonly designDocuments: readonly string[];
   /** Design commit captured by the current Review round. */
   readonly reviewDesignExactSha: string | null;
+  readonly reviewDesignDocuments: readonly string[];
   readonly workId: string;
   readonly attemptId: string;
   readonly attemptNumber: number;

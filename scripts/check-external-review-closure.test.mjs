@@ -18,9 +18,10 @@ describe('review completion dual-route hard guard', () => {
     if (typeof reviewGuard.checkChatgptReviewRoundLanguage !== 'function') return;
 
     const valid = reviewGuard.checkChatgptReviewRoundLanguage(`
-      固定 \`Review Round\`、实现提交 \`exactSha\`、\`方案分支\` 与 \`方案提交 designExactSha\`。
+      固定 \`Review Round\`、实现提交 \`exactSha\`、\`方案分支\`、\`方案提交 designExactSha\` 与当前功能的 \`设计文档\` 清单。
       方案讨论会话可以提供背景，但不是权威方案。
       每条 finding 引用 git:refs/heads/<方案分支>@<完整 designExactSha>。
+      同时引用 git:refs/heads/<方案分支>@<完整 designExactSha>:<适用设计文档路径>。
       独立检视时 Barrier 前不得读取或推测其他 reviewer 意见。
       调用 \`cat_cafe_review_draft_submit\`、\`cat_cafe_review_independent_finish\`、
       \`cat_cafe_review_cross_finish\` 和 \`cat_cafe_review_consensus_publish\`。

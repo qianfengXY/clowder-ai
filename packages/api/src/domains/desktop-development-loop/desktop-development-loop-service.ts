@@ -2,6 +2,7 @@ import {
   type BacklogItem,
   type BacklogStatus,
   buildProjectReviewHubId,
+  buildReviewDesignDocumentRef,
   buildReviewDesignRef,
   type CatId,
   CHATGPT_DESKTOP_DEVELOPMENT_ACTOR,
@@ -13,10 +14,11 @@ import {
   type DesktopDevelopmentWorkflowNode,
   type DesktopReviewConsensusAuthorization,
   type DesktopSessionBinding,
-  type FeatureDesignBranchView,
+  type FeatureDesignDocumentsView,
   type ManagedWorkConsumerSnapshot,
   type ManagedWorkLifecycle,
   normalizeGitHubRepository,
+  type ProjectDesignAuthorityView,
   type PublicDesktopDevelopmentProject,
   type ReviewRoundSafeView,
   toPublicDesktopDevelopmentProject,
@@ -30,7 +32,15 @@ import type { ExternalProjectStore } from '../projects/external-project-store.js
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
 import type { IReviewRoundStore } from '../review-coordination/ReviewRoundStore.js';
 import { buildReviewCompletionObjective, type DesktopTaskLauncher } from './codex-desktop-task-launcher.js';
-import { type DesignBranchResolver, type ResolvedDesignBranch, resolveDesignBranch } from './design-branch-resolver.js';
+import {
+  type DesignBranchResolver,
+  type DesignDocumentsResolver,
+  normalizeDesignDocuments,
+  type ResolvedDesignAuthority,
+  type ResolvedDesignBranch,
+  resolveDesignBranch,
+  resolveDesignDocuments,
+} from './design-branch-resolver.js';
 import type { DesktopSessionStore } from './desktop-session-store.js';
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import { featureTitleForReview } from './review-round-display-context.js';
@@ -203,6 +213,14 @@ export interface DesktopDevelopmentLaunchState {
     | { readonly status: 'failed'; readonly error: string };
 }
 
+interface ProjectFeatureDesignAuthorityView {
+  readonly branch: string | null;
+  readonly exactSha: string | null;
+  readonly documents: readonly string[];
+  readonly status: 'missing' | 'ready';
+  readonly error?: string;
+}
+
 function terminalLaunchStatus(lifecycle: ManagedWorkLifecycle): 'completed' | 'rejected' | null {
   if (lifecycle === 'accepted') return 'completed';
   if (lifecycle === 'rejected') return 'rejected';
@@ -231,51 +249,74 @@ export class DesktopDevelopmentLoopService {
     private readonly desktopTaskLauncher?: DesktopTaskLauncher,
     private readonly workspacePathVerifier: WorkspacePathVerifier = verifyWorkspacePath,
     private readonly designBranchResolver: DesignBranchResolver = resolveDesignBranch,
+    private readonly designDocumentsResolver: DesignDocumentsResolver = resolveDesignDocuments,
   ) {}
 
-  async listFeatureDesignBranches(input: {
+  async readProjectDesignAuthority(input: {
     protocolVersion: number;
     ownerUserId: string;
     projectId: string;
-  }): Promise<readonly FeatureDesignBranchView[]> {
+  }): Promise<{
+    readonly authority: ProjectDesignAuthorityView;
+    readonly features: readonly FeatureDesignDocumentsView[];
+  }> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const items = (await this.backlogStore.listByUser(input.ownerUserId)).filter(
       (item) => item.projectId === input.projectId && featureIdForItem(item) !== null,
     );
-    const branches = await this.externalProjects.getFeatureDesignBranches(input.projectId);
-    return Promise.all(items.map((item) => this.projectFeatureDesignBranchView(project, item, branches[item.id])));
+    const [configuredBranch, documentsByFeature] = await Promise.all([
+      this.externalProjects.getProjectDesignBranch(input.projectId),
+      this.externalProjects.getFeatureDesignDocuments(input.projectId),
+    ]);
+    const authority = await this.projectDesignAuthorityView(project, configuredBranch);
+    const features = await Promise.all(
+      items.map((item) => this.featureDesignDocumentsView(project, item, documentsByFeature[item.id] ?? [], authority)),
+    );
+    return { authority, features };
   }
 
-  async updateFeatureDesignBranch(input: {
+  async updateProjectDesignBranch(input: {
+    protocolVersion: number;
+    ownerUserId: string;
+    projectId: string;
+    branch: string;
+  }): Promise<ProjectDesignAuthorityView> {
+    this.assertProtocol(input.protocolVersion);
+    const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
+    const branch = input.branch.trim();
+    const resolved = await this.designBranchResolver({
+      sourcePath: project.sourcePath,
+      repository: project.desktopDevelopment.repository,
+      branch,
+    });
+    await this.externalProjects.setProjectDesignBranch(input.projectId, resolved.branch);
+    return this.readyProjectDesignAuthorityView(input.projectId, resolved);
+  }
+
+  async updateFeatureDesignDocuments(input: {
     protocolVersion: number;
     ownerUserId: string;
     projectId: string;
     backlogItemId: string;
-    branch: string;
-  }): Promise<FeatureDesignBranchView> {
+    documents: readonly string[];
+  }): Promise<FeatureDesignDocumentsView> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const item = (await this.backlogStore.listByUser(input.ownerUserId)).find(
       (candidate) => candidate.id === input.backlogItemId && candidate.projectId === input.projectId,
     );
     if (!item || !featureIdForItem(item)) throw new Error('Project feature not found');
-
-    const branch = input.branch.trim();
-    const existing = (await this.externalProjects.getFeatureDesignBranches(input.projectId))[item.id];
-    if (existing && existing !== branch) {
-      const launch = await this.classifyProjectLaunchState(input.ownerUserId, input.projectId, item);
-      if (launch.status !== 'available') {
-        throw new Error('Design branch name is locked while this feature has managed work');
-      }
-    }
+    const branch = await this.externalProjects.getProjectDesignBranch(input.projectId);
+    if (!branch) throw new Error('Project design branch is not configured');
     const resolved = await this.designBranchResolver({
       sourcePath: project.sourcePath,
       repository: project.desktopDevelopment.repository,
       branch,
     });
-    await this.externalProjects.setFeatureDesignBranch(input.projectId, item.id, resolved.branch);
-    return this.readyFeatureDesignBranchView(input.projectId, item, resolved);
+    const documents = await this.designDocumentsResolver(project.sourcePath, resolved.exactSha, input.documents);
+    await this.externalProjects.setFeatureDesignDocuments(input.projectId, item.id, documents);
+    return this.readyFeatureDesignDocumentsView(input.projectId, item, documents);
   }
 
   async listProjectLaunchStates(input: {
@@ -304,7 +345,7 @@ export class DesktopDevelopmentLoopService {
     );
     if (!item) throw new Error('Project backlog item not found');
 
-    const design = await this.requireFeatureDesignBranch(project, item);
+    const design = await this.requireFeatureDesignAuthority(project, item);
 
     await Promise.all([
       this.reviewHubs.ensureForFeature(input.projectId, item.id, 'plan', input.ownerUserId),
@@ -327,6 +368,7 @@ export class DesktopDevelopmentLoopService {
           title: item.title,
           designBranch: design.branch,
           designExactSha: design.exactSha,
+          designDocuments: design.documents,
         });
         return { ...state, desktopTask };
       } catch (error) {
@@ -734,7 +776,7 @@ export class DesktopDevelopmentLoopService {
     if (!backlogItem) throw new Error('Review display context backlog item is unavailable');
     const featureId = featureIdForItem(backlogItem);
     if (!featureId) throw new Error('Review display context feature id is unavailable');
-    const design = await this.requireFeatureDesignBranch(project, backlogItem);
+    const design = await this.requireFeatureDesignAuthority(project, backlogItem);
 
     const evidence = await this.managedWork.appendEvidence({
       ...this.managedIdentity(input),
@@ -761,6 +803,7 @@ export class DesktopDevelopmentLoopService {
       exactSha,
       designBranch: design.branch,
       designExactSha: design.exactSha,
+      designDocuments: design.documents,
       author: { kind: 'external_actor', actorId: CHATGPT_DESKTOP_DEVELOPMENT_ACTOR },
       reviewerCatIds: project.desktopDevelopment.defaultReviewers,
       recorderCatId,
@@ -788,6 +831,7 @@ export class DesktopDevelopmentLoopService {
         attemptNumber: managed.attempt.attemptNumber,
         designBranch: design.branch,
         designExactSha: design.exactSha,
+        designDocuments: design.documents,
       },
     });
 
@@ -1023,7 +1067,7 @@ export class DesktopDevelopmentLoopService {
         throw new Error('Architecture decision conflicts with the recorded choice');
       return this.readWork(input, managed.state.version);
     }
-    const design = await this.requireFeatureDesignBranch(project, item);
+    const design = await this.requireFeatureDesignAuthority(project, item);
     if (
       input.decision === 'approve_plan_change' &&
       review.round.designExactSha &&
@@ -1208,8 +1252,7 @@ export class DesktopDevelopmentLoopService {
       (candidate) => candidate.id === managed.admission.producerRef && candidate.projectId === input.projectId,
     );
     if (!featureItem) throw new Error('Development-loop backlog item is unavailable');
-    const configuredBranches = await this.externalProjects.getFeatureDesignBranches(input.projectId);
-    const design = await this.projectFeatureDesignBranchView(project, featureItem, configuredBranches[featureItem.id]);
+    const design = await this.projectFeatureDesignAuthorityView(project, featureItem);
     const architectureDecisionIds = new Set(
       managed.evidence.flatMap((evidence) =>
         evidence.kind === 'architecture_decision_recorded' && evidence.exactSha === review?.round.exactSha
@@ -1217,12 +1260,16 @@ export class DesktopDevelopmentLoopService {
           : [],
       ),
     );
-    const roundDesignRef =
+    const designRefs =
       review?.round.designBranch && review.round.designExactSha
-        ? buildReviewDesignRef(review.round.designBranch, review.round.designExactSha)
+        ? buildDesignAuthorityRefs(
+            review.round.designBranch,
+            review.round.designExactSha,
+            review.round.designDocuments ?? [],
+          )
         : design.status === 'ready' && design.branch && design.exactSha
-          ? buildReviewDesignRef(design.branch, design.exactSha)
-          : null;
+          ? buildDesignAuthorityRefs(design.branch, design.exactSha, design.documents)
+          : [];
     const openFindings = (review?.findings ?? [])
       .filter((finding) => finding.status === 'open')
       .map((finding) => ({
@@ -1233,7 +1280,7 @@ export class DesktopDevelopmentLoopService {
         // Historical findings may predate exact design references. Once the
         // feature has a validated design branch, anchor them to its commit;
         // discussion threads are never promoted into implementation authority.
-        designRefs: resumeDesignRefs(finding.designRefs, roundDesignRef),
+        designRefs: resumeDesignRefs(finding.designRefs, designRefs),
         scope: finding.scope,
         architectureDecisionRecorded: architectureDecisionIds.has(finding.findingId),
         status: 'open' as const,
@@ -1268,7 +1315,9 @@ export class DesktopDevelopmentLoopService {
       defaultBranch: project.desktopDevelopment.defaultBranch,
       designBranch: design.branch,
       designExactSha: design.exactSha,
+      designDocuments: design.documents,
       reviewDesignExactSha: review?.round.designExactSha ?? null,
+      reviewDesignDocuments: review?.round.designDocuments ?? [],
       workId: managed.state.workId,
       attemptId: managed.attempt.attemptId,
       attemptNumber: managed.attempt.attemptNumber,
@@ -1420,7 +1469,7 @@ export class DesktopDevelopmentLoopService {
     if (!item) throw new Error('Development-loop backlog item is unavailable');
     const featureId = featureIdForItem(item);
     if (!featureId) throw new Error('Development-loop feature id is unavailable');
-    const design = await this.requireFeatureDesignBranch(project, item);
+    const design = await this.requireFeatureDesignAuthority(project, item);
     return {
       projectName: project.name,
       repository: project.desktopDevelopment.repository.fullName,
@@ -1430,6 +1479,7 @@ export class DesktopDevelopmentLoopService {
       attemptNumber: managed.attempt.attemptNumber,
       designBranch: design.branch,
       designExactSha: design.exactSha,
+      designDocuments: design.documents,
     };
   }
 
@@ -1493,7 +1543,7 @@ export class DesktopDevelopmentLoopService {
     if (!item) throw new Error('Review display context backlog item is unavailable');
     const featureId = featureIdForItem(item);
     if (!featureId) throw new Error('Review display context feature id is unavailable');
-    const design = await this.requireFeatureDesignBranch(project, item);
+    const design = await this.requireFeatureDesignAuthority(project, item);
     const operatorDecisions = managed.evidence
       .filter(
         (evidence) =>
@@ -1520,6 +1570,7 @@ export class DesktopDevelopmentLoopService {
         exactSha: review.round.exactSha,
         designBranch: design.branch,
         designExactSha: design.exactSha,
+        designDocuments: design.documents,
         runtimeSessionId: session.runtimeSessionId,
         operatorDecisions,
       }),
@@ -1540,18 +1591,32 @@ export class DesktopDevelopmentLoopService {
     };
   }
 
-  private async projectFeatureDesignBranchView(
+  private async projectFeatureDesignAuthorityView(
     project: Awaited<ReturnType<DesktopDevelopmentLoopService['requireConfiguredProject']>>,
     item: BacklogItem,
-    configuredBranch: string | undefined,
-  ): Promise<FeatureDesignBranchView> {
-    const featureId = featureIdForItem(item);
-    if (!featureId) throw new Error('Project feature id is unavailable');
+  ): Promise<ProjectFeatureDesignAuthorityView> {
+    const [configuredBranch, documentsByFeature] = await Promise.all([
+      this.externalProjects.getProjectDesignBranch(project.id),
+      this.externalProjects.getFeatureDesignDocuments(project.id),
+    ]);
+    const authority = await this.projectDesignAuthorityView(project, configuredBranch);
+    const feature = await this.featureDesignDocumentsView(project, item, documentsByFeature[item.id] ?? [], authority);
+    return {
+      branch: authority.branch,
+      exactSha: authority.exactSha,
+      documents: feature.documents,
+      status: authority.status === 'ready' && feature.status === 'ready' ? 'ready' : 'missing',
+      error: authority.error ?? feature.error,
+    };
+  }
+
+  private async projectDesignAuthorityView(
+    project: Awaited<ReturnType<DesktopDevelopmentLoopService['requireConfiguredProject']>>,
+    configuredBranch: string | null,
+  ): Promise<ProjectDesignAuthorityView> {
     if (!configuredBranch) {
       return {
         projectId: project.id,
-        backlogItemId: item.id,
-        featureId,
         branch: null,
         exactSha: null,
         status: 'missing',
@@ -1563,12 +1628,10 @@ export class DesktopDevelopmentLoopService {
         repository: project.desktopDevelopment.repository,
         branch: configuredBranch,
       });
-      return this.readyFeatureDesignBranchView(project.id, item, resolved);
+      return this.readyProjectDesignAuthorityView(project.id, resolved);
     } catch (error) {
       return {
         projectId: project.id,
-        backlogItemId: item.id,
-        featureId,
         branch: configuredBranch,
         exactSha: null,
         status: 'unavailable',
@@ -1577,36 +1640,86 @@ export class DesktopDevelopmentLoopService {
     }
   }
 
-  private readyFeatureDesignBranchView(
+  private readyProjectDesignAuthorityView(
     projectId: string,
-    item: BacklogItem,
     resolved: ResolvedDesignBranch,
-  ): FeatureDesignBranchView {
-    const featureId = featureIdForItem(item);
-    if (!featureId) throw new Error('Project feature id is unavailable');
+  ): ProjectDesignAuthorityView {
     return {
       projectId,
-      backlogItemId: item.id,
-      featureId,
       branch: resolved.branch,
       exactSha: resolved.exactSha,
       status: 'ready',
     };
   }
 
-  private async requireFeatureDesignBranch(
+  private async featureDesignDocumentsView(
     project: Awaited<ReturnType<DesktopDevelopmentLoopService['requireConfiguredProject']>>,
     item: BacklogItem,
-  ): Promise<ResolvedDesignBranch> {
-    const configured = (await this.externalProjects.getFeatureDesignBranches(project.id))[item.id];
-    if (!configured) {
-      throw new Error('Feature design branch is not configured; bind a committed design branch before continuing');
+    configuredDocuments: readonly string[],
+    authority: ProjectDesignAuthorityView,
+  ): Promise<FeatureDesignDocumentsView> {
+    const featureId = featureIdForItem(item);
+    if (!featureId) throw new Error('Project feature id is unavailable');
+    if (configuredDocuments.length === 0) {
+      return { projectId: project.id, backlogItemId: item.id, featureId, documents: [], status: 'missing' };
     }
-    return this.designBranchResolver({
+    if (authority.status !== 'ready' || !authority.exactSha) {
+      return {
+        projectId: project.id,
+        backlogItemId: item.id,
+        featureId,
+        documents: normalizeDesignDocuments(configuredDocuments),
+        status: 'unavailable',
+        error: authority.error ?? 'Project design branch is unavailable',
+      };
+    }
+    try {
+      const documents = await this.designDocumentsResolver(project.sourcePath, authority.exactSha, configuredDocuments);
+      return this.readyFeatureDesignDocumentsView(project.id, item, documents);
+    } catch (error) {
+      return {
+        projectId: project.id,
+        backlogItemId: item.id,
+        featureId,
+        documents: normalizeDesignDocuments(configuredDocuments),
+        status: 'unavailable',
+        error: error instanceof Error ? error.message : 'Design documents are unavailable',
+      };
+    }
+  }
+
+  private readyFeatureDesignDocumentsView(
+    projectId: string,
+    item: BacklogItem,
+    documents: readonly string[],
+  ): FeatureDesignDocumentsView {
+    const featureId = featureIdForItem(item);
+    if (!featureId) throw new Error('Project feature id is unavailable');
+    return { projectId, backlogItemId: item.id, featureId, documents, status: 'ready' };
+  }
+
+  private async requireFeatureDesignAuthority(
+    project: Awaited<ReturnType<DesktopDevelopmentLoopService['requireConfiguredProject']>>,
+    item: BacklogItem,
+  ): Promise<ResolvedDesignAuthority> {
+    const [configuredBranch, documentsByFeature] = await Promise.all([
+      this.externalProjects.getProjectDesignBranch(project.id),
+      this.externalProjects.getFeatureDesignDocuments(project.id),
+    ]);
+    if (!configuredBranch) {
+      throw new Error('Project design branch is not configured; bind the shared committed branch before continuing');
+    }
+    const configuredDocuments = documentsByFeature[item.id] ?? [];
+    if (configuredDocuments.length === 0) {
+      throw new Error('Feature design documents are not configured; select design documents before continuing');
+    }
+    const resolved = await this.designBranchResolver({
       sourcePath: project.sourcePath,
       repository: project.desktopDevelopment.repository,
-      branch: configured,
+      branch: configuredBranch,
     });
+    const documents = await this.designDocumentsResolver(project.sourcePath, resolved.exactSha, configuredDocuments);
+    return { ...resolved, documents };
   }
 
   private async requireProject(projectId: string, ownerUserId: string) {
@@ -1688,6 +1801,7 @@ function buildManualWorkflowResumeObjective(input: {
   readonly runtimeSessionId: string;
   readonly designBranch: string;
   readonly designExactSha: string;
+  readonly designDocuments: readonly string[];
 }): string {
   return [
     `[开发闭环系统消息] ${input.projectName} · ${input.featureId} · ${input.featureTitle}`,
@@ -1701,6 +1815,7 @@ function buildManualWorkflowResumeObjective(input: {
     `runtimeSessionId：${input.runtimeSessionId}`,
     `方案分支：${input.designBranch}`,
     `方案提交：${input.designExactSha}`,
+    `设计文档：${input.designDocuments.join('、')}`,
     '',
     '请在原绑定任务中读取最新 Resume Packet，只执行服务端返回的 nextLegalActions。',
     '实现必须以该方案提交为准；方案讨论会话只用于讨论，不是实现依据。',
@@ -1713,7 +1828,7 @@ function deriveWorkflowNodes(input: {
   readonly session: DesktopSessionBinding;
   readonly review: ReviewRoundSafeView | null;
   readonly derived: DesktopDevelopmentDerivedState;
-  readonly design: FeatureDesignBranchView;
+  readonly design: ProjectFeatureDesignAuthorityView;
 }): readonly DesktopDevelopmentWorkflowNode[] {
   const context = buildWorkflowProjectionContext(input);
   return [
@@ -1737,7 +1852,7 @@ interface WorkflowProjectionContext {
   readonly mergedAt: number | null;
   readonly acceptanceAt: number | null;
   readonly consensusApproved: boolean;
-  readonly design: FeatureDesignBranchView;
+  readonly design: ProjectFeatureDesignAuthorityView;
 }
 
 function buildWorkflowProjectionContext(input: {
@@ -1745,7 +1860,7 @@ function buildWorkflowProjectionContext(input: {
   readonly session: DesktopSessionBinding;
   readonly review: ReviewRoundSafeView | null;
   readonly derived: DesktopDevelopmentDerivedState;
-  readonly design: FeatureDesignBranchView;
+  readonly design: ProjectFeatureDesignAuthorityView;
 }): WorkflowProjectionContext {
   const attemptId = input.managed.attempt.attemptId;
   const review = input.review?.round.attemptId === attemptId && input.review.currentForWork ? input.review : null;
@@ -1928,9 +2043,20 @@ function latestEvidenceAt(
   return latest;
 }
 
-function resumeDesignRefs(designRefs: readonly string[], designRef: string | null): readonly string[] {
+function buildDesignAuthorityRefs(
+  designBranch: string,
+  designExactSha: string,
+  designDocuments: readonly string[],
+): readonly string[] {
+  return [
+    buildReviewDesignRef(designBranch, designExactSha),
+    ...designDocuments.map((documentPath) => buildReviewDesignDocumentRef(designBranch, designExactSha, documentPath)),
+  ];
+}
+
+function resumeDesignRefs(designRefs: readonly string[], fallbackRefs: readonly string[]): readonly string[] {
   if (designRefs.length > 0) return designRefs;
-  return designRef ? [designRef] : [];
+  return fallbackRefs;
 }
 
 interface DesktopDevelopmentStateInput {

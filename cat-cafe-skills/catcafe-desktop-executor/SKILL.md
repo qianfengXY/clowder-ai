@@ -18,8 +18,8 @@ triggers:
 
 这条技能把 ChatGPT Desktop 当作外部实现者连接到 Cat Café 的项目、managed work 和 ReviewRound。
 Cat Café 保管项目、工作、Review 与验收真相；Desktop 只用原生本地文件与 Git 能力改代码，并通过严格 MCP
-报告状态。聊天记录、PR、窗口 ID 和 Scheduled Task 引用都不是工作身份；实现依据是 Resume Packet 中每功能
-方案分支捕获的精确提交，而不是方案讨论会话。
+报告状态。聊天记录、PR、窗口 ID 和 Scheduled Task 引用都不是工作身份；实现依据是 Resume Packet 中项目共用
+方案分支捕获的精确提交，以及为当前功能指定的设计文档，而不是方案讨论会话。
 
 ## 启动前提
 
@@ -61,9 +61,10 @@ Cat Café 保管项目、工作、Review 与验收真相；Desktop 只用原生�
 
 连接后只执行 Resume Packet 的 `nextLegalActions`。不要从旧聊天、旧卡片或记忆推断当前阶段。
 
-Resume Packet 必须同时给出非空 `designBranch` 与 `designExactSha`。在不 checkout、不移动分支的前提下读取这个
-精确提交中的方案文件，并确认当前任务的 Feature ID、实现边界与验收条件。方案分支之后移动时，重新读取 Resume
-Packet；不得把方案讨论会话里的未提交想法当作新方案。
+Resume Packet 必须同时给出非空 `designBranch`、`designExactSha` 与 `designDocuments`。`designBranch` 是项目级
+唯一共用方案分支，不是当前功能的开发分支；只在其精确提交中读取 `designDocuments` 列出的文件，并确认当前任务
+的 Feature ID、实现边界与验收条件。方案分支之后移动时重新读取 Resume Packet；不得把方案讨论会话里的未提交
+想法当作新方案，也不得擅自把其他功能文档加入实现范围。
 
 当 `phase=fix_required` / `nextLegalActions=[start_fix_attempt]` 时，先用当前 Resume Packet 的 attempt、
 managed-work version 和 binding epoch 再调用一次 `cat_cafe_development_work_connect`。服务端会幂等创建下一个
@@ -73,7 +74,8 @@ F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `at
 当 `phase=awaiting_design_branch`、`phase=awaiting_review_continuation` 或
 `phase=awaiting_architecture_decision` 时立即停止 Desktop 写入：
 
-- `configure_design_branch` 只能由用户在 Cat Café 功能列表绑定本地已提交方案分支；Desktop 不自造分支名。
+- `configure_design_branch` 只能由用户在 Cat Café 功能列表绑定项目共用的本地已提交方案分支，并为功能选择设计
+  文档；Desktop 不自造方案分支名或文档清单。
 - `request_review_continuation_approval` 只允许用户在 Cat Café 界面批准下一组最多 15 次 Review；Desktop 不代批、
   不重连、不中途创建 attempt。
 - `request_user_architecture_decision` 表示 Review 与方案分支有重大分歧。用户可以保持当前方案，或和猫猫修改并提交
@@ -84,8 +86,9 @@ F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `at
 
 在项目的永久 worktree 中使用 ChatGPT Desktop 原生文件、终端和 Git 能力：
 
-1. 确认 repository、实现 branch、base SHA、方案分支与方案 SHA 都和 Resume Packet 一致。
-2. 严格按 `designExactSha` 中的方案实现，并运行风险匹配测试；每次系统任务都重新核对这个依据。
+1. 确认 repository、实现 branch、base SHA、共用方案分支、方案 SHA 与设计文档都和 Resume Packet 一致。实现
+   branch 可由多个功能共用，也可为当前功能单独创建，不能据此反推方案分支。
+2. 严格按 `designExactSha` 中列出的 `designDocuments` 实现，并运行风险匹配测试；每次系统任务都重新核对依据。
 3. 提交所有准备交付的改动，确认 worktree 的 current SHA 等于 last committed SHA。
 4. 调用 `cat_cafe_development_implementation_report` 报告完整 commit SHA。
 
@@ -117,9 +120,10 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
-- 只实现 `scope=plan_conformance` 且引用 `git:refs/heads/<designBranch>@<designExactSha>` 的 finding；经用户裁决的架构 finding 必须严格服从
+- 只实现 `scope=plan_conformance` 且同时引用 `git:refs/heads/<designBranch>@<designExactSha>` 与该功能已选设计文档
+  ref 的 finding；经用户裁决的架构 finding 必须严格服从
   Cat Café 记录的决定。禁止把 Review 中新增的个人偏好、方案外重构或需求扩张带入实现。
-- 对启用该约束前已落库的历史 finding，只能作为迁移证据；继续实现前仍必须先配置并读取方案分支。
+- 对启用该约束前已落库的历史 finding，只能作为迁移证据；继续实现前仍必须配置共用方案分支和功能设计文档。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
 - 每个新 SHA 都必须开启完整的新 ReviewRound；旧 SHA 的批准不能沿用。
 

@@ -197,6 +197,7 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
       normalized.workId,
       normalized.exactSha,
       ...(normalized.designExactSha ? [normalized.designExactSha] : []),
+      ...(normalized.designDocuments ?? []),
     ]);
     const creationFingerprint = createFingerprint(normalized);
     const legacyCreationFingerprint = createFingerprint({ ...normalized, reviewThreadId: undefined });
@@ -208,7 +209,11 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
       attemptId: normalized.attemptId,
       exactSha: normalized.exactSha,
       ...(normalized.designBranch && normalized.designExactSha
-        ? { designBranch: normalized.designBranch, designExactSha: normalized.designExactSha }
+        ? {
+            designBranch: normalized.designBranch,
+            designExactSha: normalized.designExactSha,
+            ...(normalized.designDocuments ? { designDocuments: normalized.designDocuments } : {}),
+          }
         : {}),
       author: normalized.author,
       reviewerCatIds: normalized.reviewerCatIds,
@@ -397,11 +402,12 @@ export class RedisReviewRoundStore implements IReviewRoundStore {
 
 function normalizeCreate(input: CreateReviewRoundInput): Omit<
   Required<CreateReviewRoundInput>,
-  'reviewThreadId' | 'designBranch' | 'designExactSha'
+  'reviewThreadId' | 'designBranch' | 'designExactSha' | 'designDocuments'
 > & {
   readonly reviewThreadId?: string;
   readonly designBranch?: string;
   readonly designExactSha?: string;
+  readonly designDocuments?: readonly string[];
 } {
   assertId(input.ownerUserId, 'ownerUserId');
   assertId(input.projectId, 'projectId');
@@ -414,6 +420,16 @@ function normalizeCreate(input: CreateReviewRoundInput): Omit<
   if (input.designBranch !== undefined) {
     if (!input.designBranch.trim()) throw new Error('designBranch is invalid');
     assertFullSha(input.designExactSha as string, 'designExactSha');
+    if (
+      !Array.isArray(input.designDocuments) ||
+      input.designDocuments.length === 0 ||
+      input.designDocuments.length > 20
+    ) {
+      throw new Error('ReviewRound requires configured design documents');
+    }
+    for (const documentPath of input.designDocuments) assertText(documentPath, 'designDocument', 1_000);
+  } else if (input.designDocuments !== undefined) {
+    throw new Error('ReviewRound design documents require a design branch');
   }
   assertActor(input.author);
   if (
@@ -437,7 +453,11 @@ function normalizeCreate(input: CreateReviewRoundInput): Omit<
     ...input,
     exactSha: input.exactSha.toLowerCase(),
     ...(input.designBranch && input.designExactSha
-      ? { designBranch: input.designBranch.trim(), designExactSha: input.designExactSha.toLowerCase() }
+      ? {
+          designBranch: input.designBranch.trim(),
+          designExactSha: input.designExactSha.toLowerCase(),
+          designDocuments: [...new Set(input.designDocuments)].sort(),
+        }
       : {}),
     reviewerCatIds: [...input.reviewerCatIds].sort(),
     now,
@@ -604,6 +624,7 @@ function parseRound(raw: string): ReviewRound {
   const { _creationFingerprint: _internalFingerprint, ...round } = stored;
   return {
     ...round,
+    ...(round.designDocuments ? { designDocuments: asStringArray(round.designDocuments) } : {}),
     reviewerCatIds: asCatIdArray(round.reviewerCatIds),
     independentFinishedCatIds: asCatIdArray(round.independentFinishedCatIds),
     crossReviewFinishedCatIds: asCatIdArray(round.crossReviewFinishedCatIds),

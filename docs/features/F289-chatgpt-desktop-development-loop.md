@@ -122,15 +122,15 @@ Resume Capsule 的 baton holder 和按钮点击本身都不能证明已经交给
 reviewer 或 recorder 重发带 `Review 系统消息` 标识的当前 stage。用户决策门禁继续使用专用动作，通用重试接口
 必须拒绝代替用户做决定。
 
-Review 系统消息只携带路由、项目/功能、阶段、实现 SHA、方案分支/SHA、round 与进度，并要求加载
+Review 系统消息只携带路由、项目/功能、阶段、实现 SHA、共用方案分支/SHA、功能设计文档、round 与进度，并要求加载
 `chatgpt-review-rounds` skill。统一表格、回调顺序和强制约束只在 skill 中维护，不在每轮消息里重复展开。
 
 whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port 不可用，F289 必须返回 `managed_work_capability_unavailable`，不能通过 thread、branch、task 或本地 Redis key 猜测/复制 work identity。
 
 ## 核心不变量
 
-1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源；功能方案分支的精确提交是唯一实现与 Review 方案真相源。
-2. 一个导入功能只有一个方案分支绑定、一个方案讨论会话和一个 Review 会话；一个实现 exact SHA + 方案 exact SHA 组合只有一个 active immutable ReviewRound。
+1. 项目绑定是唯一 repo/默认分支/本地 checkout/自动化策略真相源；项目级共用方案分支的精确提交与该功能选中的设计文档共同构成实现和 Review 的方案真相源。
+2. 一个项目只有一个方案分支绑定；一个导入功能有一组设计文档、一个方案讨论会话和一个 Review 会话。一个实现 exact SHA + 方案 exact SHA + 文档清单组合只有一个 active immutable ReviewRound。
 3. 每个 Review 阶段面向用户的回复统一采用同一份双表格协议：阶段摘要表 + 检视意见明细表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
 4. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
 5. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
@@ -140,7 +140,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
 9. 协议版本或 capability 不兼容时写操作 fail closed；只读状态与恢复指引仍可返回。
 10. Cat Café 或 ChatGPT 可见窗口删除不等于 work/ReviewRound/证据删除。
-11. Review finding 必须引用冻结的方案提交；未由用户决定且未提交到方案分支的严重架构冲突，以及每 15 次循环边界，均阻断下一次 Desktop 投递。
+11. Review finding 必须引用冻结的方案提交与本功能设计文档；未由用户决定且未提交到共用方案分支的严重架构冲突，以及每 15 次循环边界，均阻断下一次 Desktop 投递。
 12. Reviewer 无法形成共识时只接受当前用户的显式裁决授权；不得自动多数表决、追加 reviewer 或从聊天文字猜测授权。授权一经记录不可静默改写。
 
 ## MCP 合同
@@ -177,7 +177,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-P2: 每个项目只会 resolve 到一个 Review Hub；10 个并发 ensure 请求仍只创建/恢复一个 Hub thread。（`project-review-hub-service.test.js`）
 - [x] AC-P3: Hub thread 软删除后原位恢复且 round/history 不变；底层视图不可恢复地丢失时按同一 deterministic Hub ID 重建，不复制 lifecycle truth。（`project-review-hub-service.test.js`）
 - [x] AC-P4: 项目绑定和 pilot count 在服务重启后仍存在；本地路径不出现在公开 DTO/消息/日志。（`external-project-store.test.js`、`desktop-development-loop.test.js`）
-- [x] AC-P5: 每个功能可持久绑定同仓库的本地已提交方案分支；启动、恢复、Desktop 任务和 ReviewRound 都冻结并展示精确方案 SHA，错误仓库/缺失分支 fail closed。（`design-branch-resolver.test.js`、`external-project-store.redis.test.js`、`desktop-development-launch.test.js`、`desktop-development-loop-routes.test.js`）
+- [x] AC-P5: 项目可持久绑定一个本地已提交共用方案分支，每个功能可选择其中一至多份设计文档；启动、恢复、Desktop 任务和 ReviewRound 都冻结并展示精确方案 SHA 与文档，错误仓库/缺失分支/缺失文档 fail closed。（`design-branch-resolver.test.js`、`external-project-store.redis.test.js`、`desktop-development-launch.test.js`、`desktop-development-loop-routes.test.js`）
 
 ### Desktop session / recovery
 

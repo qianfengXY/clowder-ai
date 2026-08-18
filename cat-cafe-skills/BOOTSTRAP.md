@@ -11,7 +11,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
     → quality-gate → [fresh-context-review] → request-review → receive-review
     → merge-gate → feat-lifecycle(完成)
 
-ChatGPT author → chatgpt-review-rounds（独立检视→交叉检视→callback 共识，绑定方案分支精确提交）
+ChatGPT author → chatgpt-review-rounds（独立检视→交叉检视→callback 共识，绑定共用方案分支精确提交与功能设计文档）
     → ChatGPT fix → repeat → merge-gate → operator acceptance
 
 Cat Café bound project → catcafe-desktop-executor（repo resolve→managed work→Resume Packet）

@@ -372,7 +372,7 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     }
   });
 
-  app.get('/api/external-projects/:projectId/development-loop/design-branches', async (request, reply) => {
+  app.get('/api/external-projects/:projectId/development-loop/design-authority', async (request, reply) => {
     const ownerUserId = requireUserId(request, reply);
     if (!ownerUserId) return;
     if (!desktopDevelopmentLoopService) {
@@ -382,19 +382,43 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     const query = z.object({ protocolVersion: protocolSchema }).strict().safeParse(request.query);
     if (!params.success || !query.success) return reply.status(400).send({ error: 'Invalid request' });
     try {
-      const designBranches = await desktopDevelopmentLoopService.listFeatureDesignBranches({
+      const designAuthority = await desktopDevelopmentLoopService.readProjectDesignAuthority({
         ...params.data,
         ...query.data,
         ownerUserId,
       });
-      return reply.send({ designBranches });
+      return reply.send(designAuthority);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  app.put('/api/external-projects/:projectId/development-loop/design-branch', async (request, reply) => {
+    const ownerUserId = resolveStrictUserId(request);
+    if (!ownerUserId) return reply.status(401).send({ error: 'Identity required' });
+    if (!desktopDevelopmentLoopService) {
+      return reply.status(503).send({ error: 'Desktop managed-work capability is unavailable' });
+    }
+    const params = z.object({ projectId: idSchema }).strict().safeParse(request.params);
+    const body = z
+      .object({ protocolVersion: protocolSchema, branch: z.string().trim().min(1).max(244) })
+      .strict()
+      .safeParse(request.body);
+    if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
+    try {
+      const designAuthority = await desktopDevelopmentLoopService.updateProjectDesignBranch({
+        ...params.data,
+        ...body.data,
+        ownerUserId,
+      });
+      return reply.send({ designAuthority });
     } catch (error) {
       return sendError(reply, error);
     }
   });
 
   app.put(
-    '/api/external-projects/:projectId/development-loop/features/:backlogItemId/design-branch',
+    '/api/external-projects/:projectId/development-loop/features/:backlogItemId/design-documents',
     async (request, reply) => {
       const ownerUserId = resolveStrictUserId(request);
       if (!ownerUserId) return reply.status(401).send({ error: 'Identity required' });
@@ -403,17 +427,20 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
       }
       const params = z.object({ projectId: idSchema, backlogItemId: idSchema }).strict().safeParse(request.params);
       const body = z
-        .object({ protocolVersion: protocolSchema, branch: z.string().trim().min(1).max(244) })
+        .object({
+          protocolVersion: protocolSchema,
+          documents: z.array(z.string().trim().min(1).max(1_000)).min(1).max(20),
+        })
         .strict()
         .safeParse(request.body);
       if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid request' });
       try {
-        const designBranch = await desktopDevelopmentLoopService.updateFeatureDesignBranch({
+        const designDocuments = await desktopDevelopmentLoopService.updateFeatureDesignDocuments({
           ...params.data,
           ...body.data,
           ownerUserId,
         });
-        return reply.send({ designBranch });
+        return reply.send({ designDocuments });
       } catch (error) {
         return sendError(reply, error);
       }

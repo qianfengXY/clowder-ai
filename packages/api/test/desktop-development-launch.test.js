@@ -10,7 +10,8 @@ describe('F289 project-scoped Desktop launch', () => {
   let snapshots;
   let sessions;
   let upsertCalls;
-  let designBranches;
+  let designBranch;
+  let designDocuments;
   let VersionConflictError;
 
   const project = {
@@ -81,7 +82,8 @@ describe('F289 project-scoped Desktop launch', () => {
     snapshots = new Map();
     sessions = new Map();
     upsertCalls = [];
-    designBranches = { 'backlog-1': 'design/f006-workspace-capability' };
+    designBranch = 'design/shared-specs';
+    designDocuments = { 'backlog-1': ['docs/design/f006-workspace-capability.md'] };
     const workflowSopStore = {
       get: async (itemId) => sops.get(itemId) ?? null,
       getManagedWorkAdmission: async (_ownerUserId, itemId) => admissions.get(itemId) ?? null,
@@ -115,10 +117,13 @@ describe('F289 project-scoped Desktop launch', () => {
     service = new serviceModule.DesktopDevelopmentLoopService(
       {
         getById: async (id) => (id === project.id ? project : null),
-        getFeatureDesignBranches: async () => ({ ...designBranches }),
-        setFeatureDesignBranch: async (_projectId, backlogItemId, branch) => {
-          if (branch) designBranches[backlogItemId] = branch;
-          else delete designBranches[backlogItemId];
+        getProjectDesignBranch: async () => designBranch,
+        setProjectDesignBranch: async (_projectId, branch) => {
+          designBranch = branch;
+        },
+        getFeatureDesignDocuments: async () => ({ ...designDocuments }),
+        setFeatureDesignDocuments: async (_projectId, backlogItemId, documents) => {
+          designDocuments[backlogItemId] = documents;
         },
       },
       {
@@ -149,6 +154,7 @@ describe('F289 project-scoped Desktop launch', () => {
       workflowSopStore,
     );
     service.designBranchResolver = async ({ branch }) => ({ branch, exactSha: 'd'.repeat(40) });
+    service.designDocumentsResolver = async (_sourcePath, _exactSha, documents) => documents;
   });
 
   test('lists only the selected project and starts with create-only SOP semantics', async () => {
@@ -220,13 +226,14 @@ describe('F289 project-scoped Desktop launch', () => {
       backlogItemId: 'backlog-1',
       featureId: 'F006',
       title: '[F006] Workspace capability settings',
-      designBranch: 'design/f006-workspace-capability',
+      designBranch: 'design/shared-specs',
       designExactSha: 'd'.repeat(40),
+      designDocuments: ['docs/design/f006-workspace-capability.md'],
     });
   });
 
-  test('refuses to start before a committed feature design branch is configured', async () => {
-    designBranches = {};
+  test('refuses to start before a committed shared design branch is configured', async () => {
+    designBranch = null;
     await assert.rejects(
       () =>
         service.startProjectWork({
@@ -236,6 +243,21 @@ describe('F289 project-scoped Desktop launch', () => {
           backlogItemId: 'backlog-1',
         }),
       /design branch is not configured/i,
+    );
+    assert.equal(upsertCalls.length, 0);
+  });
+
+  test('refuses to start before design documents are selected for the feature', async () => {
+    designDocuments = {};
+    await assert.rejects(
+      () =>
+        service.startProjectWork({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: 'project-1',
+          backlogItemId: 'backlog-1',
+        }),
+      /design documents are not configured/i,
     );
     assert.equal(upsertCalls.length, 0);
   });

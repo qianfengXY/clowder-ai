@@ -9,6 +9,7 @@ const SHA_B = 'b'.repeat(40);
 const DESIGN_SHA = 'd'.repeat(40);
 const REVISED_DESIGN_SHA = 'e'.repeat(40);
 const DESIGN_BRANCH = 'design/f289-desktop-loop';
+const DESIGN_DOCUMENTS = ['docs/design/f289-desktop-loop.md'];
 
 describe(
   'F289 DesktopDevelopmentLoopService',
@@ -104,6 +105,7 @@ describe(
         undefined,
         async () => {},
         async ({ branch }) => ({ branch, exactSha: currentDesignSha }),
+        async (_sourcePath, _exactSha, documents) => documents,
       );
       reviewCoordinator = new ReviewRoundCoordinatorService(
         reviewRounds,
@@ -119,6 +121,7 @@ describe(
             attemptNumber: 1,
             designBranch: DESIGN_BRANCH,
             designExactSha: DESIGN_SHA,
+            designDocuments: DESIGN_DOCUMENTS,
           }),
         },
         sessions,
@@ -179,7 +182,8 @@ describe(
         tags: ['feature:F289'],
         status: 'approved',
       });
-      await externalProjects.setFeatureDesignBranch(project.id, 'backlog-1', DESIGN_BRANCH);
+      await externalProjects.setProjectDesignBranch(project.id, DESIGN_BRANCH);
+      await externalProjects.setFeatureDesignDocuments(project.id, 'backlog-1', DESIGN_DOCUMENTS);
       return { project, bundle };
     }
 
@@ -387,6 +391,7 @@ describe(
             attemptNumber: 1,
             designBranch: DESIGN_BRANCH,
             designExactSha: DESIGN_SHA,
+            designDocuments: DESIGN_DOCUMENTS,
           },
         },
       ]);
@@ -400,6 +405,7 @@ describe(
       assert.equal(round.round.exactSha, SHA_A);
       assert.equal(round.round.designBranch, DESIGN_BRANCH);
       assert.equal(round.round.designExactSha, DESIGN_SHA);
+      assert.deepEqual(round.round.designDocuments, DESIGN_DOCUMENTS);
       assert.deepEqual(round.round.reviewerCatIds, ['cat-codex', 'cat-kimi']);
       assert.equal(round.round.author.actorId, 'chatgpt-desktop-dev');
 
@@ -641,7 +647,10 @@ describe(
         packet.openFindings.map((finding) => finding.summary),
         ['Consensus P1'],
       );
-      assert.deepEqual(packet.openFindings[0].designRefs, [`git:refs/heads/${DESIGN_BRANCH}@${DESIGN_SHA}`]);
+      assert.deepEqual(packet.openFindings[0].designRefs, [
+        `git:refs/heads/${DESIGN_BRANCH}@${DESIGN_SHA}`,
+        `git:refs/heads/${DESIGN_BRANCH}@${DESIGN_SHA}:${DESIGN_DOCUMENTS[0]}`,
+      ]);
       assert.doesNotMatch(JSON.stringify(packet), /Private P1|Must not leak/);
       assert.deepEqual(packet.nextLegalActions, ['request_user_architecture_decision']);
       assert.equal(packet.phase, 'awaiting_architecture_decision');

@@ -81,6 +81,7 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
     title: 'Workspace settings',
     designBranch: 'design/f006-workspace-capability',
     designExactSha: 'd'.repeat(40),
+    designDocuments: ['docs/design/f006.md'],
   };
   assert.deepEqual(await launcher.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
   assert.deepEqual(await launcher.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
@@ -130,6 +131,7 @@ test('Desktop task launcher starts the visible turn through the durable ChatGPT 
     title: 'Workspace settings',
     designBranch: 'design/f006-workspace-capability',
     designExactSha: 'd'.repeat(40),
+    designDocuments: ['docs/design/f006.md'],
   });
 
   assert.deepEqual(result, { status: 'created', threadId: 'native-thread-f006' });
@@ -588,6 +590,7 @@ test('Desktop task launcher reopens an existing task without writing a new turn'
     title: 'Workspace settings',
     designBranch: 'design/f006-workspace-capability',
     designExactSha: 'd'.repeat(40),
+    designDocuments: ['docs/design/f006.md'],
   });
   assert.deepEqual(opened, ['existing-thread']);
   assert.equal(sessionCreated, false);

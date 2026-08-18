@@ -21,7 +21,9 @@ export class ExternalProjectStore {
   private readonly redis: RedisClient | undefined;
   private readonly fallbackProjects = new Map<string, ExternalProject>();
   private readonly fallbackFeatureWorkspaceBindings = new Map<string, Record<string, string>>();
+  private readonly fallbackProjectDesignBranches = new Map<string, string>();
   private readonly fallbackFeatureDesignBranches = new Map<string, Record<string, string>>();
+  private readonly fallbackFeatureDesignDocuments = new Map<string, Record<string, readonly string[]>>();
 
   constructor(redis?: RedisClient) {
     this.redis = redis;
@@ -191,6 +193,73 @@ export class ExternalProjectStore {
     );
   }
 
+  async getProjectDesignBranch(projectId: string): Promise<string | null> {
+    if (!this.redis) {
+      const configured = this.fallbackProjectDesignBranches.get(projectId);
+      if (configured) return configured;
+      return uniqueLegacyDesignBranch(this.fallbackFeatureDesignBranches.get(projectId));
+    }
+    const configured = await this.redis.hget(ExternalProjectKeys.detail(projectId), 'projectDesignBranch');
+    if (configured) return configured;
+    return uniqueLegacyDesignBranch(await this.getFeatureDesignBranches(projectId));
+  }
+
+  async setProjectDesignBranch(projectId: string, branch: string): Promise<void> {
+    if (!this.redis) {
+      this.fallbackProjectDesignBranches.set(projectId, branch);
+      return;
+    }
+    await this.redis.hset(ExternalProjectKeys.detail(projectId), 'projectDesignBranch', branch);
+  }
+
+  async getFeatureDesignDocuments(projectId: string): Promise<Record<string, readonly string[]>> {
+    if (!this.redis) return { ...(this.fallbackFeatureDesignDocuments.get(projectId) ?? {}) };
+    const raw = await this.redis.hget(ExternalProjectKeys.detail(projectId), 'featureDesignDocuments');
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(parsed).flatMap(([key, value]) =>
+          Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? [[key, value]] : [],
+        ),
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  async setFeatureDesignDocuments(
+    projectId: string,
+    backlogItemId: string,
+    documents: readonly string[],
+  ): Promise<void> {
+    if (!this.redis) {
+      const current = { ...(this.fallbackFeatureDesignDocuments.get(projectId) ?? {}) };
+      if (documents.length > 0) current[backlogItemId] = [...documents];
+      else delete current[backlogItemId];
+      this.fallbackFeatureDesignDocuments.set(projectId, current);
+      return;
+    }
+    await this.redis.eval(
+      `
+        local raw = redis.call('HGET', KEYS[1], 'featureDesignDocuments')
+        local documentsByFeature = {}
+        if raw then
+          local ok, decoded = pcall(cjson.decode, raw)
+          if ok and type(decoded) == 'table' then documentsByFeature = decoded end
+        end
+        local documents = cjson.decode(ARGV[2])
+        if #documents > 0 then documentsByFeature[ARGV[1]] = documents else documentsByFeature[ARGV[1]] = nil end
+        redis.call('HSET', KEYS[1], 'featureDesignDocuments', cjson.encode(documentsByFeature))
+        return 1
+      `,
+      1,
+      ExternalProjectKeys.detail(projectId),
+      backlogItemId,
+      JSON.stringify(documents),
+    );
+  }
+
   async update(id: string, patch: Partial<CreateExternalProjectInput>): Promise<ExternalProject | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
@@ -249,7 +318,9 @@ export class ExternalProjectStore {
     } else {
       this.fallbackProjects.delete(id);
       this.fallbackFeatureWorkspaceBindings.delete(id);
+      this.fallbackProjectDesignBranches.delete(id);
       this.fallbackFeatureDesignBranches.delete(id);
+      this.fallbackFeatureDesignDocuments.delete(id);
     }
     return true;
   }
@@ -343,4 +414,15 @@ export class ExternalProjectStore {
     }
     return updated;
   }
+}
+
+function uniqueLegacyDesignBranch(branches: Record<string, string> | undefined): string | null {
+  const unique = [
+    ...new Set(
+      Object.values(branches ?? {})
+        .map((branch) => branch.trim())
+        .filter(Boolean),
+    ),
+  ];
+  return unique.length === 1 ? (unique[0] ?? null) : null;
 }

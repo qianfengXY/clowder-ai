@@ -144,11 +144,11 @@ qc.idle
 
 当实现作者是 **ChatGPT 桌面 Codex**，且 operator 明确启用本 lane 时，采用多猫独立判断后再共识收敛的窄例外；普通 Cat Café 代码 review 仍走上方按风险路由的 QC Loop。
 
-1. ChatGPT 提交精确 code HEAD 与测试证据后，Cat Café 同时捕获该功能方案分支的精确提交；至少两只非作者猫读取同一代码 SHA 与方案 SHA，分别独立检视并通过 callback 保存私有 draft；独立阶段禁止互看意见。
+1. ChatGPT 提交精确 code HEAD 与测试证据后，Cat Café 同时捕获项目共用方案分支的精确提交及该功能选中的设计文档；至少两只非作者猫读取同一代码 SHA、方案 SHA 与文档清单，分别独立检视并通过 callback 保存私有 draft；独立阶段禁止互看意见。
 2. 独立检视与后续交叉检视期间，所有 reviewer 对 Git 只读：不修改共享分支，不 commit/push/rebase/checkout。
 3. 只有所有 reviewer 都明确完成独立检视后，才开启交叉检视；猫猫相互核验证据、去重 finding，并形成统一共识。
 4. 只有服务端指定的 recorder 能通过 `cat_cafe_review_consensus_publish` 发布共识。ReviewRound callback 是持久化真相；reviewer 不写或推送 Git ledger。
-5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>`。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户处理。
+5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>` 与至少一份本功能设计文档。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户处理。
 6. 用户可以保持当前方案，或与猫猫修改并提交同一方案分支。Cat Café 验证方案 SHA 后才恢复原 ChatGPT 窗口；ChatGPT 按 callback 共识修复并提交新 code SHA，再重新开始完整 ReviewRound。
 7. 所有已接受 finding（含 P3）关闭、无新 finding、checks 通过后才允许合入；merge 后仍必须等待用户亲自验收。
 

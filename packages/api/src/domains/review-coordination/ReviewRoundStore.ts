@@ -19,6 +19,7 @@ export interface CreateReviewRoundInput {
   readonly exactSha: string;
   readonly designBranch?: string;
   readonly designExactSha?: string;
+  readonly designDocuments?: readonly string[];
   readonly author: ManagedWorkExecutorActor;
   readonly reviewerCatIds: readonly CatId[];
   readonly recorderCatId: CatId;

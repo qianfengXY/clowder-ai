@@ -2,7 +2,13 @@ import type { IBacklogStore } from '../cats/services/stores/ports/BacklogStore.j
 import type { IManagedWorkConsumerPort } from '../cats/services/stores/ports/ManagedWorkConsumerPort.js';
 import type { ExternalProjectStore } from '../projects/external-project-store.js';
 import type { ProjectReviewHubService } from '../projects/project-review-hub-service.js';
-import { type DesignBranchResolver, resolveDesignBranch } from './design-branch-resolver.js';
+import {
+  type DesignBranchResolver,
+  type DesignDocumentsResolver,
+  normalizeDesignDocuments,
+  resolveDesignBranch,
+  resolveDesignDocuments,
+} from './design-branch-resolver.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
 
@@ -15,6 +21,7 @@ export interface ReviewRoundDisplayContext {
   readonly attemptNumber: number;
   readonly designBranch: string;
   readonly designExactSha: string;
+  readonly designDocuments: readonly string[];
 }
 
 export interface ResolveReviewRoundDisplayContextInput {
@@ -24,6 +31,7 @@ export interface ResolveReviewRoundDisplayContextInput {
   readonly attemptId: string;
   readonly designBranch?: string;
   readonly designExactSha?: string;
+  readonly designDocuments?: readonly string[];
 }
 
 export interface IReviewRoundDisplayContextResolver {
@@ -32,11 +40,15 @@ export interface IReviewRoundDisplayContextResolver {
 
 export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayContextResolver {
   constructor(
-    private readonly externalProjects: Pick<ExternalProjectStore, 'getById' | 'getFeatureDesignBranches'>,
+    private readonly externalProjects: Pick<
+      ExternalProjectStore,
+      'getById' | 'getProjectDesignBranch' | 'getFeatureDesignDocuments'
+    >,
     private readonly backlogStore: Pick<IBacklogStore, 'listByUser'>,
     private readonly managedWork: Pick<IManagedWorkConsumerPort, 'read'>,
     _reviewHubs?: Pick<ProjectReviewHubService, 'ensureForFeature'>,
     private readonly designBranchResolver: DesignBranchResolver = resolveDesignBranch,
+    private readonly designDocumentsResolver: DesignDocumentsResolver = resolveDesignDocuments,
   ) {}
 
   async resolve(input: ResolveReviewRoundDisplayContextInput): Promise<ReviewRoundDisplayContext> {
@@ -66,7 +78,7 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
         : null;
     const configuredBranch = recordedDesign
       ? recordedDesign.branch
-      : (await this.externalProjects.getFeatureDesignBranches(input.projectId))[backlogItemId];
+      : await this.externalProjects.getProjectDesignBranch(input.projectId);
     if (!configuredBranch) throw new Error('Review display context design branch is unavailable');
     const design =
       recordedDesign ??
@@ -75,6 +87,16 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
         repository: project.desktopDevelopment.repository,
         branch: configuredBranch,
       }));
+    const configuredDocuments =
+      input.designDocuments ?? (await this.externalProjects.getFeatureDesignDocuments(input.projectId))[backlogItemId];
+    if (!configuredDocuments?.length && !recordedDesign) {
+      throw new Error('Review display context design documents are unavailable');
+    }
+    const designDocuments = !configuredDocuments?.length
+      ? []
+      : recordedDesign
+        ? normalizeDesignDocuments(configuredDocuments)
+        : await this.designDocumentsResolver(project.sourcePath, design.exactSha, configuredDocuments);
     return {
       projectName: project.name,
       repository: project.desktopDevelopment.repository.fullName,
@@ -84,6 +106,7 @@ export class ReviewRoundDisplayContextResolver implements IReviewRoundDisplayCon
       attemptNumber: managed.attempt.attemptNumber,
       designBranch: design.branch,
       designExactSha: design.exactSha,
+      designDocuments,
     };
   }
 }

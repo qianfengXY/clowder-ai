@@ -521,11 +521,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                     方案：
                     {work.designBranch && work.designExactSha
                       ? `${work.designBranch}@${work.designExactSha.slice(0, 12)}`
-                      : '未配置（请到功能列表绑定本地已提交方案分支）'}
+                      : '未配置（请到功能列表绑定项目共用方案分支）'}
                     {work.reviewDesignExactSha && work.reviewDesignExactSha !== work.designExactSha
                       ? ` · 本轮 Review 基于 ${work.reviewDesignExactSha.slice(0, 12)}`
                       : ''}
                   </div>
+                  <div>设计文档：{work.designDocuments.length > 0 ? work.designDocuments.join('、') : '未指定'}</div>
                 </div>
               )}
               {work && (

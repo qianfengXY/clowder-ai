@@ -16,6 +16,7 @@ test('Review coordinator requires every new finding to cite the round design com
       exactSha: 'a'.repeat(40),
       designBranch: 'design/f006-workspace',
       designExactSha: designSha,
+      designDocuments: ['docs/design/f006.md'],
       reviewerCatIds: ['cat-gpt', 'cat-kimi'],
       recorderCatId: 'cat-gpt',
       reviewThreadId: 'project-feature-review:project-1:backlog-1',
@@ -58,7 +59,15 @@ test('Review coordinator requires every new finding to cite the round design com
 
   await service.submitDraft({
     ...base,
-    findings: [{ ...finding, designRefs: [`git:refs/heads/design/f006-workspace@${designSha}`] }],
+    findings: [
+      {
+        ...finding,
+        designRefs: [
+          `git:refs/heads/design/f006-workspace@${designSha}`,
+          `git:refs/heads/design/f006-workspace@${designSha}:docs/design/f006.md`,
+        ],
+      },
+    ],
   });
   assert.equal(submitted, 1);
 });

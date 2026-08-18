@@ -1,4 +1,10 @@
-import { buildProjectReviewHubId, buildReviewDesignRef, type CatId, type ReviewRoundSafeView } from '@cat-cafe/shared';
+import {
+  buildProjectReviewHubId,
+  buildReviewDesignDocumentRef,
+  buildReviewDesignRef,
+  type CatId,
+  type ReviewRoundSafeView,
+} from '@cat-cafe/shared';
 import type { IManagedWorkConsumerPort } from '../cats/services/stores/ports/ManagedWorkConsumerPort.js';
 import type {
   ConsensusFindingInput,
@@ -214,7 +220,11 @@ export class ReviewRoundCoordinatorService {
         reviewRoundId: before.round.roundId,
         exactSha: before.round.exactSha,
         ...(before.round.designBranch && before.round.designExactSha
-          ? { designBranch: before.round.designBranch, designExactSha: before.round.designExactSha }
+          ? {
+              designBranch: before.round.designBranch,
+              designExactSha: before.round.designExactSha,
+              designDocuments: before.round.designDocuments ?? [],
+            }
           : {}),
       });
     }
@@ -281,6 +291,7 @@ export class ReviewRoundCoordinatorService {
     readonly attemptId: string;
     readonly designBranch?: string;
     readonly designExactSha?: string;
+    readonly designDocuments?: readonly string[];
   }) {
     if (!this.reviewDisplayContexts) {
       throw new Error('Review display context resolver is unavailable');
@@ -291,7 +302,11 @@ export class ReviewRoundCoordinatorService {
       workId: round.workId,
       attemptId: round.attemptId,
       ...(round.designBranch && round.designExactSha
-        ? { designBranch: round.designBranch, designExactSha: round.designExactSha }
+        ? {
+            designBranch: round.designBranch,
+            designExactSha: round.designExactSha,
+            designDocuments: round.designDocuments ?? [],
+          }
         : {}),
     });
   }
@@ -305,6 +320,7 @@ export class ReviewRoundCoordinatorService {
     readonly exactSha: string;
     readonly designBranch?: string;
     readonly designExactSha?: string;
+    readonly designDocuments?: readonly string[];
   }): Promise<void> {
     if (!this.desktopSessions || !this.desktopTasks) return;
     const binding = await this.desktopSessions.getCurrent(input.projectId, input.workId);
@@ -333,5 +349,14 @@ function assertFindingDesignRefs(
   const requiredRef = buildReviewDesignRef(designBranch, designExactSha);
   if (findings.some((finding) => !finding.designRefs.includes(requiredRef))) {
     throw new Error(`Every Review finding must reference the authoritative design commit: ${requiredRef}`);
+  }
+  const requiredDocumentRefs = (review.round.designDocuments ?? []).map((documentPath) =>
+    buildReviewDesignDocumentRef(designBranch, designExactSha, documentPath),
+  );
+  if (
+    requiredDocumentRefs.length > 0 &&
+    findings.some((finding) => !finding.designRefs.some((value) => requiredDocumentRefs.includes(value)))
+  ) {
+    throw new Error('Every Review finding must reference at least one configured design document');
   }
 }
