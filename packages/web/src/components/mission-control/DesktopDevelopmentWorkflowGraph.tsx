@@ -5,18 +5,43 @@ import type {
   DesktopDevelopmentWorkflowNode,
   DesktopDevelopmentWorkflowNodeStatus,
 } from '@cat-cafe/shared';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type GraphStatus = DesktopDevelopmentWorkflowNodeStatus | 'inactive';
+type WorkflowInspectionId =
+  | 'design-entry'
+  | 'acceptance-rework-entry'
+  | 'implementation'
+  | 'independent_review'
+  | 'cross_review'
+  | 'consensus'
+  | 'handoff'
+  | 'merge'
+  | 'acceptance'
+  | 'accepted-end';
+
+interface WorkflowInspectionSelection {
+  readonly id: WorkflowInspectionId;
+  readonly title: string;
+  readonly owner: string;
+  readonly status: GraphStatus;
+}
+
+interface WorkflowHoverState {
+  readonly selection: WorkflowInspectionSelection;
+  readonly top: number;
+}
 
 export function DesktopDevelopmentWorkflowGraph({
   work,
   retrying,
   onRetry,
+  onOpenReview,
 }: {
   work: DesktopDevelopmentResumePacket;
   retrying: boolean;
   onRetry: () => void;
+  onOpenReview?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const nodes = work.workflowNodes ?? [];
@@ -97,7 +122,7 @@ export function DesktopDevelopmentWorkflowGraph({
 
       {!collapsed && (
         <div id={`workflow-graph-body-${work.workId}`} data-testid="workflow-graph-body">
-          <WorkflowSwimlaneGraph work={work} currentLabel={currentLabel} />
+          <WorkflowSwimlaneGraph work={work} currentLabel={currentLabel} onOpenReview={onOpenReview} />
 
           <p className="border-t border-[var(--console-hover-bg)] px-4 py-3 text-micro leading-relaxed text-cafe-secondary">
             高亮节点就是当前执行位置；检视意见未清零会回到同一个 ChatGPT
@@ -111,7 +136,19 @@ export function DesktopDevelopmentWorkflowGraph({
 
 type ActorTone = 'entry' | 'desktop' | 'review' | 'catcafe' | 'user';
 
-function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmentResumePacket; currentLabel: string }) {
+function WorkflowSwimlaneGraph({
+  work,
+  currentLabel,
+  onOpenReview,
+}: {
+  work: DesktopDevelopmentResumePacket;
+  currentLabel: string;
+  onOpenReview?: () => void;
+}) {
+  const [inspection, setInspection] = useState<WorkflowInspectionSelection | null>(null);
+  const [hovered, setHovered] = useState<WorkflowHoverState | null>(null);
+  const graphRef = useRef<HTMLDivElement>(null);
+  const inspectionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const nodes = work.workflowNodes ?? [];
   const node = (id: DesktopDevelopmentWorkflowNode['id']) => nodes.find((candidate) => candidate.id === id);
   const designEntry = node('design');
@@ -135,11 +172,44 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
   const reviewReturnActive = work.phase === 'fix_required' || handoff?.status === 'blocked';
   const mergeRouteActive =
     work.phase === 'approved_for_merge' || work.merged || work.acceptancePending || work.phase === 'accepted';
+  const safeWorkId = work.workId.replace(/[^a-zA-Z0-9_-]/g, '');
+  const inspectorId = `workflow-node-inspector-${safeWorkId}`;
+  const tooltipId = `workflow-node-tooltip-${safeWorkId}`;
+  const closeInspection = () => {
+    setInspection(null);
+    inspectionTriggerRef.current?.focus();
+  };
+  const inspect = (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => {
+    inspectionTriggerRef.current = trigger;
+    setInspection((current) => (current?.id === selection.id ? null : selection));
+  };
+  const preview = (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => {
+    if (!selection || !trigger || !graphRef.current) {
+      setHovered(null);
+      return;
+    }
+    const graphRect = graphRef.current.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const top = Math.max(8, Math.min(triggerRect.top - graphRect.top - 4, Math.max(8, graphRect.height - 150)));
+    setHovered({ selection, top });
+  };
+
+  useEffect(() => {
+    if (!inspection) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setInspection(null);
+        inspectionTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [inspection]);
 
   return (
-    <div
+    <section
+      ref={graphRef}
       className="relative m-3 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-7"
-      role="img"
       aria-label={`开发闭环泳道图，当前停在${currentLabel}`}
       data-testid="workflow-swimlane-graph"
     >
@@ -148,6 +218,7 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
         reviewActive={reviewReturnActive}
         acceptanceActive={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'}
       />
+      {hovered && <WorkflowHoverPreview id={tooltipId} work={work} selection={hovered.selection} top={hovered.top} />}
 
       <WorkflowLane tone="entry" label="进入" caption="两种入口">
         <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] sm:gap-0">
@@ -159,6 +230,12 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             detail={`${work.designBranch}@${shortSha(work.designExactSha)}`}
             meta="方案提交后开启新交付轮次"
             status={designEntryStatus}
+            owner="你"
+            selected={inspection?.id === 'design-entry'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'design-entry' ? tooltipId : undefined}
+            controls={inspectorId}
             dashed
           />
           <LaneOr />
@@ -170,6 +247,13 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             detail={`保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据`}
             meta="直接回到实现与 Review 循环"
             status={reworkEntryStatus}
+            owner="你"
+            selected={inspection?.id === 'acceptance-rework-entry'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'acceptance-rework-entry' ? tooltipId : undefined}
+            controls={inspectorId}
+            returnTarget="acceptance"
             dashed
           />
         </div>
@@ -186,6 +270,13 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
           detail={`实现 #${work.attemptNumber} · ${shortSha(work.currentSha)}`}
           meta={`原 Desktop 窗口 · 绑定代次 ${work.bindingEpoch}`}
           status={implementation?.status ?? 'pending'}
+          owner="ChatGPT Desktop"
+          selected={inspection?.id === 'implementation'}
+          onInspect={inspect}
+          onPreview={preview}
+          describedBy={hovered?.selection.id === 'implementation' ? tooltipId : undefined}
+          controls={inspectorId}
+          returnTarget="review"
         />
       </WorkflowLane>
 
@@ -206,13 +297,48 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             </div>
             <StatusBadge status={reviewStatus} />
           </div>
-          <div className="mt-3 grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] sm:gap-0">
-            <ReviewStageNode node={independentReview} title="独立检视" detail="草稿隔离" />
-            <LaneArrow />
-            <ReviewStageNode node={crossReview} title="交叉检视" detail="核验对方意见" />
-            <LaneArrow />
-            <ReviewStageNode node={consensus} title="共识整理" detail={`${work.openFindings.length} 项开放意见`} />
-          </div>
+          <section
+            className="mt-3 flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto overscroll-x-contain pb-2 md:grid md:grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] md:gap-0 md:overflow-visible md:pb-0"
+            data-testid="workflow-review-stages"
+            aria-label="Review 三阶段，可横向滚动"
+          >
+            <ReviewStageNode
+              id="independent_review"
+              node={independentReview}
+              title="独立检视"
+              detail="草稿隔离"
+              selected={inspection?.id === 'independent_review'}
+              onInspect={inspect}
+              onPreview={preview}
+              describedBy={hovered?.selection.id === 'independent_review' ? tooltipId : undefined}
+              controls={inspectorId}
+            />
+            <ReviewLaneArrow />
+            <ReviewStageNode
+              id="cross_review"
+              node={crossReview}
+              title="交叉检视"
+              detail="核验对方意见"
+              selected={inspection?.id === 'cross_review'}
+              onInspect={inspect}
+              onPreview={preview}
+              describedBy={hovered?.selection.id === 'cross_review' ? tooltipId : undefined}
+              controls={inspectorId}
+            />
+            <ReviewLaneArrow />
+            <ReviewStageNode
+              id="consensus"
+              node={consensus}
+              title="共识整理"
+              detail="发布唯一共识"
+              findingCount={work.openFindings.length}
+              selected={inspection?.id === 'consensus'}
+              onInspect={inspect}
+              onPreview={preview}
+              describedBy={hovered?.selection.id === 'consensus' ? tooltipId : undefined}
+              controls={inspectorId}
+            />
+          </section>
         </div>
       </WorkflowLane>
 
@@ -220,15 +346,23 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
 
       <WorkflowLane tone="catcafe" label="CatCafe" caption="协调与门控">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.05fr)_minmax(150px,0.75fr)]">
-          <DecisionNode work={work} node={handoff} />
-          <fieldset className="flex flex-col justify-center gap-2">
-            <legend className="sr-only">清零门分支</legend>
+          <DecisionNode
+            work={work}
+            node={handoff}
+            selected={inspection?.id === 'handoff'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'handoff' ? tooltipId : undefined}
+            controls={inspectorId}
+          />
+          <ul className="flex flex-col justify-center gap-2" aria-label="清零门分支">
             <RouteCard
               tone="warning"
               active={reviewReturnActive}
               symbol="↺"
               title="仍有检视意见："
               detail="回到 ChatGPT 修复，再次进入 Review"
+              returnSource="review"
             />
             <RouteCard
               tone="success"
@@ -237,7 +371,7 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
               title="检视意见清零"
               detail="进入 04 · 合入 main"
             />
-          </fieldset>
+          </ul>
         </div>
       </WorkflowLane>
 
@@ -253,6 +387,12 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             detail="通过合入门禁"
             meta={work.mergeMode === 'manual_confirm_in_chatgpt' ? 'ChatGPT 窗口人工确认' : work.mergeMode}
             status={merge?.status ?? 'pending'}
+            owner="ChatGPT Desktop"
+            selected={inspection?.id === 'merge'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'merge' ? tooltipId : undefined}
+            controls={inspectorId}
           />
           <LaneArrow />
           <LaneNode
@@ -263,6 +403,12 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             detail="只有你能决定"
             meta={work.acceptancePending ? '等待你的验收结果' : '尚未进入验收'}
             status={acceptance?.status ?? 'pending'}
+            owner="你"
+            selected={inspection?.id === 'acceptance'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'acceptance' ? tooltipId : undefined}
+            controls={inspectorId}
           />
           <LaneArrow label="通过" />
           <LaneNode
@@ -273,12 +419,19 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
             detail="本交付轮次终止"
             meta="后续方案变化从入口 A 再开启"
             status={terminalAccepted ? 'active' : 'pending'}
+            owner="你"
+            selected={inspection?.id === 'accepted-end'}
+            onInspect={inspect}
+            onPreview={preview}
+            describedBy={hovered?.selection.id === 'accepted-end' ? tooltipId : undefined}
+            controls={inspectorId}
           />
         </div>
         <div
           className={`mt-3 flex items-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2 ${terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework' ? '' : 'opacity-50'}`}
           role="note"
           aria-label="验收未通过返工路径"
+          data-return-source="acceptance"
         >
           <span className="mr-2 text-base text-[var(--semantic-warning)]">↶</span>
           <span className="text-micro font-medium text-cafe-secondary">
@@ -286,7 +439,17 @@ function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmen
           </span>
         </div>
       </WorkflowLane>
-    </div>
+
+      {inspection && (
+        <WorkflowNodeInspector
+          id={inspectorId}
+          work={work}
+          selection={inspection}
+          onClose={closeInspection}
+          onOpenReview={onOpenReview}
+        />
+      )}
+    </section>
   );
 }
 
@@ -321,26 +484,53 @@ function LaneNode({
   detail,
   meta,
   status,
+  owner,
+  selected,
+  onInspect,
+  onPreview,
+  describedBy,
+  controls,
+  returnTarget,
   dashed = false,
 }: {
-  id: string;
+  id: WorkflowInspectionId;
   tone: ActorTone;
   step: string;
   title: string;
   detail: string;
   meta: string;
   status: GraphStatus;
+  owner: string;
+  selected: boolean;
+  onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
+  onPreview: (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => void;
+  describedBy?: string;
+  controls: string;
+  returnTarget?: 'review' | 'acceptance';
   dashed?: boolean;
 }) {
   const isCurrent = status === 'active' || status === 'blocked';
+  const selection = { id, title, owner, status } satisfies WorkflowInspectionSelection;
   return (
-    <div
-      className={`relative min-h-[98px] overflow-hidden rounded-2xl border border-l-4 p-3 transition-colors ${actorBorderClass(tone)} ${graphNodeClass(status)} ${dashed ? 'border-dashed' : ''}`}
+    <button
+      type="button"
+      className={`group relative min-h-[98px] w-full overflow-hidden rounded-2xl border border-l-4 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] ${actorBorderClass(tone)} ${graphNodeClass(status)} ${dashed ? 'border-dashed' : ''} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
+      data-return-target={returnTarget}
       aria-current={isCurrent ? 'step' : undefined}
-      title={`${title}\n${detail}\n${meta}\n状态：${graphStatusLabel(status)}`}
+      aria-haspopup="dialog"
+      aria-expanded={selected}
+      aria-controls={controls}
+      aria-describedby={describedBy}
+      aria-label={`${title}，${graphStatusLabel(status)}。点击查看节点详情`}
+      onMouseEnter={(event) => onPreview(selection, event.currentTarget)}
+      onMouseLeave={() => onPreview(null)}
+      onFocus={(event) => onPreview(selection, event.currentTarget)}
+      onBlur={() => onPreview(null)}
+      onClick={(event) => onInspect(selection, event.currentTarget)}
     >
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex items-center justify-between gap-2">
         <StepBadge label={step} />
         <StatusBadge status={status} />
@@ -348,55 +538,109 @@ function LaneNode({
       <div className="mt-2 text-xs font-semibold text-cafe">{title}</div>
       <div className="mt-1 text-micro text-cafe-secondary">{detail}</div>
       <div className="mt-1 text-micro leading-relaxed text-cafe-secondary opacity-80">{meta}</div>
-    </div>
+    </button>
   );
 }
 
 function ReviewStageNode({
+  id,
   node,
   title,
   detail,
+  findingCount,
+  selected,
+  onInspect,
+  onPreview,
+  describedBy,
+  controls,
 }: {
+  id: 'independent_review' | 'cross_review' | 'consensus';
   node: DesktopDevelopmentWorkflowNode | undefined;
   title: string;
   detail: string;
+  findingCount?: number;
+  selected: boolean;
+  onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
+  onPreview: (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => void;
+  describedBy?: string;
+  controls: string;
 }) {
   const status = node?.status ?? 'pending';
-  const progress = node?.requiredCount ? `${node.completedCount ?? 0}/${node.requiredCount}` : graphStatusLabel(status);
+  const hasProgress = Boolean(node?.requiredCount);
+  const progress = hasProgress ? `${node?.completedCount ?? 0}/${node?.requiredCount}` : graphStatusLabel(status);
+  const owner = node ? workflowActorLabel(node.actor) : id === 'consensus' ? '共识记录猫猫' : 'Review 猫猫';
+  const selection = { id, title, owner, status } satisfies WorkflowInspectionSelection;
   return (
-    <div
-      className={`min-h-[86px] rounded-xl border border-l-4 p-2.5 ${actorBorderClass('review')} ${graphNodeClass(status)}`}
-      data-testid={`workflow-graph-node-${node?.id ?? 'unknown-review'}`}
+    <button
+      type="button"
+      className={`group relative min-h-[94px] w-[78%] max-w-[280px] shrink-0 snap-start rounded-xl border border-l-4 p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] md:w-auto md:max-w-none md:min-w-0 ${actorBorderClass('review')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
+      data-testid={`workflow-graph-node-${id}`}
       data-status={status}
       aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
-      title={`${title}\n${detail}\n${progress}`}
+      aria-haspopup="dialog"
+      aria-expanded={selected}
+      aria-controls={controls}
+      aria-describedby={describedBy}
+      aria-label={`${title}，${graphStatusLabel(status)}。点击查看 Review 详情`}
+      onMouseEnter={(event) => onPreview(selection, event.currentTarget)}
+      onMouseLeave={() => onPreview(null)}
+      onFocus={(event) => onPreview(selection, event.currentTarget)}
+      onBlur={() => onPreview(null)}
+      onClick={(event) => onInspect(selection, event.currentTarget)}
     >
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex items-start justify-between gap-1">
         <div className="text-micro font-semibold text-cafe">{title}</div>
         <StatusDot status={status} />
       </div>
       <div className="mt-1 text-micro text-cafe-secondary">{detail}</div>
-      <div className="mt-2 text-xs font-semibold text-cafe">{progress}</div>
-    </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro font-semibold text-cafe">
+        <span>{hasProgress ? `进度 ${progress}` : progress}</span>
+        {findingCount !== undefined && <span>开放意见 {findingCount}</span>}
+      </div>
+    </button>
   );
 }
 
 function DecisionNode({
   work,
   node,
+  selected,
+  onInspect,
+  onPreview,
+  describedBy,
+  controls,
 }: {
   work: DesktopDevelopmentResumePacket;
   node: DesktopDevelopmentWorkflowNode | undefined;
+  selected: boolean;
+  onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
+  onPreview: (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => void;
+  describedBy?: string;
+  controls: string;
 }) {
   const status = node?.status ?? 'pending';
+  const owner = node ? workflowActorLabel(node.actor) : 'CatCafe 协调器';
+  const selection = { id: 'handoff', title: '检视清零门', owner, status } satisfies WorkflowInspectionSelection;
   return (
-    <div
-      className={`relative flex min-h-[120px] items-center gap-4 overflow-hidden rounded-2xl border border-l-4 p-3 ${actorBorderClass('catcafe')} ${graphNodeClass(status)}`}
+    <button
+      type="button"
+      className={`group relative flex min-h-[120px] w-full items-center gap-4 overflow-hidden rounded-2xl border border-l-4 p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] ${actorBorderClass('catcafe')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
       data-testid="workflow-graph-node-review-gate"
       data-status={status}
       aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
-      title={`检视清零门\n${handoffDetail(work)}\n开放意见：${work.openFindings.length}`}
+      aria-haspopup="dialog"
+      aria-expanded={selected}
+      aria-controls={controls}
+      aria-describedby={describedBy}
+      aria-label={`检视清零门，${graphStatusLabel(status)}。点击查看门控详情`}
+      onMouseEnter={(event) => onPreview(selection, event.currentTarget)}
+      onMouseLeave={() => onPreview(null)}
+      onFocus={(event) => onPreview(selection, event.currentTarget)}
+      onBlur={() => onPreview(null)}
+      onClick={(event) => onInspect(selection, event.currentTarget)}
     >
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex h-14 w-14 shrink-0 rotate-45 items-center justify-center rounded-xl border-2 border-[var(--semantic-warning)] bg-[var(--console-card-bg)]">
         <span className="-rotate-45 text-xs font-bold text-[var(--semantic-warning)]">03</span>
       </div>
@@ -408,6 +652,188 @@ function DecisionNode({
         <div className="mt-1 text-micro text-cafe-secondary">{handoffDetail(work)}</div>
         <div className="mt-2 text-micro font-medium text-cafe">开放意见：{work.openFindings.length}</div>
       </div>
+    </button>
+  );
+}
+
+function ActiveNodePulse() {
+  return (
+    <span
+      className="pointer-events-none absolute inset-1 rounded-[inherit] border-2 border-[var(--mc-accent)] opacity-50 motion-safe:animate-pulse"
+      aria-hidden="true"
+      data-testid="workflow-active-pulse"
+    />
+  );
+}
+
+function WorkflowHoverPreview({
+  id,
+  work,
+  selection,
+  top,
+}: {
+  id: string;
+  work: DesktopDevelopmentResumePacket;
+  selection: WorkflowInspectionSelection;
+  top: number;
+}) {
+  return (
+    <div
+      id={id}
+      role="tooltip"
+      className="pointer-events-none absolute right-9 z-30 w-[min(250px,calc(100%-7rem))] rounded-xl border border-[var(--console-border-strong)] bg-[var(--console-card-bg)] p-3 shadow-lg"
+      style={{ top }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-cafe">{selection.title}</span>
+        <StatusBadge status={selection.status} />
+      </div>
+      <div className="mt-2 space-y-1 text-micro text-cafe-secondary">
+        <div>负责人：{selection.owner}</div>
+        <div className="break-all">{inspectionShaLine(work, selection.id)}</div>
+        <div>{inspectionDetailLine(work, selection.id)}</div>
+      </div>
+      <div className="mt-2 text-micro font-medium text-[var(--mc-accent)]">点击固定详情</div>
+    </div>
+  );
+}
+
+function WorkflowNodeInspector({
+  id,
+  work,
+  selection,
+  onClose,
+  onOpenReview,
+}: {
+  id: string;
+  work: DesktopDevelopmentResumePacket;
+  selection: WorkflowInspectionSelection;
+  onClose: () => void;
+  onOpenReview?: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const node = workflowNodeForInspection(work, selection.id);
+  const reviewInspection = isReviewInspection(selection.id);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  return (
+    <div
+      ref={dialogRef}
+      id={id}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={`${id}-title`}
+      tabIndex={-1}
+      className="relative border-t border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-4 focus:outline-none"
+      data-testid="workflow-node-inspector"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h5 id={`${id}-title`} className="text-xs font-semibold text-cafe">
+              {selection.title} · 节点详情
+            </h5>
+            <StatusBadge status={selection.status} />
+          </div>
+          <p className="mt-1 text-micro text-cafe-secondary">负责人：{selection.owner}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-[var(--console-border-soft)] px-2 py-1 text-micro text-cafe-secondary hover:text-cafe"
+          aria-label="关闭节点详情"
+        >
+          关闭
+        </button>
+      </div>
+
+      <dl className="mt-3 grid gap-2 text-micro sm:grid-cols-2">
+        <InspectorFact label="精确版本" value={inspectionShaLine(work, selection.id)} mono />
+        <InspectorFact label="当前上下文" value={inspectionDetailLine(work, selection.id)} />
+        <InspectorFact label="开始时间" value={formatWorkflowTime(node?.startedAt)} />
+        <InspectorFact label="完成时间" value={formatWorkflowTime(node?.completedAt)} />
+      </dl>
+
+      {node?.requiredCount ? (
+        <div className="mt-3 rounded-xl bg-[var(--console-shell-bg)] px-3 py-2 text-micro text-cafe-secondary">
+          阶段进度：{node.completedCount ?? 0}/{node.requiredCount}
+        </div>
+      ) : null}
+
+      <div className="mt-3">
+        <div className="text-micro font-semibold text-cafe">下一合法动作</div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {work.nextLegalActions.length > 0 ? (
+            work.nextLegalActions.map((action) => (
+              <span
+                key={action}
+                className="rounded-full border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1 text-micro text-cafe-secondary"
+              >
+                {legalActionLabel(action)}
+              </span>
+            ))
+          ) : (
+            <span className="text-micro text-cafe-secondary">当前没有需要执行的动作</span>
+          )}
+        </div>
+      </div>
+
+      {reviewInspection && (
+        <div className="mt-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-micro font-semibold text-cafe">开放检视意见 {work.openFindings.length} 项</div>
+              <div className="mt-0.5 text-micro text-cafe-secondary">
+                ReviewRound：{work.reviewRoundId ?? '尚未创建'}
+              </div>
+            </div>
+            {onOpenReview && (
+              <button
+                type="button"
+                onClick={onOpenReview}
+                className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-micro font-medium text-[var(--cafe-surface)]"
+              >
+                打开 Review 会话
+              </button>
+            )}
+          </div>
+          {work.openFindings.length > 0 && (
+            <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto" aria-label="开放检视意见">
+              {work.openFindings.map((finding) => (
+                <li
+                  key={finding.findingId}
+                  className="rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-2.5 py-2"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="rounded-md bg-[var(--semantic-warning-surface)] px-1.5 py-0.5 text-micro font-semibold text-[var(--semantic-warning)]">
+                      {finding.severity}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-micro font-medium text-cafe">{finding.summary}</div>
+                      <div className="mt-1 text-micro text-cafe-secondary">
+                        {findingScopeLabel(finding.scope)} · 设计引用 {finding.designRefs.length} · 证据{' '}
+                        {finding.evidenceRefs.length}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InspectorFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-xl bg-[var(--console-shell-bg)] px-3 py-2">
+      <dt className="text-cafe-secondary">{label}</dt>
+      <dd className={`mt-1 break-all text-cafe ${mono ? 'font-mono' : ''}`}>{value}</dd>
     </div>
   );
 }
@@ -418,19 +844,26 @@ function RouteCard({
   symbol,
   title,
   detail,
+  returnSource,
 }: {
   tone: 'warning' | 'success';
   active: boolean;
   symbol: string;
   title: string;
   detail: string;
+  returnSource?: 'review';
 }) {
-  const className =
+  const activeClass =
     tone === 'warning'
       ? 'border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] text-[var(--semantic-warning)]'
       : 'border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] text-[var(--semantic-success)]';
+  const inactiveClass = 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-cafe-secondary';
   return (
-    <div className={`rounded-xl border border-dashed p-2.5 ${className} ${active ? 'shadow-sm' : 'opacity-55'}`}>
+    <li
+      className={`rounded-xl border border-dashed p-2.5 ${active ? `${activeClass} shadow-sm` : inactiveClass}`}
+      data-active={active}
+      data-return-source={returnSource}
+    >
       <div className="flex items-center gap-2">
         <span className="text-base font-bold">{symbol}</span>
         <div>
@@ -438,7 +871,7 @@ function RouteCard({
           <div className="mt-0.5 text-micro text-cafe-secondary">{detail}</div>
         </div>
       </div>
-    </div>
+    </li>
   );
 }
 
@@ -452,53 +885,181 @@ function WorkflowReturnRails({
   acceptanceActive: boolean;
 }) {
   const markerId = `workflow-return-${workId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [geometry, setGeometry] = useState<ReturnRailGeometry | null>(null);
+
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    const graph = svg?.parentElement;
+    if (!svg || !graph) return;
+
+    const measure = () => {
+      const graphRect = graph.getBoundingClientRect();
+      if (graphRect.width <= 0 || graphRect.height <= 0) return;
+
+      const buildRail = (
+        sourceName: 'review' | 'acceptance',
+        targetName: 'review' | 'acceptance',
+        railInset: number,
+      ): ReturnRailPath | null => {
+        const source = graph.querySelector<HTMLElement>(`[data-return-source="${sourceName}"]`);
+        const target = graph.querySelector<HTMLElement>(`[data-return-target="${targetName}"]`);
+        if (!source || !target) return null;
+        const sourceRect = source.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        return {
+          startX: sourceRect.right - graphRect.left + 3,
+          startY: sourceRect.top - graphRect.top + sourceRect.height / 2,
+          railX: graphRect.width - railInset,
+          endX: targetRect.right - graphRect.left + 3,
+          endY: targetRect.top - graphRect.top + targetRect.height / 2,
+        };
+      };
+
+      const next = {
+        review: buildRail('review', 'review', 12),
+        acceptance: buildRail('acceptance', 'acceptance', 4),
+      } satisfies ReturnRailGeometry;
+      setGeometry((current) => (sameReturnRailGeometry(current, next) ? current : next));
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(graph);
+    for (const element of graph.querySelectorAll<HTMLElement>('[data-return-source], [data-return-target]')) {
+      observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <svg
-      className="pointer-events-none absolute inset-y-0 right-0 z-10 h-full w-7"
-      viewBox="0 0 28 100"
-      preserveAspectRatio="none"
+      ref={svgRef}
+      className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+      width="100%"
+      height="100%"
       aria-hidden="true"
+      focusable="false"
+      data-testid="workflow-return-rails"
     >
       <defs>
-        <marker id={markerId} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
-          <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--semantic-warning)" />
+        <marker
+          id={markerId}
+          markerWidth="6"
+          markerHeight="6"
+          refX="5"
+          refY="3"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M0,0 L6,3 L0,6 Z" fill="var(--semantic-warning)" />
         </marker>
       </defs>
-      <path
-        d="M 3 69 H 21 V 27 H 7"
-        fill="none"
-        stroke="var(--semantic-warning)"
-        strokeWidth={reviewActive ? 1.8 : 1}
-        strokeDasharray="3 2"
-        opacity={reviewActive ? 1 : 0.35}
-        markerEnd={`url(#${markerId})`}
-      />
-      <path
-        d="M 5 93 H 26 V 9 H 9"
-        fill="none"
-        stroke="var(--semantic-warning)"
-        strokeWidth={acceptanceActive ? 1.8 : 1}
-        strokeDasharray="2 2"
-        opacity={acceptanceActive ? 1 : 0.22}
-        markerEnd={`url(#${markerId})`}
-      />
+      {geometry?.review && (
+        <ReturnRailPathElement path={geometry.review} markerId={markerId} active={reviewActive} dash="5 4" />
+      )}
+      {geometry?.acceptance && (
+        <ReturnRailPathElement path={geometry.acceptance} markerId={markerId} active={acceptanceActive} dash="3 4" />
+      )}
     </svg>
   );
 }
 
-function LaneTransition({ label, strong = false }: { label: string; strong?: boolean }) {
+interface ReturnRailPath {
+  readonly startX: number;
+  readonly startY: number;
+  readonly railX: number;
+  readonly endX: number;
+  readonly endY: number;
+}
+
+interface ReturnRailGeometry {
+  readonly review: ReturnRailPath | null;
+  readonly acceptance: ReturnRailPath | null;
+}
+
+function ReturnRailPathElement({
+  path,
+  markerId,
+  active,
+  dash,
+}: {
+  path: ReturnRailPath;
+  markerId: string;
+  active: boolean;
+  dash: string;
+}) {
   return (
-    <div className="grid h-8 grid-cols-[72px_minmax(0,1fr)]" aria-hidden="true">
-      <div className="border-r border-[var(--console-border-soft)]" />
+    <>
+      <circle
+        cx={path.startX}
+        cy={path.startY}
+        r={active ? 2.5 : 2}
+        fill="var(--semantic-warning)"
+        opacity={active ? 1 : 0.3}
+      />
+      <path
+        d={`M ${path.startX} ${path.startY} H ${path.railX} V ${path.endY} H ${path.endX}`}
+        fill="none"
+        stroke="var(--semantic-warning)"
+        strokeWidth={active ? 2 : 1}
+        strokeDasharray={dash}
+        opacity={active ? 1 : 0.28}
+        markerEnd={`url(#${markerId})`}
+        vectorEffect="non-scaling-stroke"
+      />
+    </>
+  );
+}
+
+function sameReturnRailGeometry(current: ReturnRailGeometry | null, next: ReturnRailGeometry): boolean {
+  return (
+    sameReturnRail(current?.review ?? null, next.review) && sameReturnRail(current?.acceptance ?? null, next.acceptance)
+  );
+}
+
+function sameReturnRail(current: ReturnRailPath | null, next: ReturnRailPath | null): boolean {
+  if (!current || !next) return current === next;
+  return (
+    current.startX === next.startX &&
+    current.startY === next.startY &&
+    current.railX === next.railX &&
+    current.endX === next.endX &&
+    current.endY === next.endY
+  );
+}
+
+function LaneTransition({ label, strong = false }: { label: string; strong?: boolean }) {
+  const lineClass = strong ? 'bg-[var(--mc-accent)]' : 'bg-[var(--console-border-strong)]';
+  const arrowClass = strong ? 'border-t-[var(--mc-accent)]' : 'border-t-[var(--console-border-strong)]';
+  return (
+    <div className="grid h-8 grid-cols-[72px_minmax(0,1fr)]">
+      <div className="border-r border-[var(--console-border-soft)]" aria-hidden="true" />
       <div className="relative flex items-center justify-center">
+        <span className={`absolute inset-y-0 left-1/2 w-px ${lineClass}`} aria-hidden="true" />
         <span
-          className={`absolute inset-y-0 left-1/2 w-px ${strong ? 'bg-[var(--mc-accent)]' : 'bg-[var(--console-border-strong)]'}`}
+          className={`absolute top-0 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ${lineClass}`}
+          aria-hidden="true"
         />
         <span className="relative rounded-full bg-[var(--console-shell-bg)] px-2 py-0.5 text-micro font-medium text-cafe-secondary">
+          <span className="sr-only">流程转移：</span>
           {label}
         </span>
-        <span className="absolute bottom-0 left-1/2 h-0 w-0 -translate-x-[3px] border-x-[4px] border-t-[6px] border-x-transparent border-t-[var(--mc-accent)]" />
+        <span
+          className={`absolute bottom-0 left-1/2 h-0 w-0 -translate-x-[3px] border-x-[4px] border-t-[6px] border-x-transparent ${arrowClass}`}
+          aria-hidden="true"
+        />
       </div>
+    </div>
+  );
+}
+
+function ReviewLaneArrow() {
+  return (
+    <div className="flex w-6 shrink-0 items-center justify-center px-1 md:w-auto" aria-hidden="true">
+      <span className="h-px flex-1 bg-[var(--mc-slice-hardening)]" />
+      <span className="h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-[var(--mc-slice-hardening)]" />
     </div>
   );
 }
@@ -557,6 +1118,117 @@ function handoffDetail(work: DesktopDevelopmentResumePacket): string {
   if (work.phase === 'fix_required') return `${work.openFindings.length} 项意见待修复`;
   if (work.phase === 'approved_for_merge' || work.merged || work.acceptancePending) return '检视意见已清零';
   return '判断返工或进入合入';
+}
+
+function workflowNodeForInspection(
+  work: DesktopDevelopmentResumePacket,
+  id: WorkflowInspectionId,
+): DesktopDevelopmentWorkflowNode | undefined {
+  const nodeId =
+    id === 'design-entry' ? 'design' : id === 'acceptance-rework-entry' || id === 'accepted-end' ? null : id;
+  return nodeId ? work.workflowNodes.find((node) => node.id === nodeId) : undefined;
+}
+
+function inspectionShaLine(work: DesktopDevelopmentResumePacket, id: WorkflowInspectionId): string {
+  if (id === 'design-entry') {
+    return `方案 ${work.designBranch ?? '未配置'}@${shortSha(work.designExactSha)}`;
+  }
+  if (isReviewInspection(id) && work.reviewDesignExactSha) {
+    return `实现 ${shortSha(work.currentSha)} · 方案 ${shortSha(work.reviewDesignExactSha)}`;
+  }
+  return `实现 ${work.branch}@${shortSha(work.currentSha)}`;
+}
+
+function inspectionDetailLine(work: DesktopDevelopmentResumePacket, id: WorkflowInspectionId): string {
+  switch (id) {
+    case 'design-entry':
+      return work.designDocuments.length > 0 ? `${work.designDocuments.length} 份中文设计文档` : '尚未选择设计文档';
+    case 'acceptance-rework-entry':
+      return `交付 #${work.deliveryCycleNumber} · 验收返工入口`;
+    case 'implementation':
+      return `实现 #${work.attemptNumber} · 绑定代次 ${work.bindingEpoch} · ${work.sessionStatus}`;
+    case 'independent_review':
+    case 'cross_review':
+    case 'consensus':
+      return `Review ${work.reviewPhase ?? '未开始'} · 开放意见 ${work.openFindings.length}`;
+    case 'handoff':
+      return `${handoffDetail(work)} · 开放意见 ${work.openFindings.length}`;
+    case 'merge':
+      return work.merged ? '已经合入 main' : `合入方式：${mergeModeLabel(work.mergeMode)}`;
+    case 'acceptance':
+      return work.acceptancePending ? '等待你的最终体验验收' : '尚未进入最终验收';
+    case 'accepted-end':
+      return work.phase === 'accepted' ? '本交付轮次已经结束' : '验收通过后结束本交付轮次';
+  }
+}
+
+function isReviewInspection(id: WorkflowInspectionId): boolean {
+  return id === 'independent_review' || id === 'cross_review' || id === 'consensus' || id === 'handoff';
+}
+
+function formatWorkflowTime(value: number | null | undefined): string {
+  if (!value) return '暂无记录';
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(value);
+}
+
+function mergeModeLabel(mode: DesktopDevelopmentResumePacket['mergeMode']): string {
+  return mode === 'manual_confirm_in_chatgpt' ? 'ChatGPT 窗口人工确认' : '自动合入';
+}
+
+function findingScopeLabel(scope: DesktopDevelopmentResumePacket['openFindings'][number]['scope']): string {
+  return scope === 'architecture_decision' ? '架构决策' : '方案符合性';
+}
+
+function legalActionLabel(action: string): string {
+  switch (action) {
+    case 'configure_design_branch':
+      return '配置方案分支';
+    case 'rebind_session':
+      return '重新绑定 Desktop 窗口';
+    case 'rebuild_worktree_from_last_committed_sha':
+      return '从最后提交恢复工作区';
+    case 'commit_changes_before_report':
+      return '先提交当前改动';
+    case 'implement_and_report_committed_sha':
+      return '实现并报告精确提交';
+    case 'report_new_committed_sha':
+      return '报告新的精确提交';
+    case 'fix_open_findings':
+      return '修复开放检视意见';
+    case 'wait_for_independent_review':
+      return '等待独立检视';
+    case 'wait_for_cross_review':
+      return '等待交叉检视';
+    case 'wait_for_review_evidence':
+      return '等待检视证据';
+    case 'wait_for_consensus':
+      return '等待形成共识';
+    case 'authorize_review_consensus':
+      return '授权提交最终共识';
+    case 'wait_for_authorized_consensus':
+      return '等待已授权共识';
+    case 'start_fix_attempt':
+      return '开启下一次修复';
+    case 'request_user_architecture_decision':
+      return '请求你的架构决策';
+    case 'request_review_continuation_approval':
+      return '请求继续 Review';
+    case 'request_merge_confirmation':
+      return '请求合入确认';
+    case 'merge_with_native_git':
+      return '使用原生 Git 合入';
+    case 'wait_for_final_acceptance':
+      return '等待最终体验验收';
+    default:
+      return action;
+  }
 }
 
 function entryModeLabel(mode: DesktopDevelopmentResumePacket['deliveryCycleEntryMode']): string {

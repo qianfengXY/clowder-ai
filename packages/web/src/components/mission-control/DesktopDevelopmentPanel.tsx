@@ -4,9 +4,12 @@ import type {
   DesktopDevelopmentDeliveryCycleEntryMode,
   DesktopDevelopmentResumePacket,
   ExternalProject,
+  FeatureWorkspaceThreadView,
 } from '@cat-cafe/shared';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { DesktopDevelopmentWorkflowGraph } from './DesktopDevelopmentWorkflowGraph';
@@ -45,7 +48,11 @@ interface ProjectDevelopmentLaunchState {
 }
 
 export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
+  const router = useRouter();
   const { projects, setProjects } = useExternalProjectStore();
+  const setCurrentProject = useChatStore((state) => state.setCurrentProject);
+  const setCurrentThread = useChatStore((state) => state.setCurrentThread);
+  const setThreads = useChatStore((state) => state.setThreads);
   const [busy, setBusy] = useState(false);
   const [acceptingWorkId, setAcceptingWorkId] = useState<string | null>(null);
   const [reviewDecisionKey, setReviewDecisionKey] = useState<string | null>(null);
@@ -117,6 +124,30 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     setStatus(null);
     void loadWorks();
   }, [loadWorks]);
+
+  const openFeatureReview = useCallback(
+    async (backlogItemId: string) => {
+      try {
+        const response = await apiFetch(
+          `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(backlogItemId)}/threads/review`,
+          { method: 'POST' },
+        );
+        const body = (await response.json()) as { thread?: FeatureWorkspaceThreadView; error?: string };
+        if (!response.ok || !body.thread) throw new Error(body.error ?? '无法打开 Review 会话');
+        const threadResponse = await apiFetch('/api/threads');
+        if (threadResponse.ok) {
+          const threadBody = (await threadResponse.json()) as { threads?: Thread[] };
+          if (threadBody.threads) setThreads(threadBody.threads);
+        }
+        setCurrentProject(project.sourcePath);
+        setCurrentThread(body.thread.threadId);
+        router.push(`/thread/${encodeURIComponent(body.thread.threadId)}`);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : '无法打开 Review 会话');
+      }
+    },
+    [project.id, project.sourcePath, router, setCurrentProject, setCurrentThread, setThreads],
+  );
 
   const enableAutomaticMerge = async () => {
     if (!binding) return;
@@ -573,6 +604,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   work={work}
                   retrying={retryingWorkId === work.workId}
                   onRetry={() => void retryCurrentStage(work)}
+                  onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
                 />
               )}
               {work && work.openFindings.length > 0 && (

@@ -5,7 +5,7 @@ import type {
 } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesktopDevelopmentWorkflowGraph } from '../mission-control/DesktopDevelopmentWorkflowGraph';
 
 const SHA = 'a'.repeat(40);
@@ -131,6 +131,90 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(
       container.querySelector('[data-testid="workflow-graph-node-design-entry"]')?.getAttribute('data-status'),
     ).toBe('completed');
+    expect(container.querySelector('[data-testid="workflow-swimlane-graph"]')?.tagName).toBe('SECTION');
+    expect(
+      container
+        .querySelector('[data-testid="workflow-graph-node-implementation"]')
+        ?.querySelector('[data-testid="workflow-active-pulse"]'),
+    ).not.toBeNull();
+  });
+
+  it('uses measured return rails and keeps inactive route text readable', () => {
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+
+    const rails = container.querySelector('[data-testid="workflow-return-rails"]');
+    expect(rails?.getAttribute('preserveAspectRatio')).toBeNull();
+    expect(rails?.getAttribute('viewBox')).toBeNull();
+    expect(rails?.querySelector('marker')?.getAttribute('markerUnits')).toBe('userSpaceOnUse');
+    const inactiveRoute = Array.from(container.querySelectorAll('li[data-active="false"]')).find((item) =>
+      item.textContent?.includes('仍有检视意见'),
+    );
+    expect(inactiveRoute?.className).not.toContain('opacity-');
+    const transitionLabel = Array.from(container.querySelectorAll('span')).find((item) =>
+      item.textContent?.includes('提交精确 commit'),
+    );
+    expect(transitionLabel?.closest('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('previews a node on focus and opens a persistent detail dialog on click', () => {
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+
+    const implementation = container.querySelector<HTMLButtonElement>(
+      '[data-testid="workflow-graph-node-implementation"]',
+    );
+    act(() => implementation?.focus());
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('负责人：ChatGPT Desktop');
+
+    act(() => implementation?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    const inspector = container.querySelector('[data-testid="workflow-node-inspector"]');
+    expect(inspector?.getAttribute('role')).toBe('dialog');
+    expect(inspector?.textContent).toContain('实现 #1 · 绑定代次 1');
+    expect(inspector?.textContent).toContain('实现并报告精确提交');
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(container.querySelector('[data-testid="workflow-node-inspector"]')).toBeNull();
+    expect(document.activeElement).toBe(implementation);
+  });
+
+  it('shows Review findings and opens the bound feature Review thread', () => {
+    const openReview = vi.fn();
+    act(() =>
+      root.render(
+        <DesktopDevelopmentWorkflowGraph
+          work={packet({
+            reviewRoundId: 'review-round-1',
+            reviewPhase: 'consensus_ready',
+            openFindings: [
+              {
+                findingId: 'finding-1',
+                severity: 'P2',
+                summary: '移动端流程过长',
+                evidenceRefs: ['git:test'],
+                designRefs: ['git:design'],
+                scope: 'plan_conformance',
+                architectureDecisionRecorded: false,
+                status: 'open',
+              },
+            ],
+          })}
+          retrying={false}
+          onRetry={() => {}}
+          onOpenReview={openReview}
+        />,
+      ),
+    );
+
+    const stages = container.querySelector('[data-testid="workflow-review-stages"]');
+    expect(stages?.className).toContain('overflow-x-auto');
+    expect(stages?.getAttribute('aria-label')).toBe('Review 三阶段，可横向滚动');
+    const consensus = container.querySelector<HTMLButtonElement>('[data-testid="workflow-graph-node-consensus"]');
+    expect(consensus?.className).toContain('shrink-0');
+    act(() => consensus?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(container.querySelector('[data-testid="workflow-node-inspector"]')?.textContent).toContain('移动端流程过长');
+    const openButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+      button.textContent?.includes('打开 Review 会话'),
+    );
+    act(() => openButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(openReview).toHaveBeenCalledTimes(1);
   });
 
   it('collapses the graph while keeping its current-stage summary visible', () => {
