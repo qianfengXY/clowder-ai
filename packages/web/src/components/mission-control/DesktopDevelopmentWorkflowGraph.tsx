@@ -209,7 +209,7 @@ function WorkflowSwimlaneGraph({
   return (
     <section
       ref={graphRef}
-      className="relative m-2 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-7 sm:m-3"
+      className="relative m-1 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-1 sm:m-3 sm:pr-7"
       aria-label={`开发闭环泳道图，当前停在${currentLabel}`}
       data-testid="workflow-swimlane-graph"
     >
@@ -936,7 +936,7 @@ function WorkflowReturnRails({
   return (
     <svg
       ref={svgRef}
-      className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+      className="pointer-events-none absolute inset-0 z-10 hidden h-full w-full sm:block"
       width="100%"
       height="100%"
       aria-hidden="true"

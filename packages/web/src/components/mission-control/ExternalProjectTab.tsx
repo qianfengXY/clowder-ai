@@ -330,7 +330,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
       {/* Content — inert when stale blocks ALL interaction (mouse + keyboard + focus) to prevent cross-project writes */}
       <div ref={contentRef} className={`min-h-0 flex-1 overflow-auto ${isStale ? 'opacity-60' : ''}`}>
-        <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid min-h-0 grid-cols-1 gap-4 p-3 sm:p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           {/* Left column */}
           <div className="space-y-4">
             <DevelopmentTab active={subTab === 'development'} project={project} />

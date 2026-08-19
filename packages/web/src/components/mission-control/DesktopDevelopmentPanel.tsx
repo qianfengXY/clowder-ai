@@ -409,7 +409,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const pilotCount = binding.successfulManualPilotCount;
   const worksById = new Map(works.map((work) => [work.workId, work]));
   return (
-    <section className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-5">
+    <section className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-3 sm:p-5">
       <div>
         <h3 className="text-sm font-semibold text-cafe">ChatGPT Desktop 开发闭环</h3>
         <p className="mt-1 text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
@@ -549,7 +549,10 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
             launchState.desktopBinding?.chatRef ??
             (launchState.desktopTask?.status === 'created' ? launchState.desktopTask.threadId : undefined);
           return (
-            <article key={launchState.backlogItemId} className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-3">
+            <article
+              key={launchState.backlogItemId}
+              className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-3 sm:px-3"
+            >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="text-xs font-medium text-cafe">
