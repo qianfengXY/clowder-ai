@@ -38,7 +38,7 @@ interface ThreadListResponse {
 type SelfClaimPolicyBlocker = 'once' | 'thread' | null;
 
 const CONTENT_SURFACE_CLASS =
-  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
+  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-1 px-2 py-4 sm:m-3 sm:px-9 sm:py-8';
 const MISSION_HUB_ACTIVE_TAB_KEY = 'cat-cafe:mission-hub:active-tab';
 
 function detectSelfClaimPolicyBlocker(rawError: string): SelfClaimPolicyBlocker {
