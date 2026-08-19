@@ -121,6 +121,10 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(container.textContent).toContain('方案新增 / 方案变更');
     expect(container.textContent).toContain('验收未通过 / 返工');
     expect(container.textContent).toContain('仍有检视意见：回到 ChatGPT 修复，再次进入 Review');
+    expect(container.querySelector('[data-testid="workflow-swimlane-graph"]')).not.toBeNull();
+    expect(container.textContent).toContain('ChatGPT 持球');
+    expect(container.textContent).toContain('多猫检视');
+    expect(container.textContent).toContain('协调与门控');
     expect(
       container.querySelector('[data-testid="workflow-graph-node-implementation"]')?.getAttribute('data-status'),
     ).toBe('active');

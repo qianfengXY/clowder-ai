@@ -5,7 +5,7 @@ import type {
   DesktopDevelopmentWorkflowNode,
   DesktopDevelopmentWorkflowNodeStatus,
 } from '@cat-cafe/shared';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 type GraphStatus = DesktopDevelopmentWorkflowNodeStatus | 'inactive';
 
@@ -22,22 +22,12 @@ export function DesktopDevelopmentWorkflowGraph({
   const nodes = work.workflowNodes ?? [];
   if (nodes.length === 0) return null;
 
-  const node = (id: DesktopDevelopmentWorkflowNode['id']) => nodes.find((candidate) => candidate.id === id);
   const current =
     nodes.find((candidate) => candidate.status === 'blocked') ??
     nodes.find((candidate) => candidate.status === 'active');
   const retryable = current?.manualAction === 'wake_desktop' || current?.manualAction === 'replay_review_stage';
-  const designEntry = node('design');
-  const implementation = node('implementation');
-  const independentReview = node('independent_review');
-  const crossReview = node('cross_review');
-  const consensus = node('consensus');
-  const handoff = node('handoff');
-  const merge = node('merge');
-  const acceptance = node('acceptance');
   const terminalAccepted = work.phase === 'accepted';
   const terminalRejected = work.phase === 'rejected';
-  const reviewStatus = aggregateStatus([independentReview, crossReview, consensus]);
   const currentLabel = terminalAccepted
     ? '验收通过 · 本轮结束'
     : terminalRejected
@@ -107,120 +97,7 @@ export function DesktopDevelopmentWorkflowGraph({
 
       {!collapsed && (
         <div id={`workflow-graph-body-${work.workId}`} data-testid="workflow-graph-body">
-          <div
-            className="m-3 rounded-2xl bg-[var(--console-shell-bg)] p-3 sm:p-4"
-            role="img"
-            aria-label={`开发闭环，当前停在${currentLabel}`}
-          >
-            <div className="grid grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)] items-stretch">
-              <FlowNode
-                id="design-entry"
-                step="入口 A"
-                title="方案新增 / 方案变更"
-                detail="提交方案分支后进入"
-                status={
-                  work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive'
-                }
-              />
-              <div className="flex items-center justify-center" aria-hidden="true">
-                <span className="rounded-full bg-[var(--console-card-bg)] px-1.5 py-1 text-micro text-cafe-secondary">
-                  或
-                </span>
-              </div>
-              <FlowNode
-                id="acceptance-rework-entry"
-                step="入口 B"
-                title="验收未通过 / 返工"
-                detail="保留证据，重新进入闭环"
-                status={
-                  terminalRejected
-                    ? 'active'
-                    : work.deliveryCycleEntryMode === 'acceptance_rework'
-                      ? 'completed'
-                      : 'inactive'
-                }
-              />
-            </div>
-
-            <VerticalFlowArrow label="汇入本轮开发" />
-            <FlowNode
-              id="implementation"
-              step="01"
-              title="ChatGPT 实现 / 修复"
-              detail={`原 Desktop 窗口 · 实现 #${work.attemptNumber}`}
-              status={implementation?.status ?? 'pending'}
-              actor={implementation ? workflowActorLabel(implementation.actor) : undefined}
-            />
-
-            <VerticalFlowArrow label="提交实现" />
-            <div
-              className={`rounded-2xl border p-3 ${graphContainerClass(reviewStatus)}`}
-              data-testid="workflow-review-loop"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <StepBadge label="02" />
-                  <div>
-                    <div className="text-xs font-semibold text-cafe">Review 循环</div>
-                    <div className="mt-0.5 text-micro text-cafe-secondary">三阶段检视与共识收敛</div>
-                  </div>
-                </div>
-                <StatusBadge status={reviewStatus} />
-              </div>
-              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
-                <CompactNode node={independentReview} />
-                <FlowArrow compact />
-                <CompactNode node={crossReview} />
-                <FlowArrow compact />
-                <CompactNode node={consensus} />
-              </div>
-            </div>
-
-            <VerticalFlowArrow />
-            <FlowNode
-              id="review-gate"
-              step="03"
-              title="检视结果 / 清零门"
-              detail={handoffDetail(work)}
-              status={handoff?.status ?? 'pending'}
-              actor={handoff ? workflowActorLabel(handoff.actor) : undefined}
-            />
-
-            <LoopConnector label="仍有检视意见：回到 ChatGPT 修复，再次进入 Review" />
-            <VerticalFlowArrow label="检视意见清零" />
-
-            <div className="grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
-              <FlowNode
-                id="merge"
-                step="04"
-                title="合入 main"
-                detail="通过合入门禁"
-                status={merge?.status ?? 'pending'}
-                actor={merge ? workflowActorLabel(merge.actor) : undefined}
-              />
-              <FlowArrow compact />
-              <FlowNode
-                id="acceptance"
-                step="05"
-                title="最终验收"
-                detail="只有你能决定"
-                status={acceptance?.status ?? 'pending'}
-                actor="你"
-              />
-              <FlowArrow label="通过" compact />
-              <FlowNode
-                id="accepted-end"
-                step="完成"
-                title="验收通过 / 结束"
-                detail="以后方案变化可再开启"
-                status={terminalAccepted ? 'active' : 'pending'}
-              />
-            </div>
-
-            <AcceptanceReworkConnector
-              active={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'}
-            />
-          </div>
+          <WorkflowSwimlaneGraph work={work} currentLabel={currentLabel} />
 
           <p className="border-t border-[var(--console-hover-bg)] px-4 py-3 text-micro leading-relaxed text-cafe-secondary">
             高亮节点就是当前执行位置；检视意见未清零会回到同一个 ChatGPT
@@ -232,64 +109,416 @@ export function DesktopDevelopmentWorkflowGraph({
   );
 }
 
-function FlowNode({
+type ActorTone = 'entry' | 'desktop' | 'review' | 'catcafe' | 'user';
+
+function WorkflowSwimlaneGraph({ work, currentLabel }: { work: DesktopDevelopmentResumePacket; currentLabel: string }) {
+  const nodes = work.workflowNodes ?? [];
+  const node = (id: DesktopDevelopmentWorkflowNode['id']) => nodes.find((candidate) => candidate.id === id);
+  const designEntry = node('design');
+  const implementation = node('implementation');
+  const independentReview = node('independent_review');
+  const crossReview = node('cross_review');
+  const consensus = node('consensus');
+  const handoff = node('handoff');
+  const merge = node('merge');
+  const acceptance = node('acceptance');
+  const terminalAccepted = work.phase === 'accepted';
+  const terminalRejected = work.phase === 'rejected';
+  const reviewStatus = aggregateStatus([independentReview, crossReview, consensus]);
+  const designEntryStatus =
+    work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive';
+  const reworkEntryStatus = terminalRejected
+    ? 'active'
+    : work.deliveryCycleEntryMode === 'acceptance_rework'
+      ? 'completed'
+      : 'inactive';
+  const reviewReturnActive = work.phase === 'fix_required' || handoff?.status === 'blocked';
+  const mergeRouteActive =
+    work.phase === 'approved_for_merge' || work.merged || work.acceptancePending || work.phase === 'accepted';
+
+  return (
+    <div
+      className="relative m-3 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-7"
+      role="img"
+      aria-label={`开发闭环泳道图，当前停在${currentLabel}`}
+      data-testid="workflow-swimlane-graph"
+    >
+      <WorkflowReturnRails
+        workId={work.workId}
+        reviewActive={reviewReturnActive}
+        acceptanceActive={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'}
+      />
+
+      <WorkflowLane tone="entry" label="进入" caption="两种入口">
+        <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] sm:gap-0">
+          <LaneNode
+            id="design-entry"
+            tone="user"
+            step="入口 A"
+            title="方案新增 / 方案变更"
+            detail={`${work.designBranch}@${shortSha(work.designExactSha)}`}
+            meta="方案提交后开启新交付轮次"
+            status={designEntryStatus}
+            dashed
+          />
+          <LaneOr />
+          <LaneNode
+            id="acceptance-rework-entry"
+            tone="user"
+            step="入口 B"
+            title="验收未通过 / 返工"
+            detail={`保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据`}
+            meta="直接回到实现与 Review 循环"
+            status={reworkEntryStatus}
+            dashed
+          />
+        </div>
+      </WorkflowLane>
+
+      <LaneTransition label="任一入口汇入本轮开发" />
+
+      <WorkflowLane tone="desktop" label="Desktop" caption="ChatGPT 持球">
+        <LaneNode
+          id="implementation"
+          tone="desktop"
+          step="01"
+          title="ChatGPT 实现 / 修复"
+          detail={`实现 #${work.attemptNumber} · ${shortSha(work.currentSha)}`}
+          meta={`原 Desktop 窗口 · 绑定代次 ${work.bindingEpoch}`}
+          status={implementation?.status ?? 'pending'}
+        />
+      </WorkflowLane>
+
+      <LaneTransition label="提交精确 commit" strong />
+
+      <WorkflowLane tone="review" label="Review" caption="多猫检视">
+        <div
+          className={`relative overflow-hidden rounded-2xl border border-l-4 p-3 ${actorBorderClass('review')} ${graphContainerClass(reviewStatus)}`}
+          data-testid="workflow-review-loop"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <StepBadge label="02" />
+              <div>
+                <div className="text-xs font-semibold text-cafe">Review 共识循环</div>
+                <div className="mt-0.5 text-micro text-cafe-secondary">先独立、再交叉、最后只发布一份共识</div>
+              </div>
+            </div>
+            <StatusBadge status={reviewStatus} />
+          </div>
+          <div className="mt-3 grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] sm:gap-0">
+            <ReviewStageNode node={independentReview} title="独立检视" detail="草稿隔离" />
+            <LaneArrow />
+            <ReviewStageNode node={crossReview} title="交叉检视" detail="核验对方意见" />
+            <LaneArrow />
+            <ReviewStageNode node={consensus} title="共识整理" detail={`${work.openFindings.length} 项开放意见`} />
+          </div>
+        </div>
+      </WorkflowLane>
+
+      <LaneTransition label="共识 verdict" strong />
+
+      <WorkflowLane tone="catcafe" label="CatCafe" caption="协调与门控">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.05fr)_minmax(150px,0.75fr)]">
+          <DecisionNode work={work} node={handoff} />
+          <fieldset className="flex flex-col justify-center gap-2">
+            <legend className="sr-only">清零门分支</legend>
+            <RouteCard
+              tone="warning"
+              active={reviewReturnActive}
+              symbol="↺"
+              title="仍有检视意见："
+              detail="回到 ChatGPT 修复，再次进入 Review"
+            />
+            <RouteCard
+              tone="success"
+              active={mergeRouteActive}
+              symbol="↓"
+              title="检视意见清零"
+              detail="进入 04 · 合入 main"
+            />
+          </fieldset>
+        </div>
+      </WorkflowLane>
+
+      <LaneTransition label="清零后放行" />
+
+      <WorkflowLane tone="user" label="交付" caption="合入与验收">
+        <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] sm:gap-0">
+          <LaneNode
+            id="merge"
+            tone="desktop"
+            step="04"
+            title="合入 main"
+            detail="通过合入门禁"
+            meta={work.mergeMode === 'manual_confirm_in_chatgpt' ? 'ChatGPT 窗口人工确认' : work.mergeMode}
+            status={merge?.status ?? 'pending'}
+          />
+          <LaneArrow />
+          <LaneNode
+            id="acceptance"
+            tone="user"
+            step="05"
+            title="最终验收"
+            detail="只有你能决定"
+            meta={work.acceptancePending ? '等待你的验收结果' : '尚未进入验收'}
+            status={acceptance?.status ?? 'pending'}
+          />
+          <LaneArrow label="通过" />
+          <LaneNode
+            id="accepted-end"
+            tone="user"
+            step="完成"
+            title="验收通过 / 结束"
+            detail="本交付轮次终止"
+            meta="后续方案变化从入口 A 再开启"
+            status={terminalAccepted ? 'active' : 'pending'}
+          />
+        </div>
+        <div
+          className={`mt-3 flex items-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2 ${terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework' ? '' : 'opacity-50'}`}
+          role="note"
+          aria-label="验收未通过返工路径"
+        >
+          <span className="mr-2 text-base text-[var(--semantic-warning)]">↶</span>
+          <span className="text-micro font-medium text-cafe-secondary">
+            验收未通过：返回入口 B，保留本轮证据并开启下一交付轮次
+          </span>
+        </div>
+      </WorkflowLane>
+    </div>
+  );
+}
+
+function WorkflowLane({
+  tone,
+  label,
+  caption,
+  children,
+}: {
+  tone: ActorTone;
+  label: string;
+  caption: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[72px_minmax(0,1fr)] border-b border-[var(--console-border-soft)] last:border-b-0">
+      <div className="relative flex flex-col justify-center border-r border-[var(--console-border-soft)] px-2 py-4">
+        <span className={`absolute inset-y-0 left-0 w-1 ${actorBarClass(tone)}`} aria-hidden="true" />
+        <div className={`text-micro font-bold ${actorTextClass(tone)}`}>{label}</div>
+        <div className="mt-1 text-micro leading-tight text-cafe-secondary">{caption}</div>
+      </div>
+      <div className="min-w-0 p-3">{children}</div>
+    </div>
+  );
+}
+
+function LaneNode({
   id,
+  tone,
   step,
   title,
   detail,
+  meta,
   status,
-  actor,
+  dashed = false,
 }: {
   id: string;
+  tone: ActorTone;
   step: string;
   title: string;
   detail: string;
+  meta: string;
   status: GraphStatus;
-  actor?: string;
+  dashed?: boolean;
 }) {
   const isCurrent = status === 'active' || status === 'blocked';
   return (
     <div
-      className={`relative min-h-[92px] overflow-hidden rounded-2xl border p-3 ${graphNodeClass(status)}`}
+      className={`relative min-h-[98px] overflow-hidden rounded-2xl border border-l-4 p-3 transition-colors ${actorBorderClass(tone)} ${graphNodeClass(status)} ${dashed ? 'border-dashed' : ''}`}
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
       aria-current={isCurrent ? 'step' : undefined}
+      title={`${title}\n${detail}\n${meta}\n状态：${graphStatusLabel(status)}`}
     >
-      {isCurrent && <span className="absolute inset-y-0 left-0 w-1 bg-[var(--mc-accent)]" aria-hidden="true" />}
       <div className="flex items-center justify-between gap-2">
         <StepBadge label={step} />
         <StatusBadge status={status} />
       </div>
       <div className="mt-2 text-xs font-semibold text-cafe">{title}</div>
-      <div className="mt-1 text-micro leading-relaxed text-cafe-secondary">{detail}</div>
-      {actor && (
-        <div className="mt-2 inline-flex rounded-full bg-[var(--console-shell-bg)] px-2 py-1 text-micro text-cafe-secondary">
-          {actor}
-        </div>
-      )}
+      <div className="mt-1 text-micro text-cafe-secondary">{detail}</div>
+      <div className="mt-1 text-micro leading-relaxed text-cafe-secondary opacity-80">{meta}</div>
     </div>
   );
 }
 
-function CompactNode({ node }: { node: DesktopDevelopmentWorkflowNode | undefined }) {
+function ReviewStageNode({
+  node,
+  title,
+  detail,
+}: {
+  node: DesktopDevelopmentWorkflowNode | undefined;
+  title: string;
+  detail: string;
+}) {
   const status = node?.status ?? 'pending';
+  const progress = node?.requiredCount ? `${node.completedCount ?? 0}/${node.requiredCount}` : graphStatusLabel(status);
   return (
     <div
-      className={`min-h-[76px] rounded-xl border p-2.5 ${graphNodeClass(status)}`}
+      className={`min-h-[86px] rounded-xl border border-l-4 p-2.5 ${actorBorderClass('review')} ${graphNodeClass(status)}`}
       data-testid={`workflow-graph-node-${node?.id ?? 'unknown-review'}`}
       data-status={status}
       aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
+      title={`${title}\n${detail}\n${progress}`}
     >
       <div className="flex items-start justify-between gap-1">
-        <div className="text-micro font-semibold text-cafe">{node ? workflowNodeLabel(node.id) : '等待 Review'}</div>
+        <div className="text-micro font-semibold text-cafe">{title}</div>
         <StatusDot status={status} />
       </div>
-      <div className="mt-1 text-micro text-cafe-secondary">{graphStatusLabel(status)}</div>
-      {node?.requiredCount !== undefined && node.requiredCount > 0 && (
-        <div className="mt-1 text-micro text-cafe-secondary">
-          {node.completedCount ?? 0}/{node.requiredCount}
+      <div className="mt-1 text-micro text-cafe-secondary">{detail}</div>
+      <div className="mt-2 text-xs font-semibold text-cafe">{progress}</div>
+    </div>
+  );
+}
+
+function DecisionNode({
+  work,
+  node,
+}: {
+  work: DesktopDevelopmentResumePacket;
+  node: DesktopDevelopmentWorkflowNode | undefined;
+}) {
+  const status = node?.status ?? 'pending';
+  return (
+    <div
+      className={`relative flex min-h-[120px] items-center gap-4 overflow-hidden rounded-2xl border border-l-4 p-3 ${actorBorderClass('catcafe')} ${graphNodeClass(status)}`}
+      data-testid="workflow-graph-node-review-gate"
+      data-status={status}
+      aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
+      title={`检视清零门\n${handoffDetail(work)}\n开放意见：${work.openFindings.length}`}
+    >
+      <div className="flex h-14 w-14 shrink-0 rotate-45 items-center justify-center rounded-xl border-2 border-[var(--semantic-warning)] bg-[var(--console-card-bg)]">
+        <span className="-rotate-45 text-xs font-bold text-[var(--semantic-warning)]">03</span>
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs font-semibold text-cafe">检视清零门</div>
+          <StatusBadge status={status} />
         </div>
-      )}
+        <div className="mt-1 text-micro text-cafe-secondary">{handoffDetail(work)}</div>
+        <div className="mt-2 text-micro font-medium text-cafe">开放意见：{work.openFindings.length}</div>
+      </div>
+    </div>
+  );
+}
+
+function RouteCard({
+  tone,
+  active,
+  symbol,
+  title,
+  detail,
+}: {
+  tone: 'warning' | 'success';
+  active: boolean;
+  symbol: string;
+  title: string;
+  detail: string;
+}) {
+  const className =
+    tone === 'warning'
+      ? 'border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] text-[var(--semantic-warning)]'
+      : 'border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] text-[var(--semantic-success)]';
+  return (
+    <div className={`rounded-xl border border-dashed p-2.5 ${className} ${active ? 'shadow-sm' : 'opacity-55'}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-base font-bold">{symbol}</span>
+        <div>
+          <div className="text-micro font-semibold">{title}</div>
+          <div className="mt-0.5 text-micro text-cafe-secondary">{detail}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowReturnRails({
+  workId,
+  reviewActive,
+  acceptanceActive,
+}: {
+  workId: string;
+  reviewActive: boolean;
+  acceptanceActive: boolean;
+}) {
+  const markerId = `workflow-return-${workId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  return (
+    <svg
+      className="pointer-events-none absolute inset-y-0 right-0 z-10 h-full w-7"
+      viewBox="0 0 28 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <marker id={markerId} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--semantic-warning)" />
+        </marker>
+      </defs>
+      <path
+        d="M 3 69 H 21 V 27 H 7"
+        fill="none"
+        stroke="var(--semantic-warning)"
+        strokeWidth={reviewActive ? 1.8 : 1}
+        strokeDasharray="3 2"
+        opacity={reviewActive ? 1 : 0.35}
+        markerEnd={`url(#${markerId})`}
+      />
+      <path
+        d="M 5 93 H 26 V 9 H 9"
+        fill="none"
+        stroke="var(--semantic-warning)"
+        strokeWidth={acceptanceActive ? 1.8 : 1}
+        strokeDasharray="2 2"
+        opacity={acceptanceActive ? 1 : 0.22}
+        markerEnd={`url(#${markerId})`}
+      />
+    </svg>
+  );
+}
+
+function LaneTransition({ label, strong = false }: { label: string; strong?: boolean }) {
+  return (
+    <div className="grid h-8 grid-cols-[72px_minmax(0,1fr)]" aria-hidden="true">
+      <div className="border-r border-[var(--console-border-soft)]" />
+      <div className="relative flex items-center justify-center">
+        <span
+          className={`absolute inset-y-0 left-1/2 w-px ${strong ? 'bg-[var(--mc-accent)]' : 'bg-[var(--console-border-strong)]'}`}
+        />
+        <span className="relative rounded-full bg-[var(--console-shell-bg)] px-2 py-0.5 text-micro font-medium text-cafe-secondary">
+          {label}
+        </span>
+        <span className="absolute bottom-0 left-1/2 h-0 w-0 -translate-x-[3px] border-x-[4px] border-t-[6px] border-x-transparent border-t-[var(--mc-accent)]" />
+      </div>
+    </div>
+  );
+}
+
+function LaneOr() {
+  return (
+    <div className="flex items-center justify-center" aria-hidden="true">
+      <span className="rounded-full bg-[var(--console-shell-bg)] px-1.5 py-1 text-micro text-cafe-secondary">或</span>
+    </div>
+  );
+}
+
+function LaneArrow({ label }: { label?: string }) {
+  return (
+    <div className="hidden flex-col items-center justify-center px-1 sm:flex" aria-hidden="true">
+      {label && <span className="mb-1 whitespace-nowrap text-micro text-cafe-secondary">{label}</span>}
+      <div className="flex w-full items-center">
+        <span className="h-px flex-1 bg-[var(--mc-accent)]" />
+        <span className="h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-[var(--mc-accent)]" />
+      </div>
     </div>
   );
 }
@@ -312,55 +541,6 @@ function StatusBadge({ status }: { status: GraphStatus }) {
       <StatusDot status={status} />
       {graphStatusLabel(status)}
     </span>
-  );
-}
-
-function FlowArrow({ label, compact = false }: { label?: string; compact?: boolean }) {
-  return (
-    <div
-      className={`flex shrink-0 flex-col items-center justify-center px-1 ${compact ? 'w-[22px]' : 'w-9'}`}
-      aria-hidden="true"
-    >
-      {label && <span className="mb-1 whitespace-nowrap text-micro text-cafe-secondary">{label}</span>}
-      <div className="flex w-full items-center">
-        <span className="h-px flex-1 bg-[var(--mc-accent)]" />
-        <span className="h-0 w-0 border-y-[4px] border-l-[6px] border-y-transparent border-l-[var(--mc-accent)]" />
-      </div>
-    </div>
-  );
-}
-
-function VerticalFlowArrow({ label }: { label?: string }) {
-  return (
-    <div className="flex min-h-10 flex-col items-center justify-center py-1" aria-hidden="true">
-      {label && <span className="mb-1 text-center text-micro font-medium text-cafe-secondary">{label}</span>}
-      <span className="h-4 w-px bg-[var(--mc-accent)]" />
-      <span className="h-0 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-[var(--mc-accent)]" />
-    </div>
-  );
-}
-
-function LoopConnector({ label }: { label: string }) {
-  return (
-    <div className="mt-2 px-4" aria-hidden="true">
-      <div className="flex min-h-9 items-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2">
-        <span className="mr-2 text-sm text-[var(--semantic-warning)]">↶</span>
-        <span className="text-micro font-medium leading-relaxed text-cafe-secondary">{label}</span>
-      </div>
-    </div>
-  );
-}
-
-function AcceptanceReworkConnector({ active }: { active: boolean }) {
-  return (
-    <div className={`mt-2 px-4 ${active ? '' : 'opacity-60'}`} aria-hidden="true">
-      <div className="flex min-h-9 items-center justify-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2 text-center">
-        <span className="mr-2 text-sm text-[var(--semantic-warning)]">↶</span>
-        <span className="text-micro font-medium leading-relaxed text-cafe-secondary">
-          验收未通过：保留本轮证据，从返工入口重新进入实现与 Review 循环
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -448,6 +628,55 @@ function graphStatusLabel(status: GraphStatus): string {
       return '等待处理';
     case 'completed':
       return '已经过';
+  }
+}
+
+function shortSha(value: string | null | undefined): string {
+  return value ? value.slice(0, 8) : '等待 commit';
+}
+
+function actorBarClass(tone: ActorTone): string {
+  switch (tone) {
+    case 'entry':
+      return 'bg-[var(--console-border-strong)]';
+    case 'desktop':
+      return 'bg-[var(--semantic-info)]';
+    case 'review':
+      return 'bg-[var(--mc-slice-hardening)]';
+    case 'catcafe':
+      return 'bg-[var(--semantic-warning)]';
+    case 'user':
+      return 'bg-[var(--semantic-success)]';
+  }
+}
+
+function actorTextClass(tone: ActorTone): string {
+  switch (tone) {
+    case 'entry':
+      return 'text-cafe-secondary';
+    case 'desktop':
+      return 'text-[var(--semantic-info)]';
+    case 'review':
+      return 'text-[var(--mc-slice-hardening)]';
+    case 'catcafe':
+      return 'text-[var(--semantic-warning)]';
+    case 'user':
+      return 'text-[var(--semantic-success)]';
+  }
+}
+
+function actorBorderClass(tone: ActorTone): string {
+  switch (tone) {
+    case 'entry':
+      return 'border-l-[var(--console-border-strong)]';
+    case 'desktop':
+      return 'border-l-[var(--semantic-info)]';
+    case 'review':
+      return 'border-l-[var(--mc-slice-hardening)]';
+    case 'catcafe':
+      return 'border-l-[var(--semantic-warning)]';
+    case 'user':
+      return 'border-l-[var(--semantic-success)]';
   }
 }
 
