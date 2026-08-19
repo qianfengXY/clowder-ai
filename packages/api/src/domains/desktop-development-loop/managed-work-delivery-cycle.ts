@@ -1,4 +1,9 @@
-import type { ManagedWorkConsumerSnapshot, ManagedWorkEvidence, ReviewRoundSafeView } from '@cat-cafe/shared';
+import type {
+  DesktopDevelopmentDeliveryCycleEntryMode,
+  ManagedWorkConsumerSnapshot,
+  ManagedWorkEvidence,
+  ReviewRoundSafeView,
+} from '@cat-cafe/shared';
 
 export function deliveryCycleNumber(managed: ManagedWorkConsumerSnapshot): number {
   return managed.state.currentDeliveryCycleNumber ?? 1;
@@ -6,6 +11,13 @@ export function deliveryCycleNumber(managed: ManagedWorkConsumerSnapshot): numbe
 
 export function deliveryCycleAttemptNumber(managed: ManagedWorkConsumerSnapshot): number {
   return managed.state.currentDeliveryCycleAttemptNumber ?? managed.attempt.attemptNumber;
+}
+
+export function deliveryCycleEntryMode(managed: ManagedWorkConsumerSnapshot): DesktopDevelopmentDeliveryCycleEntryMode {
+  const boundary = currentDeliveryCycleEvidence(managed).find((evidence) => evidence.kind === 'delivery_cycle_started');
+  return boundary?.kind === 'delivery_cycle_started' && boundary.previousLifecycle === 'rejected'
+    ? 'acceptance_rework'
+    : 'design_change';
 }
 
 /** Evidence at or after the latest explicit delivery-cycle boundary. */

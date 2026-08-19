@@ -9,6 +9,7 @@ import {
   DESKTOP_DEVELOPMENT_PROTOCOL_VERSION,
   DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
   DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT,
+  type DesktopDevelopmentDeliveryCycleEntryMode,
   type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
   type DesktopDevelopmentWorkflowNode,
@@ -48,6 +49,7 @@ import {
   currentDeliveryCycleReview,
   currentDeliveryCycleSnapshot,
   deliveryCycleAttemptNumber,
+  deliveryCycleEntryMode,
   deliveryCycleNumber,
 } from './managed-work-delivery-cycle.js';
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
@@ -210,6 +212,7 @@ export interface DesktopDevelopmentLaunchState {
     readonly attemptId: string;
     readonly attemptNumber: number;
     readonly deliveryCycleNumber: number;
+    readonly deliveryCycleEntryMode: DesktopDevelopmentDeliveryCycleEntryMode;
     readonly lifecycle: ManagedWorkLifecycle;
   };
   readonly deliveryCycleStarted?: boolean;
@@ -558,8 +561,7 @@ export class DesktopDevelopmentLoopService {
     const session = await this.sessions.getCurrent(projectId, snapshot.admission.workId);
     const sessionMatchesAttempt = session?.attemptId === snapshot.attempt.attemptId;
     const deliveryCycleStart = currentDeliveryCycleEvidence(snapshot).find(
-      (evidence) =>
-        evidence.kind === 'delivery_cycle_started' && evidence.newAttemptId === snapshot.attempt.attemptId,
+      (evidence) => evidence.kind === 'delivery_cycle_started' && evidence.newAttemptId === snapshot.attempt.attemptId,
     );
     const workContext = {
       managedWork: {
@@ -567,6 +569,7 @@ export class DesktopDevelopmentLoopService {
         attemptId: snapshot.attempt.attemptId,
         attemptNumber: deliveryCycleAttemptNumber(snapshot),
         deliveryCycleNumber: deliveryCycleNumber(snapshot),
+        deliveryCycleEntryMode: deliveryCycleEntryMode(snapshot),
         lifecycle: snapshot.state.lifecycle,
       },
       ...(snapshot.state.lifecycle === 'active' && deliveryCycleStart?.kind === 'delivery_cycle_started'
@@ -1403,6 +1406,7 @@ export class DesktopDevelopmentLoopService {
       attemptId: managed.attempt.attemptId,
       attemptNumber: deliveryCycleAttemptNumber(managed),
       deliveryCycleNumber: deliveryCycleNumber(managed),
+      deliveryCycleEntryMode: deliveryCycleEntryMode(managed),
       phase: derived.phase,
       workLifecycle: managed.state.lifecycle,
       managedWorkVersion: knownManagedVersion ?? managed.state.version,

@@ -8,6 +8,7 @@ export const DESKTOP_DEVELOPMENT_REVIEW_ATTEMPT_LIMIT = 15 as const;
 export type DesktopDevelopmentProtocolVersion = typeof DESKTOP_DEVELOPMENT_PROTOCOL_VERSION;
 export type DesktopDevelopmentActor = typeof CHATGPT_DESKTOP_DEVELOPMENT_ACTOR;
 export type DesktopDevelopmentMergeMode = 'manual_confirm_in_chatgpt' | 'automatic';
+export type DesktopDevelopmentDeliveryCycleEntryMode = 'design_change' | 'acceptance_rework';
 export type DesktopDevelopmentPhase =
   | 'awaiting_design_branch'
   | 'ready_for_desktop'
@@ -228,6 +229,8 @@ export interface DesktopDevelopmentResumePacket {
   readonly attemptNumber: number;
   /** Delivery cycle number for an initial delivery, rejected repair, or accepted feature supplement. */
   readonly deliveryCycleNumber: number;
+  /** Why this delivery cycle entered the implementation/Review loop. */
+  readonly deliveryCycleEntryMode: DesktopDevelopmentDeliveryCycleEntryMode;
   readonly phase: DesktopDevelopmentPhase;
   readonly workLifecycle: 'active' | 'accepted' | 'rejected';
   readonly managedWorkVersion: number;

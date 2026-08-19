@@ -277,6 +277,8 @@ describe(
       assert.equal(first.bindingEpoch, 1);
       assert.equal(first.chatRef, 'chat-1');
       assert.equal(first.attemptNumber, 1);
+      assert.equal(first.deliveryCycleNumber, 1);
+      assert.equal(first.deliveryCycleEntryMode, 'design_change');
       assert.equal(first.phase, 'implementing');
       assert.equal(first.managedWorkVersion, 2);
       assert.equal(first.reviewRoundId, null);

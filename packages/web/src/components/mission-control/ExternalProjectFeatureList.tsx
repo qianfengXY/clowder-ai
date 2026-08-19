@@ -52,8 +52,8 @@ function launchButtonLabel(status: LaunchStatus, desktopBound: boolean, featureI
   if (status === 'ready_for_desktop') return '已启动 · 等待 Desktop';
   if (status === 'connected_to_desktop') return 'Desktop 执行中';
   if (status === 'managed_by_catcafe') return 'CatCafe 流程处理中';
-  if (status === 'rejected') return '开启修复轮次';
-  if (status === 'completed') return '发起补充实现';
+  if (status === 'rejected') return '从返工入口开启';
+  if (status === 'completed') return '从方案变更入口开启';
   if (status === 'error') return '重试启动';
   return '启动开发闭环';
 }

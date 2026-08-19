@@ -564,7 +564,7 @@ describe('ExternalProjectFeatureList', () => {
     await flush();
 
     const button = container.querySelector('[data-testid="external-project-start-item-F006"]') as HTMLButtonElement;
-    expect(button.textContent).toContain('开启修复轮次');
+    expect(button.textContent).toContain('从返工入口开启');
     expect(button.textContent).not.toContain('已完成');
     expect(button.disabled).toBe(false);
     await act(async () => {

@@ -412,6 +412,7 @@ describe('F289 project-scoped Desktop launch', () => {
       attemptId: 'attempt-backlog-1',
       attemptNumber: 1,
       deliveryCycleNumber: 1,
+      deliveryCycleEntryMode: 'design_change',
       lifecycle: 'active',
     });
 
@@ -505,6 +506,7 @@ describe('F289 project-scoped Desktop launch', () => {
     assert.equal(result.managedWork.workId, bundle.admission.workId);
     assert.equal(result.managedWork.attemptNumber, 1);
     assert.equal(result.managedWork.deliveryCycleNumber, 2);
+    assert.equal(result.managedWork.deliveryCycleEntryMode, 'acceptance_rework');
     assert.equal(result.managedWork.lifecycle, 'active');
     assert.equal(resumeInput.workId, bundle.admission.workId);
     assert.equal(resumeInput.attemptId, result.managedWork.attemptId);
