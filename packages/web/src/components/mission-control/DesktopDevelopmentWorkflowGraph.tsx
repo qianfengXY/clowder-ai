@@ -5,6 +5,7 @@ import type {
   DesktopDevelopmentWorkflowNode,
   DesktopDevelopmentWorkflowNodeStatus,
 } from '@cat-cafe/shared';
+import { useState } from 'react';
 
 type GraphStatus = DesktopDevelopmentWorkflowNodeStatus | 'inactive';
 
@@ -17,6 +18,7 @@ export function DesktopDevelopmentWorkflowGraph({
   retrying: boolean;
   onRetry: () => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const nodes = work.workflowNodes ?? [];
   if (nodes.length === 0) return null;
 
@@ -45,140 +47,201 @@ export function DesktopDevelopmentWorkflowGraph({
         : '正在确认下一节点';
 
   return (
-    <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3" data-testid={`workflow-graph-${work.workId}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-xs font-medium text-cafe">完整开发闭环图</div>
-            <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
-              交付 #{work.deliveryCycleNumber} · 实现 #{work.attemptNumber}
-            </span>
-            <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro font-medium text-cafe">
-              本轮入口：{entryModeLabel(work.deliveryCycleEntryMode)}
-            </span>
+    <section
+      className="mt-3 overflow-hidden rounded-2xl border border-[var(--console-hover-bg)] bg-[var(--console-card-bg)] shadow-sm"
+      data-testid={`workflow-graph-${work.workId}`}
+    >
+      <header className={`p-3 ${collapsed ? '' : 'border-b border-[var(--console-hover-bg)]'}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--console-hover-bg)] text-base text-[var(--mc-accent)]">
+              ↻
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-xs font-semibold text-cafe">完整开发闭环</h4>
+                <span className="rounded-full border border-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
+                  交付 #{work.deliveryCycleNumber} · 实现 #{work.attemptNumber}
+                </span>
+                <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro font-medium text-cafe">
+                  本轮入口：{entryModeLabel(work.deliveryCycleEntryMode)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 text-micro text-cafe-secondary">
+                <StatusDot
+                  status={
+                    terminalAccepted ? 'completed' : terminalRejected ? 'blocked' : (current?.status ?? 'pending')
+                  }
+                />
+                <span>当前停在：{currentLabel}</span>
+              </div>
+            </div>
           </div>
-          <div className="mt-1 text-micro text-cafe-secondary">当前停在：{currentLabel}</div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {retryable && !terminalAccepted && !terminalRejected && (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={retrying}
+                className="rounded-xl bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] shadow-sm disabled:opacity-40"
+              >
+                {retrying ? '触发中...' : workflowActionLabel(current.manualAction)}
+              </button>
+            )}
+            <button
+              type="button"
+              aria-expanded={!collapsed}
+              aria-controls={`workflow-graph-body-${work.workId}`}
+              onClick={() => setCollapsed((value) => !value)}
+              className="flex items-center gap-1 rounded-xl border border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary hover:text-cafe"
+            >
+              {collapsed ? '展开流程' : '收起流程'}
+              <span className={`text-sm transition-transform ${collapsed ? '' : 'rotate-180'}`} aria-hidden="true">
+                ▾
+              </span>
+            </button>
+          </div>
         </div>
-        {retryable && !terminalAccepted && !terminalRejected && (
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={retrying}
-            className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+      </header>
+
+      {!collapsed && (
+        <div id={`workflow-graph-body-${work.workId}`} data-testid="workflow-graph-body">
+          <div
+            className="m-3 rounded-2xl bg-[var(--console-shell-bg)] p-3 sm:p-4"
+            role="img"
+            aria-label={`开发闭环，当前停在${currentLabel}`}
           >
-            {retrying ? '触发中...' : workflowActionLabel(current.manualAction)}
-          </button>
-        )}
-      </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)] items-stretch">
+              <FlowNode
+                id="design-entry"
+                step="入口 A"
+                title="方案新增 / 方案变更"
+                detail="提交方案分支后进入"
+                status={
+                  work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive'
+                }
+              />
+              <div className="flex items-center justify-center" aria-hidden="true">
+                <span className="rounded-full bg-[var(--console-card-bg)] px-1.5 py-1 text-micro text-cafe-secondary">
+                  或
+                </span>
+              </div>
+              <FlowNode
+                id="acceptance-rework-entry"
+                step="入口 B"
+                title="验收未通过 / 返工"
+                detail="保留证据，重新进入闭环"
+                status={
+                  terminalRejected
+                    ? 'active'
+                    : work.deliveryCycleEntryMode === 'acceptance_rework'
+                      ? 'completed'
+                      : 'inactive'
+                }
+              />
+            </div>
 
-      <div className="mt-3 px-1" role="img" aria-label={`开发闭环，当前停在${currentLabel}`}>
-        <div className="grid grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] items-stretch">
-          <FlowNode
-            id="design-entry"
-            title="方案新增 / 方案变更"
-            detail="提交方案分支后进入"
-            status={work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive'}
-          />
-          <div className="flex items-center justify-center text-micro text-cafe-secondary" aria-hidden="true">
-            或
+            <VerticalFlowArrow label="汇入本轮开发" />
+            <FlowNode
+              id="implementation"
+              step="01"
+              title="ChatGPT 实现 / 修复"
+              detail={`原 Desktop 窗口 · 实现 #${work.attemptNumber}`}
+              status={implementation?.status ?? 'pending'}
+              actor={implementation ? workflowActorLabel(implementation.actor) : undefined}
+            />
+
+            <VerticalFlowArrow label="提交实现" />
+            <div
+              className={`rounded-2xl border p-3 ${graphContainerClass(reviewStatus)}`}
+              data-testid="workflow-review-loop"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <StepBadge label="02" />
+                  <div>
+                    <div className="text-xs font-semibold text-cafe">Review 循环</div>
+                    <div className="mt-0.5 text-micro text-cafe-secondary">三阶段检视与共识收敛</div>
+                  </div>
+                </div>
+                <StatusBadge status={reviewStatus} />
+              </div>
+              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
+                <CompactNode node={independentReview} />
+                <FlowArrow compact />
+                <CompactNode node={crossReview} />
+                <FlowArrow compact />
+                <CompactNode node={consensus} />
+              </div>
+            </div>
+
+            <VerticalFlowArrow />
+            <FlowNode
+              id="review-gate"
+              step="03"
+              title="检视结果 / 清零门"
+              detail={handoffDetail(work)}
+              status={handoff?.status ?? 'pending'}
+              actor={handoff ? workflowActorLabel(handoff.actor) : undefined}
+            />
+
+            <LoopConnector label="仍有检视意见：回到 ChatGPT 修复，再次进入 Review" />
+            <VerticalFlowArrow label="检视意见清零" />
+
+            <div className="grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
+              <FlowNode
+                id="merge"
+                step="04"
+                title="合入 main"
+                detail="通过合入门禁"
+                status={merge?.status ?? 'pending'}
+                actor={merge ? workflowActorLabel(merge.actor) : undefined}
+              />
+              <FlowArrow compact />
+              <FlowNode
+                id="acceptance"
+                step="05"
+                title="最终验收"
+                detail="只有你能决定"
+                status={acceptance?.status ?? 'pending'}
+                actor="你"
+              />
+              <FlowArrow label="通过" compact />
+              <FlowNode
+                id="accepted-end"
+                step="完成"
+                title="验收通过 / 结束"
+                detail="以后方案变化可再开启"
+                status={terminalAccepted ? 'active' : 'pending'}
+              />
+            </div>
+
+            <AcceptanceReworkConnector
+              active={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'}
+            />
           </div>
-          <FlowNode
-            id="acceptance-rework-entry"
-            title="验收未通过 / 返工"
-            detail="保留证据，重新进入闭环"
-            status={
-              terminalRejected
-                ? 'active'
-                : work.deliveryCycleEntryMode === 'acceptance_rework'
-                  ? 'completed'
-                  : 'inactive'
-            }
-          />
+
+          <p className="border-t border-[var(--console-hover-bg)] px-4 py-3 text-micro leading-relaxed text-cafe-secondary">
+            高亮节点就是当前执行位置；检视意见未清零会回到同一个 ChatGPT
+            窗口继续修复。验收通过后闭环结束，后续方案新增或变更从方案入口开启；验收未通过则从返工入口开启。
+          </p>
         </div>
-
-        <VerticalFlowArrow label="任一入口汇入同一个闭环" />
-        <FlowNode
-          id="implementation"
-          title="ChatGPT 实现 / 修复"
-          detail={`原 Desktop 窗口 · 实现 #${work.attemptNumber}`}
-          status={implementation?.status ?? 'pending'}
-          actor={implementation ? workflowActorLabel(implementation.actor) : undefined}
-        />
-
-        <VerticalFlowArrow label="提交实现" />
-        <div
-          className={`rounded-xl border p-3 ${graphContainerClass(reviewStatus)}`}
-          data-testid="workflow-review-loop"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-1">
-            <span className="text-xs font-medium text-cafe">Review 循环</span>
-            <span className="text-micro text-cafe-secondary">独立检视 → 交叉检视 → 共识整理</span>
-          </div>
-          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
-            <CompactNode node={independentReview} />
-            <FlowArrow compact />
-            <CompactNode node={crossReview} />
-            <FlowArrow compact />
-            <CompactNode node={consensus} />
-          </div>
-        </div>
-
-        <VerticalFlowArrow />
-        <FlowNode
-          id="review-gate"
-          title="检视结果 / 清零门"
-          detail={handoffDetail(work)}
-          status={handoff?.status ?? 'pending'}
-          actor={handoff ? workflowActorLabel(handoff.actor) : undefined}
-        />
-
-        <LoopConnector label="仍有检视意见：回到 ChatGPT 修复，再次进入 Review" />
-        <VerticalFlowArrow label="检视意见清零" />
-
-        <div className="grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
-          <FlowNode
-            id="merge"
-            title="合入 main"
-            detail="通过合入门禁"
-            status={merge?.status ?? 'pending'}
-            actor={merge ? workflowActorLabel(merge.actor) : undefined}
-          />
-          <FlowArrow compact />
-          <FlowNode
-            id="acceptance"
-            title="最终验收"
-            detail="只有你能决定"
-            status={acceptance?.status ?? 'pending'}
-            actor="你"
-          />
-          <FlowArrow label="通过" compact />
-          <FlowNode
-            id="accepted-end"
-            title="验收通过 / 结束"
-            detail="以后方案变化可再开启"
-            status={terminalAccepted ? 'active' : 'pending'}
-          />
-        </div>
-
-        <AcceptanceReworkConnector active={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'} />
-      </div>
-
-      <p className="mt-1 text-micro leading-relaxed text-cafe-secondary">
-        高亮节点就是当前执行位置；检视意见未清零会回到同一个 ChatGPT
-        窗口继续修复。验收通过后闭环结束，后续方案新增或变更从上方方案入口开启；验收未通过则从返工入口开启。
-      </p>
-    </div>
+      )}
+    </section>
   );
 }
 
 function FlowNode({
   id,
+  step,
   title,
   detail,
   status,
   actor,
 }: {
   id: string;
+  step: string;
   title: string;
   detail: string;
   status: GraphStatus;
@@ -187,17 +250,23 @@ function FlowNode({
   const isCurrent = status === 'active' || status === 'blocked';
   return (
     <div
-      className={`min-h-[82px] rounded-xl border px-3 py-2 ${graphNodeClass(status)}`}
+      className={`relative min-h-[92px] overflow-hidden rounded-2xl border p-3 ${graphNodeClass(status)}`}
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
       aria-current={isCurrent ? 'step' : undefined}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-xs font-medium text-cafe">{title}</span>
-        <span className="shrink-0 text-micro text-cafe-secondary">{graphStatusLabel(status)}</span>
+      {isCurrent && <span className="absolute inset-y-0 left-0 w-1 bg-[var(--mc-accent)]" aria-hidden="true" />}
+      <div className="flex items-center justify-between gap-2">
+        <StepBadge label={step} />
+        <StatusBadge status={status} />
       </div>
+      <div className="mt-2 text-xs font-semibold text-cafe">{title}</div>
       <div className="mt-1 text-micro leading-relaxed text-cafe-secondary">{detail}</div>
-      {actor && <div className="mt-1 text-micro text-cafe-secondary">负责人：{actor}</div>}
+      {actor && (
+        <div className="mt-2 inline-flex rounded-full bg-[var(--console-shell-bg)] px-2 py-1 text-micro text-cafe-secondary">
+          {actor}
+        </div>
+      )}
     </div>
   );
 }
@@ -206,12 +275,15 @@ function CompactNode({ node }: { node: DesktopDevelopmentWorkflowNode | undefine
   const status = node?.status ?? 'pending';
   return (
     <div
-      className={`min-h-[68px] rounded-lg border px-2 py-2 ${graphNodeClass(status)}`}
+      className={`min-h-[76px] rounded-xl border p-2.5 ${graphNodeClass(status)}`}
       data-testid={`workflow-graph-node-${node?.id ?? 'unknown-review'}`}
       data-status={status}
       aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
     >
-      <div className="text-micro font-medium text-cafe">{node ? workflowNodeLabel(node.id) : '等待 Review'}</div>
+      <div className="flex items-start justify-between gap-1">
+        <div className="text-micro font-semibold text-cafe">{node ? workflowNodeLabel(node.id) : '等待 Review'}</div>
+        <StatusDot status={status} />
+      </div>
       <div className="mt-1 text-micro text-cafe-secondary">{graphStatusLabel(status)}</div>
       {node?.requiredCount !== undefined && node.requiredCount > 0 && (
         <div className="mt-1 text-micro text-cafe-secondary">
@@ -219,6 +291,27 @@ function CompactNode({ node }: { node: DesktopDevelopmentWorkflowNode | undefine
         </div>
       )}
     </div>
+  );
+}
+
+function StepBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex min-w-7 items-center justify-center rounded-lg bg-[var(--console-hover-bg)] px-2 py-1 text-micro font-semibold text-cafe-secondary">
+      {label}
+    </span>
+  );
+}
+
+function StatusDot({ status }: { status: GraphStatus }) {
+  return <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(status)}`} aria-hidden="true" />;
+}
+
+function StatusBadge({ status }: { status: GraphStatus }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--console-shell-bg)] px-2 py-1 text-micro text-cafe-secondary">
+      <StatusDot status={status} />
+      {graphStatusLabel(status)}
+    </span>
   );
 }
 
@@ -250,8 +343,8 @@ function VerticalFlowArrow({ label }: { label?: string }) {
 function LoopConnector({ label }: { label: string }) {
   return (
     <div className="mt-2 px-4" aria-hidden="true">
-      <div className="flex min-h-9 items-center rounded-lg border border-dashed border-[var(--mc-accent)] px-3 py-1.5">
-        <span className="mr-2 text-sm text-[var(--mc-accent)]">↶</span>
+      <div className="flex min-h-9 items-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2">
+        <span className="mr-2 text-sm text-[var(--semantic-warning)]">↶</span>
         <span className="text-micro font-medium leading-relaxed text-cafe-secondary">{label}</span>
       </div>
     </div>
@@ -261,8 +354,8 @@ function LoopConnector({ label }: { label: string }) {
 function AcceptanceReworkConnector({ active }: { active: boolean }) {
   return (
     <div className={`mt-2 px-4 ${active ? '' : 'opacity-60'}`} aria-hidden="true">
-      <div className="flex min-h-9 items-center justify-center rounded-lg border border-dashed border-[var(--mc-accent)] px-3 py-1.5 text-center">
-        <span className="mr-2 text-sm text-[var(--mc-accent)]">↶</span>
+      <div className="flex min-h-9 items-center justify-center rounded-xl border border-dashed border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-3 py-2 text-center">
+        <span className="mr-2 text-sm text-[var(--semantic-warning)]">↶</span>
         <span className="text-micro font-medium leading-relaxed text-cafe-secondary">
           验收未通过：保留本轮证据，从返工入口重新进入实现与 Review 循环
         </span>
@@ -361,26 +454,44 @@ function graphStatusLabel(status: GraphStatus): string {
 function graphNodeClass(status: GraphStatus): string {
   switch (status) {
     case 'active':
-      return 'border-[var(--mc-accent)] bg-[var(--console-hover-bg)] ring-1 ring-[var(--mc-accent)]';
+      return 'border-[var(--mc-accent)] bg-[var(--console-hover-bg)] ring-2 ring-[var(--mc-accent)] shadow-sm';
     case 'blocked':
-      return 'border-[var(--mc-accent)] bg-[var(--console-shell-bg)] ring-1 ring-[var(--mc-accent)]';
+      return 'border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] ring-1 ring-[var(--semantic-warning)]';
     case 'completed':
-      return 'border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)]';
+      return 'border-[var(--semantic-success)] bg-[var(--semantic-success-surface)]';
     case 'pending':
+      return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-70';
     case 'inactive':
-      return 'border-transparent bg-[var(--console-shell-bg)] opacity-60';
+      return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-45';
+  }
+}
+
+function statusDotClass(status: GraphStatus): string {
+  switch (status) {
+    case 'active':
+      return 'bg-[var(--mc-accent)] ring-2 ring-[var(--console-card-bg)]';
+    case 'blocked':
+      return 'bg-[var(--semantic-warning)]';
+    case 'completed':
+      return 'bg-[var(--semantic-success)]';
+    case 'pending':
+      return 'bg-[var(--console-border-strong)]';
+    case 'inactive':
+      return 'bg-[var(--console-border-soft)]';
   }
 }
 
 function graphContainerClass(status: GraphStatus): string {
   switch (status) {
     case 'active':
+      return 'border-[var(--mc-accent)] bg-[var(--console-hover-bg)] shadow-sm';
     case 'blocked':
-      return 'border-[var(--mc-accent)] bg-[var(--console-hover-bg)]';
+      return 'border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)]';
     case 'completed':
-      return 'border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)]';
+      return 'border-[var(--semantic-success)] bg-[var(--semantic-success-surface)]';
     case 'pending':
+      return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-80';
     case 'inactive':
-      return 'border-transparent bg-[var(--console-shell-bg)] opacity-70';
+      return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-50';
   }
 }

@@ -3,7 +3,7 @@ import type {
   DesktopDevelopmentWorkflowNode,
   DesktopDevelopmentWorkflowNodeId,
 } from '@cat-cafe/shared';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DesktopDevelopmentWorkflowGraph } from '../mission-control/DesktopDevelopmentWorkflowGraph';
@@ -127,6 +127,21 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(
       container.querySelector('[data-testid="workflow-graph-node-design-entry"]')?.getAttribute('data-status'),
     ).toBe('completed');
+  });
+
+  it('collapses the graph while keeping its current-stage summary visible', () => {
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+
+    const collapseButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('收起流程'),
+    );
+    expect(collapseButton?.getAttribute('aria-expanded')).toBe('true');
+
+    act(() => collapseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(container.querySelector('[data-testid="workflow-graph-body"]')).toBeNull();
+    expect(container.textContent).toContain('当前停在：ChatGPT 实现 / 修复 · 等待ChatGPT Desktop');
+    expect(container.textContent).toContain('展开流程');
   });
 
   it('marks rejection rework as the selected entry and highlights the clearing gate', () => {
