@@ -208,6 +208,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(stages?.getAttribute('aria-label')).toBe('Review 三阶段，可横向滚动');
     const consensus = container.querySelector<HTMLButtonElement>('[data-testid="workflow-graph-node-consensus"]');
     expect(consensus?.className).toContain('shrink-0');
+    expect(consensus?.className).toContain('w-[148px]');
     act(() => consensus?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(container.querySelector('[data-testid="workflow-node-inspector"]')?.textContent).toContain('移动端流程过长');
     const openButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((button) =>

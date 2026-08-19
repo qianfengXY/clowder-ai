@@ -209,7 +209,7 @@ function WorkflowSwimlaneGraph({
   return (
     <section
       ref={graphRef}
-      className="relative m-3 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-7"
+      className="relative m-2 overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] pr-7 sm:m-3"
       aria-label={`开发闭环泳道图，当前停在${currentLabel}`}
       data-testid="workflow-swimlane-graph"
     >
@@ -465,11 +465,11 @@ function WorkflowLane({
   children: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[72px_minmax(0,1fr)] border-b border-[var(--console-border-soft)] last:border-b-0">
-      <div className="relative flex flex-col justify-center border-r border-[var(--console-border-soft)] px-2 py-4">
+    <div className="grid grid-cols-1 border-b border-[var(--console-border-soft)] last:border-b-0 sm:grid-cols-[72px_minmax(0,1fr)]">
+      <div className="relative flex flex-row items-center gap-2 border-b border-[var(--console-border-soft)] px-3 py-2 sm:flex-col sm:items-start sm:justify-center sm:gap-0 sm:border-r sm:border-b-0 sm:px-2 sm:py-4">
         <span className={`absolute inset-y-0 left-0 w-1 ${actorBarClass(tone)}`} aria-hidden="true" />
         <div className={`text-micro font-bold ${actorTextClass(tone)}`}>{label}</div>
-        <div className="mt-1 text-micro leading-tight text-cafe-secondary">{caption}</div>
+        <div className="text-micro leading-tight text-cafe-secondary sm:mt-1">{caption}</div>
       </div>
       <div className="min-w-0 p-3">{children}</div>
     </div>
@@ -573,7 +573,7 @@ function ReviewStageNode({
   return (
     <button
       type="button"
-      className={`group relative min-h-[94px] w-[78%] max-w-[280px] shrink-0 snap-start rounded-xl border border-l-4 p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] md:w-auto md:max-w-none md:min-w-0 ${actorBorderClass('review')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
+      className={`group relative min-h-[94px] w-[148px] shrink-0 snap-start rounded-xl border border-l-4 p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] md:w-auto md:min-w-0 ${actorBorderClass('review')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
       aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
@@ -1034,8 +1034,8 @@ function LaneTransition({ label, strong = false }: { label: string; strong?: boo
   const lineClass = strong ? 'bg-[var(--mc-accent)]' : 'bg-[var(--console-border-strong)]';
   const arrowClass = strong ? 'border-t-[var(--mc-accent)]' : 'border-t-[var(--console-border-strong)]';
   return (
-    <div className="grid h-8 grid-cols-[72px_minmax(0,1fr)]">
-      <div className="border-r border-[var(--console-border-soft)]" aria-hidden="true" />
+    <div className="grid h-8 grid-cols-1 sm:grid-cols-[72px_minmax(0,1fr)]">
+      <div className="hidden border-r border-[var(--console-border-soft)] sm:block" aria-hidden="true" />
       <div className="relative flex items-center justify-center">
         <span className={`absolute inset-y-0 left-1/2 w-px ${lineClass}`} aria-hidden="true" />
         <span
