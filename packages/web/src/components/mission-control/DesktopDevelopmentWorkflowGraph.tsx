@@ -71,111 +71,96 @@ export function DesktopDevelopmentWorkflowGraph({
         )}
       </div>
 
-      <div className="mt-3 overflow-x-auto pb-2">
-        <div className="min-w-[1040px] px-1" role="img" aria-label={`开发闭环，当前停在${currentLabel}`}>
-          <div className="grid grid-cols-[180px_36px_180px_36px_390px_36px_180px] items-center">
-            <div className="space-y-2">
-              <FlowNode
-                id="design-entry"
-                title="方案新增 / 方案变更"
-                detail="提交方案分支后进入"
-                status={
-                  work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive'
-                }
-              />
-              <div className="flex items-center gap-2 px-2 text-micro text-cafe-secondary">
-                <span className="h-px flex-1 bg-[var(--console-hover-bg)]" />
-                两种入口
-                <span className="h-px flex-1 bg-[var(--console-hover-bg)]" />
-              </div>
-              <FlowNode
-                id="acceptance-rework-entry"
-                title="验收未通过 / 返工"
-                detail="保留证据，重新进入闭环"
-                status={
-                  terminalRejected
-                    ? 'active'
-                    : work.deliveryCycleEntryMode === 'acceptance_rework'
-                      ? 'completed'
-                      : 'inactive'
-                }
-              />
-            </div>
-
-            <FlowArrow label="进入" />
-            <FlowNode
-              id="implementation"
-              title="ChatGPT 实现 / 修复"
-              detail={`原 Desktop 窗口 · 实现 #${work.attemptNumber}`}
-              status={implementation?.status ?? 'pending'}
-              actor={implementation ? workflowActorLabel(implementation.actor) : undefined}
-            />
-            <FlowArrow />
-
-            <div
-              className={`rounded-xl border p-3 ${graphContainerClass(reviewStatus)}`}
-              data-testid="workflow-review-loop"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-cafe">Review 循环</span>
-                <span className="text-micro text-cafe-secondary">意见未清零就返回修复</span>
-              </div>
-              <div className="mt-2 grid grid-cols-[1fr_22px_1fr_22px_1fr] items-center">
-                <CompactNode node={independentReview} />
-                <FlowArrow compact />
-                <CompactNode node={crossReview} />
-                <FlowArrow compact />
-                <CompactNode node={consensus} />
-              </div>
-            </div>
-
-            <FlowArrow />
-            <FlowNode
-              id="review-gate"
-              title="检视结果 / 清零门"
-              detail={handoffDetail(work)}
-              status={handoff?.status ?? 'pending'}
-              actor={handoff ? workflowActorLabel(handoff.actor) : undefined}
-            />
+      <div className="mt-3 px-1" role="img" aria-label={`开发闭环，当前停在${currentLabel}`}>
+        <div className="grid grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)] items-stretch">
+          <FlowNode
+            id="design-entry"
+            title="方案新增 / 方案变更"
+            detail="提交方案分支后进入"
+            status={work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive'}
+          />
+          <div className="flex items-center justify-center text-micro text-cafe-secondary" aria-hidden="true">
+            或
           </div>
-
-          <LoopConnector label="仍有检视意见：回到 ChatGPT 修复，再次进入 Review" />
-
-          <div className="mt-1 flex items-center justify-end">
-            <span className="mr-3 text-micro font-medium text-cafe-secondary">检视意见清零</span>
-            <FlowArrow />
-            <div className="w-[180px]">
-              <FlowNode
-                id="merge"
-                title="合入 main"
-                detail="通过合入门禁"
-                status={merge?.status ?? 'pending'}
-                actor={merge ? workflowActorLabel(merge.actor) : undefined}
-              />
-            </div>
-            <FlowArrow />
-            <div className="w-[180px]">
-              <FlowNode
-                id="acceptance"
-                title="最终验收"
-                detail="只有你能决定"
-                status={acceptance?.status ?? 'pending'}
-                actor="你"
-              />
-            </div>
-            <FlowArrow label="通过" />
-            <div className="w-[180px]">
-              <FlowNode
-                id="accepted-end"
-                title="验收通过 / 结束"
-                detail="以后方案变化可再开启"
-                status={terminalAccepted ? 'active' : 'pending'}
-              />
-            </div>
-          </div>
-
-          <AcceptanceReworkConnector active={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'} />
+          <FlowNode
+            id="acceptance-rework-entry"
+            title="验收未通过 / 返工"
+            detail="保留证据，重新进入闭环"
+            status={
+              terminalRejected
+                ? 'active'
+                : work.deliveryCycleEntryMode === 'acceptance_rework'
+                  ? 'completed'
+                  : 'inactive'
+            }
+          />
         </div>
+
+        <VerticalFlowArrow label="任一入口汇入同一个闭环" />
+        <FlowNode
+          id="implementation"
+          title="ChatGPT 实现 / 修复"
+          detail={`原 Desktop 窗口 · 实现 #${work.attemptNumber}`}
+          status={implementation?.status ?? 'pending'}
+          actor={implementation ? workflowActorLabel(implementation.actor) : undefined}
+        />
+
+        <VerticalFlowArrow label="提交实现" />
+        <div
+          className={`rounded-xl border p-3 ${graphContainerClass(reviewStatus)}`}
+          data-testid="workflow-review-loop"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-1">
+            <span className="text-xs font-medium text-cafe">Review 循环</span>
+            <span className="text-micro text-cafe-secondary">独立检视 → 交叉检视 → 共识整理</span>
+          </div>
+          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
+            <CompactNode node={independentReview} />
+            <FlowArrow compact />
+            <CompactNode node={crossReview} />
+            <FlowArrow compact />
+            <CompactNode node={consensus} />
+          </div>
+        </div>
+
+        <VerticalFlowArrow />
+        <FlowNode
+          id="review-gate"
+          title="检视结果 / 清零门"
+          detail={handoffDetail(work)}
+          status={handoff?.status ?? 'pending'}
+          actor={handoff ? workflowActorLabel(handoff.actor) : undefined}
+        />
+
+        <LoopConnector label="仍有检视意见：回到 ChatGPT 修复，再次进入 Review" />
+        <VerticalFlowArrow label="检视意见清零" />
+
+        <div className="grid grid-cols-[minmax(0,1fr)_22px_minmax(0,1fr)_22px_minmax(0,1fr)] items-center">
+          <FlowNode
+            id="merge"
+            title="合入 main"
+            detail="通过合入门禁"
+            status={merge?.status ?? 'pending'}
+            actor={merge ? workflowActorLabel(merge.actor) : undefined}
+          />
+          <FlowArrow compact />
+          <FlowNode
+            id="acceptance"
+            title="最终验收"
+            detail="只有你能决定"
+            status={acceptance?.status ?? 'pending'}
+            actor="你"
+          />
+          <FlowArrow label="通过" compact />
+          <FlowNode
+            id="accepted-end"
+            title="验收通过 / 结束"
+            detail="以后方案变化可再开启"
+            status={terminalAccepted ? 'active' : 'pending'}
+          />
+        </div>
+
+        <AcceptanceReworkConnector active={terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework'} />
       </div>
 
       <p className="mt-1 text-micro leading-relaxed text-cafe-secondary">
@@ -252,12 +237,22 @@ function FlowArrow({ label, compact = false }: { label?: string; compact?: boole
   );
 }
 
+function VerticalFlowArrow({ label }: { label?: string }) {
+  return (
+    <div className="flex min-h-10 flex-col items-center justify-center py-1" aria-hidden="true">
+      {label && <span className="mb-1 text-center text-micro font-medium text-cafe-secondary">{label}</span>}
+      <span className="h-4 w-px bg-[var(--mc-accent)]" />
+      <span className="h-0 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-[var(--mc-accent)]" />
+    </div>
+  );
+}
+
 function LoopConnector({ label }: { label: string }) {
   return (
-    <div className="ml-[216px] mr-[10px] mt-2" aria-hidden="true">
-      <div className="flex h-8 items-end rounded-bl-xl border-b border-l border-[var(--mc-accent)] px-3 pb-1">
-        <span className="mr-2 h-0 w-0 rotate-180 border-y-[4px] border-l-[6px] border-y-transparent border-l-[var(--mc-accent)]" />
-        <span className="text-micro font-medium text-cafe-secondary">{label}</span>
+    <div className="mt-2 px-4" aria-hidden="true">
+      <div className="flex min-h-9 items-center rounded-lg border border-dashed border-[var(--mc-accent)] px-3 py-1.5">
+        <span className="mr-2 text-sm text-[var(--mc-accent)]">↶</span>
+        <span className="text-micro font-medium leading-relaxed text-cafe-secondary">{label}</span>
       </div>
     </div>
   );
@@ -265,11 +260,11 @@ function LoopConnector({ label }: { label: string }) {
 
 function AcceptanceReworkConnector({ active }: { active: boolean }) {
   return (
-    <div className={`ml-[64px] mr-[194px] mt-2 ${active ? '' : 'opacity-60'}`} aria-hidden="true">
-      <div className="flex h-9 items-end justify-center rounded-bl-xl rounded-br-xl border-b border-l border-r border-[var(--mc-accent)] px-3 pb-1">
-        <span className="mr-2 h-0 w-0 rotate-180 border-y-[4px] border-l-[6px] border-y-transparent border-l-[var(--mc-accent)]" />
-        <span className="text-micro font-medium text-cafe-secondary">
-          验收未通过：保留本轮证据，从左侧返工入口重新进入实现与 Review 循环
+    <div className={`mt-2 px-4 ${active ? '' : 'opacity-60'}`} aria-hidden="true">
+      <div className="flex min-h-9 items-center justify-center rounded-lg border border-dashed border-[var(--mc-accent)] px-3 py-1.5 text-center">
+        <span className="mr-2 text-sm text-[var(--mc-accent)]">↶</span>
+        <span className="text-micro font-medium leading-relaxed text-cafe-secondary">
+          验收未通过：保留本轮证据，从返工入口重新进入实现与 Review 循环
         </span>
       </div>
     </div>
