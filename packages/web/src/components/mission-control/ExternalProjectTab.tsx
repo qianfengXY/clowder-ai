@@ -59,17 +59,9 @@ interface ExternalProjectTabProps {
   project: ExternalProject;
 }
 
-function DevelopmentTab({
-  active,
-  project,
-  onOpenFeatureConfig,
-}: {
-  active: boolean;
-  project: ExternalProject;
-  onOpenFeatureConfig: () => void;
-}) {
+function DevelopmentTab({ active, project }: { active: boolean; project: ExternalProject }) {
   if (!active) return null;
-  return <DesktopDevelopmentPanel project={project} onOpenFeatureConfig={onOpenFeatureConfig} />;
+  return <DesktopDevelopmentPanel project={project} />;
 }
 
 export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
@@ -94,10 +86,8 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [projectItems, setProjectItems] = useState<BacklogItem[]>([]);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
-  const pendingFeatureConfigFocusRef = useRef(false);
 
   useEffect(() => {
-    pendingFeatureConfigFocusRef.current = false;
     try {
       const savedSubTab = window.localStorage.getItem(`${PROJECT_SUB_TAB_KEY_PREFIX}${project.id}`)?.trim();
       setSubTab(savedSubTab && isSubTab(savedSubTab) ? savedSubTab : DEFAULT_PROJECT_SUB_TAB);
@@ -130,25 +120,6 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
     if (isStale) el.setAttribute('inert', '');
     else el.removeAttribute('inert');
   }, [isStale]);
-
-  const openFeatureConfig = useCallback(() => {
-    pendingFeatureConfigFocusRef.current = true;
-    selectSubTab('features');
-  }, [selectSubTab]);
-
-  useEffect(() => {
-    if (subTab !== 'features' || isStale || !pendingFeatureConfigFocusRef.current) return;
-    const frame = requestAnimationFrame(() => {
-      const target = contentRef.current?.querySelector<HTMLButtonElement>(
-        '[data-testid="external-project-design-branch"]',
-      );
-      if (!target) return;
-      pendingFeatureConfigFocusRef.current = false;
-      target.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-      target.focus({ preventScroll: true });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [isStale, subTab]);
 
   // Load all data for the active project — stale-while-revalidate:
   // keep old project data visible until the new project's data arrives.
@@ -319,31 +290,25 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sub-header */}
-      <div className="flex flex-col gap-2 console-divider-b bg-[var(--console-card-bg)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <nav
-          className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain"
-          aria-label="项目功能视图导航"
-          data-testid="external-project-sub-tab-strip"
-        >
-          <div className="flex w-max gap-1">
-            {SUB_TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => selectSubTab(t.id)}
-                data-testid={`external-project-sub-tab-${t.id}`}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  subTab === t.id
-                    ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
-                    : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </nav>
-        <div className="flex shrink-0 items-center justify-end gap-2">
+      <div className="flex items-center justify-between console-divider-b bg-[var(--console-card-bg)] px-6 py-2">
+        <div className="flex gap-1">
+          {SUB_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => selectSubTab(t.id)}
+              data-testid={`external-project-sub-tab-${t.id}`}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                subTab === t.id
+                  ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                  : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
           {importStatus && <span className="text-micro text-cafe-secondary">{importStatus}</span>}
           <button
             type="button"
@@ -368,11 +333,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
         <div className="grid min-h-0 grid-cols-1 gap-4 p-3 sm:p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           {/* Left column */}
           <div className="space-y-4">
-            <DevelopmentTab
-              active={subTab === 'development'}
-              project={project}
-              onOpenFeatureConfig={openFeatureConfig}
-            />
+            <DevelopmentTab active={subTab === 'development'} project={project} />
             {/* Stage 0 Frame prompt */}
             {!auditFrame && subTab === 'audit' && (
               <div className="rounded-lg bg-[var(--console-shell-bg)] p-4 text-center">

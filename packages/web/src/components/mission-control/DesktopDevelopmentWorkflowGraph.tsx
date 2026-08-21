@@ -1,36 +1,13 @@
 'use client';
 
 import type {
-  DesktopDevelopmentManualAction,
   DesktopDevelopmentResumePacket,
   DesktopDevelopmentWorkflowNode,
   DesktopDevelopmentWorkflowNodeStatus,
 } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-type GraphStatus = DesktopDevelopmentWorkflowNodeStatus | 'available' | 'inactive';
-type DirectManualAction = Extract<DesktopDevelopmentManualAction, 'wake_desktop' | 'replay_review_stage'>;
-type GuidedManualAction = Exclude<DesktopDevelopmentManualAction, DirectManualAction>;
-
-type WorkflowNodeCommandModel =
-  | {
-      readonly kind: 'direct';
-      readonly nodeId: DesktopDevelopmentWorkflowNode['id'];
-      readonly action: DirectManualAction;
-      readonly reason: string;
-    }
-  | {
-      readonly kind: 'entry';
-      readonly entryId: 'design-entry' | 'acceptance-rework-entry';
-      readonly reason: string;
-    }
-  | {
-      readonly kind: 'guided';
-      readonly nodeId: DesktopDevelopmentWorkflowNode['id'];
-      readonly action: GuidedManualAction;
-      readonly reason: string;
-    }
-  | { readonly kind: 'unavailable'; readonly reason: string };
+type GraphStatus = DesktopDevelopmentWorkflowNodeStatus | 'inactive';
 type WorkflowInspectionId =
   | 'design-entry'
   | 'acceptance-rework-entry'
@@ -58,27 +35,22 @@ interface WorkflowHoverState {
 export function DesktopDevelopmentWorkflowGraph({
   work,
   retrying,
-  onTriggerNode,
+  onRetry,
   onOpenReview,
-  startingDeliveryCycle = false,
-  onStartDeliveryCycle,
-  onFocusManualAction,
-  feedback,
 }: {
   work: DesktopDevelopmentResumePacket;
   retrying: boolean;
-  onTriggerNode: (nodeId: DesktopDevelopmentWorkflowNode['id']) => void;
+  onRetry: () => void;
   onOpenReview?: () => void;
-  startingDeliveryCycle?: boolean;
-  onStartDeliveryCycle?: () => void;
-  onFocusManualAction?: (action: DesktopDevelopmentManualAction) => void;
-  feedback?: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const nodes = work.workflowNodes ?? [];
   if (nodes.length === 0) return null;
 
-  const current = firstCurrentWorkflowNode(nodes);
+  const current =
+    nodes.find((candidate) => candidate.status === 'blocked') ??
+    nodes.find((candidate) => candidate.status === 'active');
+  const retryable = current?.manualAction === 'wake_desktop' || current?.manualAction === 'replay_review_stage';
   const terminalAccepted = work.phase === 'accepted';
   const terminalRejected = work.phase === 'rejected';
   const currentLabel = terminalAccepted
@@ -122,6 +94,16 @@ export function DesktopDevelopmentWorkflowGraph({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {retryable && !terminalAccepted && !terminalRejected && (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={retrying}
+                className="rounded-xl bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] shadow-sm disabled:opacity-40"
+              >
+                {retrying ? '触发中...' : workflowActionLabel(current.manualAction)}
+              </button>
+            )}
             <button
               type="button"
               aria-expanded={!collapsed}
@@ -140,26 +122,7 @@ export function DesktopDevelopmentWorkflowGraph({
 
       {!collapsed && (
         <div id={`workflow-graph-body-${work.workId}`} data-testid="workflow-graph-body">
-          <WorkflowSwimlaneGraph
-            work={work}
-            currentLabel={currentLabel}
-            retrying={retrying}
-            onTriggerNode={onTriggerNode}
-            onOpenReview={onOpenReview}
-            startingDeliveryCycle={startingDeliveryCycle}
-            onStartDeliveryCycle={onStartDeliveryCycle}
-            onFocusManualAction={onFocusManualAction}
-          />
-
-          {feedback && (
-            <output
-              className="mx-3 mb-3 block rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-3 py-2 text-micro leading-relaxed text-cafe-secondary"
-              aria-live="polite"
-              data-testid={`workflow-node-feedback-${work.workId}`}
-            >
-              {feedback}
-            </output>
-          )}
+          <WorkflowSwimlaneGraph work={work} currentLabel={currentLabel} onOpenReview={onOpenReview} />
 
           <p className="border-t border-[var(--console-hover-bg)] px-4 py-3 text-micro leading-relaxed text-cafe-secondary">
             高亮节点就是当前执行位置；检视意见未清零会回到同一个 ChatGPT
@@ -176,21 +139,11 @@ type ActorTone = 'entry' | 'desktop' | 'review' | 'catcafe' | 'user';
 function WorkflowSwimlaneGraph({
   work,
   currentLabel,
-  retrying,
-  onTriggerNode,
   onOpenReview,
-  startingDeliveryCycle,
-  onStartDeliveryCycle,
-  onFocusManualAction,
 }: {
   work: DesktopDevelopmentResumePacket;
   currentLabel: string;
-  retrying: boolean;
-  onTriggerNode: (nodeId: DesktopDevelopmentWorkflowNode['id']) => void;
   onOpenReview?: () => void;
-  startingDeliveryCycle: boolean;
-  onStartDeliveryCycle?: () => void;
-  onFocusManualAction?: (action: DesktopDevelopmentManualAction) => void;
 }) {
   const [inspection, setInspection] = useState<WorkflowInspectionSelection | null>(null);
   const [hovered, setHovered] = useState<WorkflowHoverState | null>(null);
@@ -209,12 +162,8 @@ function WorkflowSwimlaneGraph({
   const terminalAccepted = work.phase === 'accepted';
   const terminalRejected = work.phase === 'rejected';
   const reviewStatus = aggregateStatus([independentReview, crossReview, consensus]);
-  const currentNodeId = firstCurrentWorkflowNode(nodes)?.id;
-  const designEntryStatus = terminalAccepted
-    ? 'available'
-    : work.deliveryCycleEntryMode === 'design_change'
-      ? (designEntry?.status ?? 'pending')
-      : 'inactive';
+  const designEntryStatus =
+    work.deliveryCycleEntryMode === 'design_change' ? (designEntry?.status ?? 'pending') : 'inactive';
   const reworkEntryStatus = terminalRejected
     ? 'active'
     : work.deliveryCycleEntryMode === 'acceptance_rework'
@@ -226,22 +175,9 @@ function WorkflowSwimlaneGraph({
   const safeWorkId = work.workId.replace(/[^a-zA-Z0-9_-]/g, '');
   const inspectorId = `workflow-node-inspector-${safeWorkId}`;
   const tooltipId = `workflow-node-tooltip-${safeWorkId}`;
-  const inspectionEpoch = [
-    work.attemptId,
-    work.managedWorkVersion,
-    work.phase,
-    work.reviewRoundVersion ?? 0,
-    work.sessionVersion,
-  ].join(':');
   const closeInspection = () => {
     setInspection(null);
     inspectionTriggerRef.current?.focus();
-  };
-  const guideManualAction = (action: DesktopDevelopmentManualAction) => {
-    setInspection(null);
-    setHovered(null);
-    inspectionTriggerRef.current = null;
-    onFocusManualAction?.(action);
   };
   const inspect = (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => {
     inspectionTriggerRef.current = trigger;
@@ -270,13 +206,6 @@ function WorkflowSwimlaneGraph({
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [inspection]);
 
-  useEffect(() => {
-    void inspectionEpoch;
-    setInspection(null);
-    setHovered(null);
-    inspectionTriggerRef.current = null;
-  }, [inspectionEpoch]);
-
   return (
     <section
       ref={graphRef}
@@ -301,7 +230,6 @@ function WorkflowSwimlaneGraph({
             detail={`${work.designBranch}@${shortSha(work.designExactSha)}`}
             meta="方案提交后开启新交付轮次"
             status={designEntryStatus}
-            current={currentNodeId === 'design'}
             owner="你"
             selected={inspection?.id === 'design-entry'}
             onInspect={inspect}
@@ -319,7 +247,6 @@ function WorkflowSwimlaneGraph({
             detail={`保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据`}
             meta="直接回到实现与 Review 循环"
             status={reworkEntryStatus}
-            current={terminalRejected}
             owner="你"
             selected={inspection?.id === 'acceptance-rework-entry'}
             onInspect={inspect}
@@ -343,7 +270,6 @@ function WorkflowSwimlaneGraph({
           detail={`实现 #${work.attemptNumber} · ${shortSha(work.currentSha)}`}
           meta={`原 Desktop 窗口 · 绑定代次 ${work.bindingEpoch}`}
           status={implementation?.status ?? 'pending'}
-          current={currentNodeId === 'implementation'}
           owner="ChatGPT Desktop"
           selected={inspection?.id === 'implementation'}
           onInspect={inspect}
@@ -381,7 +307,6 @@ function WorkflowSwimlaneGraph({
               node={independentReview}
               title="独立检视"
               detail="草稿隔离"
-              current={currentNodeId === 'independent_review'}
               selected={inspection?.id === 'independent_review'}
               onInspect={inspect}
               onPreview={preview}
@@ -394,7 +319,6 @@ function WorkflowSwimlaneGraph({
               node={crossReview}
               title="交叉检视"
               detail="核验对方意见"
-              current={currentNodeId === 'cross_review'}
               selected={inspection?.id === 'cross_review'}
               onInspect={inspect}
               onPreview={preview}
@@ -408,7 +332,6 @@ function WorkflowSwimlaneGraph({
               title="共识整理"
               detail="发布唯一共识"
               findingCount={work.openFindings.length}
-              current={currentNodeId === 'consensus'}
               selected={inspection?.id === 'consensus'}
               onInspect={inspect}
               onPreview={preview}
@@ -426,7 +349,6 @@ function WorkflowSwimlaneGraph({
           <DecisionNode
             work={work}
             node={handoff}
-            current={currentNodeId === 'handoff'}
             selected={inspection?.id === 'handoff'}
             onInspect={inspect}
             onPreview={preview}
@@ -465,7 +387,6 @@ function WorkflowSwimlaneGraph({
             detail="通过合入门禁"
             meta={work.mergeMode === 'manual_confirm_in_chatgpt' ? 'ChatGPT 窗口人工确认' : work.mergeMode}
             status={merge?.status ?? 'pending'}
-            current={currentNodeId === 'merge'}
             owner="ChatGPT Desktop"
             selected={inspection?.id === 'merge'}
             onInspect={inspect}
@@ -482,7 +403,6 @@ function WorkflowSwimlaneGraph({
             detail="只有你能决定"
             meta={work.acceptancePending ? '等待你的验收结果' : '尚未进入验收'}
             status={acceptance?.status ?? 'pending'}
-            current={currentNodeId === 'acceptance'}
             owner="你"
             selected={inspection?.id === 'acceptance'}
             onInspect={inspect}
@@ -499,7 +419,6 @@ function WorkflowSwimlaneGraph({
             detail="本交付轮次终止"
             meta="后续方案变化从入口 A 再开启"
             status={terminalAccepted ? 'active' : 'pending'}
-            current={terminalAccepted}
             owner="你"
             selected={inspection?.id === 'accepted-end'}
             onInspect={inspect}
@@ -527,11 +446,6 @@ function WorkflowSwimlaneGraph({
           work={work}
           selection={inspection}
           onClose={closeInspection}
-          retrying={retrying}
-          onTriggerNode={onTriggerNode}
-          startingDeliveryCycle={startingDeliveryCycle}
-          onStartDeliveryCycle={onStartDeliveryCycle}
-          onFocusManualAction={guideManualAction}
           onOpenReview={onOpenReview}
         />
       )}
@@ -570,7 +484,6 @@ function LaneNode({
   detail,
   meta,
   status,
-  current,
   owner,
   selected,
   onInspect,
@@ -587,7 +500,6 @@ function LaneNode({
   detail: string;
   meta: string;
   status: GraphStatus;
-  current: boolean;
   owner: string;
   selected: boolean;
   onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
@@ -597,6 +509,7 @@ function LaneNode({
   returnTarget?: 'review' | 'acceptance';
   dashed?: boolean;
 }) {
+  const isCurrent = status === 'active' || status === 'blocked';
   const selection = { id, title, owner, status } satisfies WorkflowInspectionSelection;
   return (
     <button
@@ -605,7 +518,7 @@ function LaneNode({
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
       data-return-target={returnTarget}
-      aria-current={current ? 'step' : undefined}
+      aria-current={isCurrent ? 'step' : undefined}
       aria-haspopup="dialog"
       aria-expanded={selected}
       aria-controls={controls}
@@ -617,7 +530,7 @@ function LaneNode({
       onBlur={() => onPreview(null)}
       onClick={(event) => onInspect(selection, event.currentTarget)}
     >
-      {current && status === 'active' && <ActiveNodePulse />}
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex items-center justify-between gap-2">
         <StepBadge label={step} />
         <StatusBadge status={status} />
@@ -635,7 +548,6 @@ function ReviewStageNode({
   title,
   detail,
   findingCount,
-  current,
   selected,
   onInspect,
   onPreview,
@@ -647,7 +559,6 @@ function ReviewStageNode({
   title: string;
   detail: string;
   findingCount?: number;
-  current: boolean;
   selected: boolean;
   onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
   onPreview: (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => void;
@@ -665,7 +576,7 @@ function ReviewStageNode({
       className={`group relative min-h-[94px] w-[148px] shrink-0 snap-start rounded-xl border border-l-4 p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] md:w-auto md:min-w-0 ${actorBorderClass('review')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
       data-testid={`workflow-graph-node-${id}`}
       data-status={status}
-      aria-current={current ? 'step' : undefined}
+      aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
       aria-haspopup="dialog"
       aria-expanded={selected}
       aria-controls={controls}
@@ -677,7 +588,7 @@ function ReviewStageNode({
       onBlur={() => onPreview(null)}
       onClick={(event) => onInspect(selection, event.currentTarget)}
     >
-      {current && status === 'active' && <ActiveNodePulse />}
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex items-start justify-between gap-1">
         <div className="text-micro font-semibold text-cafe">{title}</div>
         <StatusDot status={status} />
@@ -694,7 +605,6 @@ function ReviewStageNode({
 function DecisionNode({
   work,
   node,
-  current,
   selected,
   onInspect,
   onPreview,
@@ -703,7 +613,6 @@ function DecisionNode({
 }: {
   work: DesktopDevelopmentResumePacket;
   node: DesktopDevelopmentWorkflowNode | undefined;
-  current: boolean;
   selected: boolean;
   onInspect: (selection: WorkflowInspectionSelection, trigger: HTMLButtonElement) => void;
   onPreview: (selection: WorkflowInspectionSelection | null, trigger?: HTMLButtonElement) => void;
@@ -719,7 +628,7 @@ function DecisionNode({
       className={`group relative flex min-h-[120px] w-full items-center gap-4 overflow-hidden rounded-2xl border border-l-4 p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] ${actorBorderClass('catcafe')} ${graphNodeClass(status)} ${selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''}`}
       data-testid="workflow-graph-node-review-gate"
       data-status={status}
-      aria-current={current ? 'step' : undefined}
+      aria-current={status === 'active' || status === 'blocked' ? 'step' : undefined}
       aria-haspopup="dialog"
       aria-expanded={selected}
       aria-controls={controls}
@@ -731,7 +640,7 @@ function DecisionNode({
       onBlur={() => onPreview(null)}
       onClick={(event) => onInspect(selection, event.currentTarget)}
     >
-      {current && status === 'active' && <ActiveNodePulse />}
+      {status === 'active' && <ActiveNodePulse />}
       <div className="flex h-14 w-14 shrink-0 rotate-45 items-center justify-center rounded-xl border-2 border-[var(--semantic-warning)] bg-[var(--console-card-bg)]">
         <span className="-rotate-45 text-xs font-bold text-[var(--semantic-warning)]">03</span>
       </div>
@@ -794,22 +703,12 @@ function WorkflowNodeInspector({
   work,
   selection,
   onClose,
-  retrying,
-  onTriggerNode,
-  startingDeliveryCycle,
-  onStartDeliveryCycle,
-  onFocusManualAction,
   onOpenReview,
 }: {
   id: string;
   work: DesktopDevelopmentResumePacket;
   selection: WorkflowInspectionSelection;
   onClose: () => void;
-  retrying: boolean;
-  onTriggerNode: (nodeId: DesktopDevelopmentWorkflowNode['id']) => void;
-  startingDeliveryCycle: boolean;
-  onStartDeliveryCycle?: () => void;
-  onFocusManualAction?: (action: DesktopDevelopmentManualAction) => void;
   onOpenReview?: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -882,17 +781,6 @@ function WorkflowNodeInspector({
         </div>
       </div>
 
-      <WorkflowNodeCommand
-        work={work}
-        selection={selection}
-        node={node}
-        retrying={retrying}
-        onTriggerNode={onTriggerNode}
-        startingDeliveryCycle={startingDeliveryCycle}
-        onStartDeliveryCycle={onStartDeliveryCycle}
-        onFocusManualAction={onFocusManualAction}
-      />
-
       {reviewInspection && (
         <div className="mt-3 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -938,139 +826,6 @@ function WorkflowNodeInspector({
         </div>
       )}
     </div>
-  );
-}
-
-function WorkflowNodeCommand({
-  work,
-  selection,
-  node,
-  retrying,
-  onTriggerNode,
-  startingDeliveryCycle,
-  onStartDeliveryCycle,
-  onFocusManualAction,
-}: {
-  work: DesktopDevelopmentResumePacket;
-  selection: WorkflowInspectionSelection;
-  node: DesktopDevelopmentWorkflowNode | undefined;
-  retrying: boolean;
-  onTriggerNode: (nodeId: DesktopDevelopmentWorkflowNode['id']) => void;
-  startingDeliveryCycle: boolean;
-  onStartDeliveryCycle?: () => void;
-  onFocusManualAction?: (action: DesktopDevelopmentManualAction) => void;
-}) {
-  const command = deriveWorkflowNodeCommand(work, selection, node);
-  const reasonId = `workflow-node-command-reason-${encodeURIComponent(work.workId)}-${selection.id}`;
-
-  return (
-    <div
-      className="mt-3 rounded-xl border border-[var(--console-border-strong)] bg-[var(--console-shell-bg)] p-3"
-      data-testid="workflow-node-command"
-    >
-      <div className="text-micro font-semibold text-cafe">从此节点操作</div>
-      <WorkflowNodeCommandButton
-        command={command}
-        reasonId={reasonId}
-        retrying={retrying}
-        onTriggerNode={onTriggerNode}
-        startingDeliveryCycle={startingDeliveryCycle}
-        onStartDeliveryCycle={onStartDeliveryCycle}
-        onFocusManualAction={onFocusManualAction}
-      />
-      <p id={reasonId} className="mt-2 text-micro leading-relaxed text-cafe-secondary">
-        {command.reason}
-      </p>
-    </div>
-  );
-}
-
-function WorkflowNodeCommandButton({
-  command,
-  reasonId,
-  retrying,
-  onTriggerNode,
-  startingDeliveryCycle,
-  onStartDeliveryCycle,
-  onFocusManualAction,
-}: {
-  command: WorkflowNodeCommandModel;
-  reasonId: string;
-  retrying: boolean;
-  onTriggerNode: (nodeId: DesktopDevelopmentWorkflowNode['id']) => void;
-  startingDeliveryCycle: boolean;
-  onStartDeliveryCycle?: () => void;
-  onFocusManualAction?: (action: DesktopDevelopmentManualAction) => void;
-}) {
-  if (command.kind === 'direct') {
-    return (
-      <WorkflowCommandButton
-        label={retrying ? '触发中...' : directNodeActionLabel(command.action)}
-        testId={`workflow-trigger-node-${command.nodeId}`}
-        describedBy={reasonId}
-        disabled={retrying}
-        onClick={() => onTriggerNode(command.nodeId)}
-      />
-    );
-  }
-  if (command.kind === 'entry' && onStartDeliveryCycle) {
-    return (
-      <WorkflowCommandButton
-        label={startingDeliveryCycle ? '开启中...' : entryNodeActionLabel(command.entryId)}
-        testId={`workflow-trigger-node-${command.entryId}`}
-        describedBy={reasonId}
-        disabled={startingDeliveryCycle}
-        onClick={onStartDeliveryCycle}
-      />
-    );
-  }
-  if (command.kind === 'guided' && onFocusManualAction) {
-    return (
-      <WorkflowCommandButton
-        label={guidedNodeActionLabel(command.action)}
-        testId={`workflow-guide-node-${command.nodeId}`}
-        describedBy={reasonId}
-        onClick={() => onFocusManualAction(command.action)}
-      />
-    );
-  }
-  return (
-    <button
-      type="button"
-      aria-disabled="true"
-      aria-describedby={reasonId}
-      onClick={(event) => event.preventDefault()}
-      className="mt-2 cursor-not-allowed rounded-lg border border-[var(--console-border-soft)] px-3 py-2 text-micro font-medium text-cafe-secondary"
-    >
-      当前不可触发
-    </button>
-  );
-}
-
-function WorkflowCommandButton({
-  label,
-  testId,
-  describedBy,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  testId: string;
-  describedBy: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-describedby={describedBy}
-      className="mt-2 rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-micro font-medium text-[var(--cafe-surface)] disabled:opacity-40"
-      data-testid={testId}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -1533,127 +1288,12 @@ function workflowActionLabel(action: NonNullable<DesktopDevelopmentWorkflowNode[
   }
 }
 
-function isDirectManualAction(action: DesktopDevelopmentManualAction): action is DirectManualAction {
-  return action === 'wake_desktop' || action === 'replay_review_stage';
-}
-
-function directNodeActionLabel(action: DirectManualAction): string {
-  return action === 'wake_desktop' ? '从此节点触发 ChatGPT' : '从此节点重触发 Review';
-}
-
-function entryNodeActionLabel(entryId: 'design-entry' | 'acceptance-rework-entry'): string {
-  return entryId === 'design-entry' ? '从方案变更入口开启' : '从返工入口开启';
-}
-
-function guidedNodeActionLabel(action: GuidedManualAction) {
-  switch (action) {
-    case 'configure_design_branch':
-      return '前往配置方案分支';
-    case 'record_architecture_decision':
-      return '前往处理方案分歧';
-    case 'approve_review_continuation':
-      return '前往批准继续 Review';
-    case 'record_acceptance':
-      return '前往最终验收';
-  }
-}
-
-function deriveWorkflowNodeCommand(
-  work: DesktopDevelopmentResumePacket,
-  selection: WorkflowInspectionSelection,
-  node: DesktopDevelopmentWorkflowNode | undefined,
-): WorkflowNodeCommandModel {
-  const manualAction = node?.manualAction;
-  const currentNode = firstCurrentWorkflowNode(work.workflowNodes);
-  const selectedCurrentNode = Boolean(node && currentNode?.id === node.id);
-  if (node && selectedCurrentNode && manualAction && isDirectManualAction(manualAction)) {
-    return {
-      kind: 'direct',
-      nodeId: node.id,
-      action: manualAction,
-      reason: '只会重触发这个当前节点；服务端会再次校验节点、实现轮次和状态版本，不会跳过前后门禁。',
-    };
-  }
-  if (selection.id === 'design-entry' && work.phase === 'accepted') {
-    return {
-      kind: 'entry',
-      entryId: selection.id,
-      reason: '将保留上一交付轮次证据，并从当前方案分支开启新的方案变更轮次。',
-    };
-  }
-  if (selection.id === 'acceptance-rework-entry' && work.phase === 'rejected') {
-    return {
-      kind: 'entry',
-      entryId: selection.id,
-      reason: '将保留验收失败证据，并从返工入口开启新的实现与 Review 循环。',
-    };
-  }
-  if (node && selectedCurrentNode && manualAction && !isDirectManualAction(manualAction)) {
-    return {
-      kind: 'guided',
-      nodeId: node.id,
-      action: manualAction,
-      reason: `${workflowActionLabel(manualAction)}；该节点需要你的明确选择，不能用无参数重触发代替。`,
-    };
-  }
-  return { kind: 'unavailable', reason: unavailableNodeCommandReason(work, selection) };
-}
-
-function unavailableNodeCommandReason(
-  work: DesktopDevelopmentResumePacket,
-  selection: WorkflowInspectionSelection,
-): string {
-  const recoveryReason = unavailableImplementationRecoveryReason(work, selection);
-  if (recoveryReason) return recoveryReason;
-  if (selection.id === 'accepted-end') {
-    return work.phase === 'accepted'
-      ? '本轮已经结束；如方案有新增或变更，请选择入口 A 开启新交付轮次。'
-      : '结束节点只展示结果，验收通过后由系统自动到达。';
-  }
-  if (selection.id === 'design-entry') {
-    return work.phase === 'rejected'
-      ? '本轮验收未通过，请从入口 B 开启返工；如果方案也有变化，请先提交方案分支。'
-      : '当前交付仍在进行，不能同时开启另一交付轮次。';
-  }
-  if (selection.id === 'acceptance-rework-entry') {
-    return '只有最终验收未通过后，才允许从返工入口开启下一交付轮次。';
-  }
-  if (selection.status === 'completed') return '本节点已经完成；为避免重复投递，历史节点不能直接重放。';
-  if (selection.status === 'pending') return '前置节点尚未完成，不能越过当前门禁提前触发。';
-  if (selection.status === 'blocked') return '另一个前置门禁仍在阻塞；请先处理流程中最靠前的阻塞节点。';
-  if (selection.status === 'available') return '这个入口已经可以开启下一交付轮次。';
-  if (selection.status === 'inactive') return '本轮没有选择这个入口。';
-  return '该节点由服务端状态推进，当前没有可执行的人工动作。';
-}
-
-function unavailableImplementationRecoveryReason(
-  work: DesktopDevelopmentResumePacket,
-  selection: WorkflowInspectionSelection,
-): string | null {
-  if (selection.id !== 'implementation') return null;
-  if (work.nextLegalActions.includes('rebind_session')) {
-    return '需先重新绑定 ChatGPT Desktop 会话；绑定恢复前不能直接触发实现节点。';
-  }
-  if (work.nextLegalActions.includes('rebuild_worktree_from_last_committed_sha')) {
-    return '需先从最后提交恢复永久 worktree；工作区恢复前不能直接触发实现节点。';
-  }
-  return null;
-}
-
-function firstCurrentWorkflowNode(
-  nodes: readonly DesktopDevelopmentWorkflowNode[],
-): DesktopDevelopmentWorkflowNode | undefined {
-  return nodes.find((candidate) => candidate.status === 'active' || candidate.status === 'blocked');
-}
-
 function graphStatusLabel(status: GraphStatus): string {
   switch (status) {
     case 'pending':
       return '未到达';
     case 'inactive':
       return '本轮未选';
-    case 'available':
-      return '可开启';
     case 'active':
       return '当前';
     case 'blocked':
@@ -1724,8 +1364,6 @@ function graphNodeClass(status: GraphStatus): string {
       return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-70';
     case 'inactive':
       return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-45';
-    case 'available':
-      return 'border-[var(--mc-accent)] bg-[var(--console-card-bg)] shadow-sm';
   }
 }
 
@@ -1741,8 +1379,6 @@ function statusDotClass(status: GraphStatus): string {
       return 'bg-[var(--console-border-strong)]';
     case 'inactive':
       return 'bg-[var(--console-border-soft)]';
-    case 'available':
-      return 'bg-[var(--mc-accent)]';
   }
 }
 
@@ -1758,7 +1394,5 @@ function graphContainerClass(status: GraphStatus): string {
       return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-80';
     case 'inactive':
       return 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)] opacity-50';
-    case 'available':
-      return 'border-[var(--mc-accent)] bg-[var(--console-card-bg)]';
   }
 }
