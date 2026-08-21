@@ -2,12 +2,14 @@
 
 import type {
   DesktopDevelopmentDeliveryCycleEntryMode,
+  DesktopDevelopmentManualAction,
   DesktopDevelopmentResumePacket,
+  DesktopDevelopmentWorkflowNodeId,
   ExternalProject,
   FeatureWorkspaceThreadView,
 } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
@@ -47,7 +49,13 @@ interface ProjectDevelopmentLaunchState {
     | { readonly status: 'failed'; readonly error: string };
 }
 
-export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
+export function DesktopDevelopmentPanel({
+  project,
+  onOpenFeatureConfig,
+}: {
+  project: ExternalProject;
+  onOpenFeatureConfig?: () => void;
+}) {
   const router = useRouter();
   const { projects, setProjects } = useExternalProjectStore();
   const setCurrentProject = useChatStore((state) => state.setCurrentProject);
@@ -63,9 +71,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [workFeedback, setWorkFeedback] = useState<Record<string, string>>({});
   const [editingReviewCats, setEditingReviewCats] = useState(false);
   const [reviewerIds, setReviewerIds] = useState<string[]>([]);
   const [reviewRecorderId, setReviewRecorderId] = useState('');
+  const retryRequestsInFlight = useRef(new Set<string>());
+  const retryRequestKeys = useRef(new Map<string, string>());
   const binding = project.desktopDevelopment;
   const { cats } = useCatData();
   const catNames = useMemo(() => new Map(cats.map((cat) => [cat.id, cat.displayName])), [cats]);
@@ -77,6 +88,10 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     () => reviewerIds.filter((reviewerId) => !catNames.has(reviewerId)),
     [catNames, reviewerIds],
   );
+  const publishWorkFeedback = useCallback((workId: string, message: string) => {
+    setWorkFeedback((current) => ({ ...current, [workId]: message }));
+    setStatus(message);
+  }, []);
 
   useEffect(() => {
     if (!binding) return;
@@ -233,13 +248,14 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录最终验收');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(
+      publishWorkFeedback(
+        work.workId,
         accepted
           ? '最终验收已通过；本轮交付已闭环'
           : '最终验收未通过；证据已保留。可直接点击“从返工入口开启”；如果方案也需调整，请先提交方案分支。',
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法记录最终验收');
+      publishWorkFeedback(work.workId, error instanceof Error ? error.message : '无法记录最终验收');
     } finally {
       setAcceptingWorkId(null);
     }
@@ -247,8 +263,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
 
   const startNextDeliveryCycle = async (launchState: ProjectDevelopmentLaunchState) => {
     if (!binding) return;
+    const feedbackWorkId = launchState.managedWork?.workId;
     setStartingDeliveryItemId(launchState.backlogItemId);
     setStatus(null);
+    if (feedbackWorkId) {
+      setWorkFeedback((current) => ({ ...current, [feedbackWorkId]: '正在开启下一交付轮次…' }));
+    }
     try {
       const response = await apiFetch(
         `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(launchState.backlogItemId)}/start`,
@@ -260,14 +280,17 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       );
       const body = (await response.json()) as { state?: ProjectDevelopmentLaunchState; error?: string };
       if (!response.ok || !body.state) throw new Error(body.error ?? '无法开启新交付轮次');
-      setStatus(
+      const message =
         body.state.desktopTask?.status === 'failed'
           ? `新交付轮次已开启，但唤醒 Desktop 失败：${body.state.desktopTask.error}`
-          : `${launchState.featureId} 已开启新交付轮次；历史证据保留，原 ChatGPT Desktop 窗口已收到继续任务。`,
-      );
+          : `${launchState.featureId} 已开启新交付轮次；历史证据保留，原 ChatGPT Desktop 窗口已收到继续任务。`;
+      if (feedbackWorkId) publishWorkFeedback(feedbackWorkId, message);
+      else setStatus(message);
       await loadWorks();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法开启新交付轮次');
+      const message = error instanceof Error ? error.message : '无法开启新交付轮次';
+      if (feedbackWorkId) publishWorkFeedback(feedbackWorkId, message);
+      else setStatus(message);
     } finally {
       setStartingDeliveryItemId(null);
     }
@@ -293,9 +316,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法批准继续 Review');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(`已批准继续 Review，新的上限为 Attempt #${body.reviewContinuationApprovedThroughAttempt}`);
+      publishWorkFeedback(
+        work.workId,
+        `已批准继续 Review，新的上限为 Attempt #${body.reviewContinuationApprovedThroughAttempt}`,
+      );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法批准继续 Review');
+      publishWorkFeedback(work.workId, error instanceof Error ? error.message : '无法批准继续 Review');
     } finally {
       setReviewDecisionKey(null);
     }
@@ -327,17 +353,38 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录架构决策');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(decision === 'keep_original_plan' ? '已决定保持当前方案分支版本' : '已确认方案分支已更新');
+      publishWorkFeedback(
+        work.workId,
+        decision === 'keep_original_plan' ? '已决定保持当前方案分支版本' : '已确认方案分支已更新',
+      );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法记录架构决策');
+      publishWorkFeedback(work.workId, error instanceof Error ? error.message : '无法记录架构决策');
     } finally {
       setReviewDecisionKey(null);
     }
   };
 
-  const retryCurrentStage = async (work: DesktopDevelopmentResumePacket) => {
+  const retryCurrentStage = async (
+    work: DesktopDevelopmentResumePacket,
+    targetNodeId: DesktopDevelopmentWorkflowNodeId,
+  ) => {
+    const requestFingerprint = [
+      work.workId,
+      work.attemptId,
+      work.managedWorkVersion,
+      work.reviewRoundVersion ?? 0,
+      targetNodeId,
+    ].join(':');
+    if (retryRequestsInFlight.current.has(requestFingerprint)) return;
+    retryRequestsInFlight.current.add(requestFingerprint);
+    const idempotencyKey =
+      retryRequestKeys.current.get(requestFingerprint) ??
+      `manual-stage-retry-${targetNodeId}-${globalThis.crypto.randomUUID()}`;
+    retryRequestKeys.current.set(requestFingerprint, idempotencyKey);
     setRetryingWorkId(work.workId);
     setStatus(null);
+    setWorkFeedback((current) => ({ ...current, [work.workId]: '正在向当前节点负责人重新投递…' }));
+    let responseStatus: number | undefined;
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/retry-current-stage`,
@@ -348,10 +395,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
             protocolVersion: work.protocolVersion,
             attemptId: work.attemptId,
             expectedManagedWorkVersion: work.managedWorkVersion,
-            idempotencyKey: `manual-stage-retry-${work.attemptId}-${Date.now()}`,
+            targetNodeId,
+            idempotencyKey,
           }),
         },
       );
+      responseStatus = response.status;
       const body = (await response.json()) as {
         work?: DesktopDevelopmentResumePacket;
         action?: 'wake_desktop' | 'replay_review_stage';
@@ -359,15 +408,37 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         error?: string;
       };
       if (!response.ok || !body.work) throw new Error(body.error ?? '无法再次触发当前节点');
+      retryRequestKeys.current.delete(requestFingerprint);
       setWorks((current) => current.map((item) => (item.workId === body.work?.workId ? body.work : item)));
-      setStatus(
-        `已登记并再次触发当前节点（目标：${body.target ?? '当前负责人'}）。节点变为“已完成”才表示服务端确认进入下一步。`,
+      publishWorkFeedback(
+        work.workId,
+        `已登记并再次触发“${workflowNodeDisplayLabel(targetNodeId)}”（目标：${body.target ?? '当前负责人'}）。节点变为“已完成”才表示服务端确认进入下一步。`,
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法再次触发当前节点');
+      let message = error instanceof Error ? error.message : '无法再次触发当前节点';
+      if (responseStatus === 409) {
+        await loadWorks();
+        message = `${message}；节点状态已经变化，已刷新到最新流程，请按新的高亮节点操作。`;
+      }
+      publishWorkFeedback(work.workId, message);
     } finally {
+      retryRequestsInFlight.current.delete(requestFingerprint);
       setRetryingWorkId(null);
     }
+  };
+
+  const focusWorkflowAction = (work: DesktopDevelopmentResumePacket, action: DesktopDevelopmentManualAction) => {
+    const target = document.getElementById(workflowActionAnchorId(work.workId, action));
+    if (!target) {
+      if (action === 'configure_design_branch' && onOpenFeatureConfig) {
+        onOpenFeatureConfig();
+        return;
+      }
+      publishWorkFeedback(work.workId, '这个节点当前没有可用的处理控件，请刷新开发闭环状态后再试。');
+      return;
+    }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    requestAnimationFrame(() => target.querySelector<HTMLElement>('button, textarea, select, input')?.focus());
   };
 
   const authorizeReviewConsensus = async (work: DesktopDevelopmentResumePacket) => {
@@ -387,9 +458,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       if (!response.ok || body.error) throw new Error(body.error ?? '无法授权提交最终检视意见');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
       setConsensusInstructions((current) => ({ ...current, [work.workId]: '' }));
-      setStatus('已授权共识记录猫按你的裁决提交最终检视意见');
+      publishWorkFeedback(work.workId, '已授权共识记录猫按你的裁决提交最终检视意见');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法授权提交最终检视意见');
+      publishWorkFeedback(work.workId, error instanceof Error ? error.message : '无法授权提交最终检视意见');
     } finally {
       setReviewDecisionKey(null);
     }
@@ -606,15 +677,22 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 <DesktopDevelopmentWorkflowGraph
                   work={work}
                   retrying={retryingWorkId === work.workId}
-                  onRetry={() => void retryCurrentStage(work)}
+                  onTriggerNode={(nodeId) => void retryCurrentStage(work, nodeId)}
                   onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
+                  startingDeliveryCycle={startingDeliveryItemId === launchState.backlogItemId}
+                  onStartDeliveryCycle={() => void startNextDeliveryCycle(launchState)}
+                  onFocusManualAction={(action) => focusWorkflowAction(work, action)}
+                  feedback={workFeedback[work.workId]}
                 />
               )}
               {work && work.openFindings.length > 0 && (
                 <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
               )}
               {work?.architectureDecisionPending && (
-                <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
+                <div
+                  id={workflowActionAnchorId(work.workId, 'record_architecture_decision')}
+                  className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3"
+                >
                   <p className="text-xs font-medium text-cafe">Review 与方案分支出现重大分歧，需要你的决策</p>
                   {work.openFindings
                     .filter(
@@ -652,7 +730,10 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 </div>
               )}
               {work?.reviewContinuationPending && (
-                <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3">
+                <div
+                  id={workflowActionAnchorId(work.workId, 'approve_review_continuation')}
+                  className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3"
+                >
                   <p className="text-xs text-cafe-secondary">
                     已达到本组 {work.reviewAttemptLimit} 次 Review 上限。只有你批准后，才会继续下一组 Review。
                   </p>
@@ -713,7 +794,10 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 </div>
               )}
               {work?.acceptancePending && (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div
+                  id={workflowActionAnchorId(work.workId, 'record_acceptance')}
+                  className="mt-3 flex flex-wrap gap-2"
+                >
                   <button
                     type="button"
                     onClick={() => void recordAcceptance(work, true)}
@@ -769,7 +853,11 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
           </button>
         )}
       </div>
-      {status && <p className="text-xs text-cafe-secondary">{status}</p>}
+      {status && (
+        <output className="block text-xs text-cafe-secondary" aria-live="polite">
+          {status}
+        </output>
+      )}
     </section>
   );
 }
@@ -778,6 +866,31 @@ function validateReviewCatSelection(reviewers: readonly string[], recorderId: st
   if (reviewers.length < 2) return '请至少选择两只不同的 Review 猫猫';
   if (!reviewers.includes(recorderId)) return '提交检视意见猫猫必须是参与本轮 Review 的猫猫';
   return null;
+}
+
+function workflowActionAnchorId(workId: string, action: DesktopDevelopmentManualAction): string {
+  return `desktop-workflow-action-${encodeURIComponent(workId)}-${action}`;
+}
+
+function workflowNodeDisplayLabel(nodeId: DesktopDevelopmentWorkflowNodeId): string {
+  switch (nodeId) {
+    case 'design':
+      return '方案分支';
+    case 'implementation':
+      return 'ChatGPT 实现 / 修复';
+    case 'independent_review':
+      return '独立检视';
+    case 'cross_review':
+      return '交叉检视';
+    case 'consensus':
+      return '共识整理';
+    case 'handoff':
+      return '检视结果 / 清零门';
+    case 'merge':
+      return '合入 main';
+    case 'acceptance':
+      return '最终验收';
+  }
 }
 
 function describeWorkState(work: DesktopDevelopmentResumePacket): string {

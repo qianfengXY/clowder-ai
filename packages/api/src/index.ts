@@ -4344,14 +4344,16 @@ async function main(): Promise<void> {
     | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
     | undefined;
   if (redis && workflowSopStore) {
-    const [serviceMod, coordinatorMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
-      import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
-      import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
-      import('./domains/desktop-development-loop/review-round-stage-dispatcher.js'),
-      import('./domains/desktop-development-loop/desktop-session-store.js'),
-      import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
-      import('./domains/review-coordination/RedisReviewRoundStore.js'),
-    ]);
+    const [serviceMod, coordinatorMod, mutationMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] =
+      await Promise.all([
+        import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
+        import('./domains/desktop-development-loop/review-round-coordinator-service.js'),
+        import('./domains/desktop-development-loop/work-mutation-coordinator.js'),
+        import('./domains/desktop-development-loop/review-round-stage-dispatcher.js'),
+        import('./domains/desktop-development-loop/desktop-session-store.js'),
+        import('./domains/cats/services/stores/redis/RedisManagedWorkConsumerPort.js'),
+        import('./domains/review-coordination/RedisReviewRoundStore.js'),
+      ]);
     managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
     reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
     const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher(
@@ -4374,6 +4376,7 @@ async function main(): Promise<void> {
     );
     const desktopSessionStore = new sessionMod.DesktopSessionStore(redis);
     const desktopTaskLauncher = new CodexDesktopTaskLauncher(redis);
+    const workMutationCoordinator = new mutationMod.WorkMutationCoordinator();
     const { ReviewRoundDisplayContextResolver } = await import(
       './domains/desktop-development-loop/review-round-display-context.js'
     );
@@ -4393,6 +4396,10 @@ async function main(): Promise<void> {
       backlogStore,
       workflowSopStore,
       desktopTaskLauncher,
+      undefined,
+      undefined,
+      undefined,
+      workMutationCoordinator,
     );
     reviewRoundCoordinatorService = new coordinatorMod.ReviewRoundCoordinatorService(
       reviewRoundStore,
@@ -4401,6 +4408,7 @@ async function main(): Promise<void> {
       reviewDisplayContexts,
       desktopSessionStore,
       desktopTaskLauncher,
+      workMutationCoordinator,
     );
   }
   const intentCardStore = new IntentCardStore();

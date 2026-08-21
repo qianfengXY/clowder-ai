@@ -49,6 +49,9 @@ describe(
       const { ReviewRoundCoordinatorService } = await import(
         '../dist/domains/desktop-development-loop/review-round-coordinator-service.js'
       );
+      const { WorkMutationCoordinator } = await import(
+        '../dist/domains/desktop-development-loop/work-mutation-coordinator.js'
+      );
 
       redis = createRedisClient({ url: REDIS_URL });
       try {
@@ -93,6 +96,7 @@ describe(
       const backlogStore = {
         listByUser: async (userId) => backlogItems.filter((item) => item.userId === userId),
       };
+      const workMutations = new WorkMutationCoordinator();
       service = new DesktopDevelopmentLoopService(
         externalProjects,
         reviewHubs,
@@ -106,6 +110,7 @@ describe(
         async () => {},
         async ({ branch }) => ({ branch, exactSha: currentDesignSha }),
         async (_sourcePath, _exactSha, documents) => documents,
+        workMutations,
       );
       reviewCoordinator = new ReviewRoundCoordinatorService(
         reviewRounds,
@@ -126,6 +131,7 @@ describe(
         },
         sessions,
         { activate: async (input) => desktopWakes.push(input) },
+        workMutations,
       );
     });
 
@@ -459,6 +465,7 @@ describe(
         attemptId: packet.attemptId,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         idempotencyKey: 'manual-desktop-retry',
+        targetNodeId: 'implementation',
         now: 2_500,
       });
       assert.equal(desktopRetry.action, 'wake_desktop');
@@ -468,6 +475,22 @@ describe(
       assert.equal(desktopWakes[0].threadId, 'chat-retry');
       assert.match(desktopWakes[0].objective, /\[开发闭环系统消息\]/);
       assert.match(desktopWakes[0].objective, /不要轮询等待 CatCafe/);
+
+      await assert.rejects(
+        () =>
+          service.retryCurrentStage({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: packet.workId,
+            attemptId: packet.attemptId,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            idempotencyKey: 'manual-wrong-node-retry',
+            targetNodeId: 'merge',
+          }),
+        /trigger conflict/i,
+      );
+      assert.equal(desktopWakes.length, 1, 'a stale or future node selection must have zero side effects');
 
       packet = await service.reportImplementation({
         protocolVersion: 1,
@@ -492,6 +515,7 @@ describe(
         attemptId: packet.attemptId,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         idempotencyKey: 'manual-review-retry',
+        targetNodeId: 'independent_review',
         now: 3_500,
       });
       assert.equal(reviewRetry.action, 'replay_review_stage');
@@ -500,6 +524,37 @@ describe(
       assert.equal(reviewDispatches[1].stage, 'independent');
       assert.equal(reviewDispatches[1].deliveryKey, 'manual:manual-review-retry');
       assert.deepEqual(reviewDispatches[1].reviewerCatIds, ['cat-codex', 'cat-kimi']);
+
+      const readCurrentSafe = reviewRounds.readCurrentSafe.bind(reviewRounds);
+      let reviewReadCount = 0;
+      reviewRounds.readCurrentSafe = async (input) => {
+        const current = await readCurrentSafe(input);
+        reviewReadCount += 1;
+        if (reviewReadCount < 2 || !current) return current;
+        return {
+          ...current,
+          round: { ...current.round, phase: 'cross_review', version: current.round.version + 1 },
+        };
+      };
+      try {
+        await assert.rejects(
+          () =>
+            service.retryCurrentStage({
+              protocolVersion: 1,
+              ownerUserId: 'owner-1',
+              projectId: project.id,
+              workId: packet.workId,
+              attemptId: packet.attemptId,
+              expectedManagedWorkVersion: packet.managedWorkVersion,
+              idempotencyKey: 'manual-review-stage-drift',
+              targetNodeId: 'independent_review',
+            }),
+          /no longer the current Review stage/i,
+        );
+      } finally {
+        reviewRounds.readCurrentSafe = readCurrentSafe;
+      }
+      assert.equal(reviewDispatches.length, 2, 'a Review phase drift must have zero dispatch side effects');
 
       await assert.rejects(
         () =>
@@ -511,9 +566,276 @@ describe(
             attemptId: packet.attemptId,
             expectedManagedWorkVersion: packet.managedWorkVersion - 1,
             idempotencyKey: 'stale-review-retry',
+            targetNodeId: 'independent_review',
           }),
         /version conflict/i,
       );
+    });
+
+    test('selects the first active or blocked workflow node in workflow order', async () => {
+      const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+      };
+      const packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-ordered-trigger',
+        chatRef: 'chat-ordered-trigger',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-ordered-trigger',
+        workspace: workspace(),
+        now: 2_000,
+      });
+      const originalReadWork = service.readWork.bind(service);
+      service.readWork = async (...args) => {
+        const current = await originalReadWork(...args);
+        return {
+          ...current,
+          workflowNodes: current.workflowNodes.map((node) =>
+            node.id === 'handoff' ? { ...node, status: 'blocked', manualAction: 'approve_review_continuation' } : node,
+          ),
+        };
+      };
+      try {
+        const retried = await service.retryCurrentStage({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          workId: packet.workId,
+          attemptId: packet.attemptId,
+          expectedManagedWorkVersion: packet.managedWorkVersion,
+          idempotencyKey: 'retry-ordered-trigger',
+          targetNodeId: 'implementation',
+          now: 2_500,
+        });
+        assert.equal(retried.action, 'wake_desktop');
+        assert.equal(desktopWakes.length, 1);
+      } finally {
+        service.readWork = originalReadWork;
+      }
+    });
+
+    test('serializes implementation reports against stale manual Desktop triggers', async () => {
+      const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+        pause: async (input) => desktopPauses.push(input),
+      };
+      const packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-concurrent-trigger',
+        chatRef: 'chat-concurrent-trigger',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-concurrent-trigger',
+        workspace: workspace(),
+        now: 2_000,
+      });
+
+      let releaseDispatch;
+      let signalDispatchStarted;
+      const dispatchStarted = new Promise((resolve) => {
+        signalDispatchStarted = resolve;
+      });
+      const holdDispatch = new Promise((resolve) => {
+        releaseDispatch = resolve;
+      });
+      const originalDispatcher = service.reviewDispatcher;
+      service.reviewDispatcher = {
+        dispatch: async (input) => {
+          reviewDispatches.push(input);
+          signalDispatchStarted();
+          await holdDispatch;
+        },
+      };
+      try {
+        const report = service.reportImplementation({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          workId: packet.workId,
+          attemptId: packet.attemptId,
+          runtimeSessionId: 'runtime-concurrent-trigger',
+          bindingEpoch: packet.bindingEpoch,
+          expectedManagedWorkVersion: packet.managedWorkVersion,
+          exactSha: SHA_A,
+          idempotencyKey: 'report-concurrent-trigger',
+          now: 3_000,
+        });
+        await dispatchStarted;
+        const staleRetry = service.retryCurrentStage({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          workId: packet.workId,
+          attemptId: packet.attemptId,
+          expectedManagedWorkVersion: packet.managedWorkVersion,
+          idempotencyKey: 'retry-concurrent-trigger',
+          targetNodeId: 'implementation',
+          now: 3_100,
+        });
+
+        releaseDispatch();
+        const reported = await report;
+        assert.equal(reported.phase, 'independent_review');
+        await assert.rejects(staleRetry, /version conflict|trigger conflict/i);
+        assert.equal(desktopWakes.length, 0, 'Review startup must not be followed by a stale Desktop wake');
+      } finally {
+        releaseDispatch?.();
+        service.reviewDispatcher = originalDispatcher;
+      }
+    });
+
+    test('holds the shared work mutation lock from Review replay validation through dispatch', async () => {
+      const { project, bundle } = await arrange();
+      let packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-review-dispatch-race',
+        chatRef: 'chat-review-dispatch-race',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-review-dispatch-race',
+        workspace: workspace(),
+        now: 2_000,
+      });
+      packet = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: packet.workId,
+        attemptId: packet.attemptId,
+        runtimeSessionId: 'runtime-review-dispatch-race',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'report-review-dispatch-race',
+        now: 3_000,
+      });
+      const roundId = packet.reviewRoundId;
+      const hubThreadId = `project-feature-review:${project.id}:backlog-1`;
+      await reviewCoordinator.submitDraft({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedDraftVersion: 0,
+        idempotencyKey: 'draft-codex-review-dispatch-race',
+        verdict: 'approve',
+        findings: [],
+        now: 4_000,
+      });
+      await reviewCoordinator.submitDraft({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-kimi',
+        roundId,
+        expectedDraftVersion: 0,
+        idempotencyKey: 'draft-kimi-review-dispatch-race',
+        verdict: 'approve',
+        findings: [],
+        now: 4_000,
+      });
+      let round = (
+        await reviewCoordinator.readSafe({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId: 'cat-codex',
+          roundId,
+        })
+      ).round;
+      round = await reviewCoordinator.finishIndependent({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        idempotencyKey: 'finish-codex-review-dispatch-race',
+        now: 5_000,
+      });
+      packet = await service.readWork({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: packet.workId,
+        attemptId: packet.attemptId,
+        now: 5_100,
+      });
+
+      let releaseDispatch;
+      let signalDispatchStarted;
+      const dispatchStarted = new Promise((resolve) => {
+        signalDispatchStarted = resolve;
+      });
+      const holdDispatch = new Promise((resolve) => {
+        releaseDispatch = resolve;
+      });
+      const dispatcher = service.reviewDispatcher;
+      const originalDispatch = dispatcher.dispatch;
+      dispatcher.dispatch = async (input) => {
+        reviewDispatches.push(input);
+        if (input.deliveryKey === 'manual:retry-review-dispatch-race') {
+          signalDispatchStarted();
+          await holdDispatch;
+        }
+      };
+      try {
+        const retry = service.retryCurrentStage({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          workId: packet.workId,
+          attemptId: packet.attemptId,
+          expectedManagedWorkVersion: packet.managedWorkVersion,
+          idempotencyKey: 'retry-review-dispatch-race',
+          targetNodeId: 'independent_review',
+          now: 5_200,
+        });
+        await dispatchStarted;
+
+        let finishSettled = false;
+        const finish = reviewCoordinator
+          .finishIndependent({
+            ownerUserId: 'owner-1',
+            threadId: hubThreadId,
+            reviewerCatId: 'cat-kimi',
+            roundId,
+            expectedRoundVersion: round.version,
+            idempotencyKey: 'finish-kimi-review-dispatch-race',
+            now: 5_300,
+          })
+          .then((value) => {
+            finishSettled = true;
+            return value;
+          });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(finishSettled, false, 'the Review transition must wait until replay dispatch completes');
+
+        releaseDispatch();
+        const retried = await retry;
+        assert.equal(retried.action, 'replay_review_stage');
+        const finished = await finish;
+        assert.equal(finished.phase, 'cross_review');
+        assert.deepEqual(
+          reviewDispatches.slice(-2).map((entry) => entry.stage),
+          ['independent', 'cross_review'],
+        );
+      } finally {
+        releaseDispatch?.();
+        dispatcher.dispatch = originalDispatch;
+      }
     });
 
     test('returns only barrier-safe consensus findings in the Resume Packet', async () => {
@@ -752,6 +1074,15 @@ describe(
       });
       assert.equal(fixed.phase, 'implementation_ready');
       assert.deepEqual(fixed.nextLegalActions, ['report_new_committed_sha']);
+      assert.deepEqual(
+        fixed.workflowNodes.slice(1, 5).map((node) => [node.id, node.status, node.manualAction]),
+        [
+          ['implementation', 'active', 'wake_desktop'],
+          ['independent_review', 'pending', null],
+          ['cross_review', 'pending', null],
+          ['consensus', 'pending', null],
+        ],
+      );
 
       const rereview = await service.reportImplementation({
         protocolVersion: 1,
@@ -773,8 +1104,78 @@ describe(
       assert.notEqual(rereview.reviewRoundId, roundId);
     });
 
+    test('does not activate Desktop directly when the session must be rebound', async () => {
+      const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+      };
+      const connected = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-detached-trigger',
+        chatRef: 'chat-detached-trigger',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-detached-trigger',
+        workspace: workspace(),
+        now: 2_000,
+      });
+      const originalGetCurrent = sessions.getCurrent.bind(sessions);
+      sessions.getCurrent = async (...args) => {
+        const binding = await originalGetCurrent(...args);
+        return binding ? { ...binding, status: 'detached' } : null;
+      };
+      try {
+        const packet = await service.readWork({
+          protocolVersion: 1,
+          ownerUserId: 'owner-1',
+          projectId: project.id,
+          workId: connected.workId,
+          attemptId: connected.attemptId,
+          now: 2_100,
+        });
+        assert.equal(packet.phase, 'ready_for_desktop');
+        assert.deepEqual(packet.nextLegalActions, ['rebind_session']);
+        assert.deepEqual(
+          packet.workflowNodes.find((node) => node.id === 'implementation'),
+          {
+            id: 'implementation',
+            status: 'blocked',
+            actor: 'chatgpt_desktop',
+            startedAt: packet.workflowNodes[1].startedAt,
+            completedAt: null,
+            manualAction: null,
+          },
+        );
+        await assert.rejects(
+          () =>
+            service.retryCurrentStage({
+              protocolVersion: 1,
+              ownerUserId: 'owner-1',
+              projectId: project.id,
+              workId: packet.workId,
+              attemptId: packet.attemptId,
+              expectedManagedWorkVersion: packet.managedWorkVersion,
+              idempotencyKey: 'retry-detached-trigger',
+              targetNodeId: 'implementation',
+              now: 2_200,
+            }),
+          /trigger conflict/i,
+        );
+        assert.equal(desktopWakes.length, 0);
+      } finally {
+        sessions.getCurrent = originalGetCurrent;
+      }
+    });
+
     test('returns an explicit committed-SHA recovery action when the permanent worktree is missing', async () => {
       const { project, bundle } = await arrange();
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+      };
       const missingWorktree = workspace();
       missingWorktree.worktreePresent = false;
       const packet = await service.connect({
@@ -784,6 +1185,7 @@ describe(
         workId: bundle.admission.workId,
         attemptId: bundle.attempt.attemptId,
         runtimeSessionId: 'runtime-missing-worktree',
+        chatRef: 'chat-missing-worktree',
         expectedBindingEpoch: 0,
         expectedManagedWorkVersion: 1,
         idempotencyKey: 'connect-missing-worktree',
@@ -794,7 +1196,31 @@ describe(
 
       assert.equal(packet.worktreePresent, false);
       assert.equal(packet.lastCommittedSha, SHA_A);
+      assert.equal(packet.phase, 'ready_for_desktop');
       assert.deepEqual(packet.nextLegalActions, ['rebuild_worktree_from_last_committed_sha']);
+      assert.deepEqual(
+        packet.workflowNodes.slice(0, 2).map((node) => [node.id, node.status, node.manualAction]),
+        [
+          ['design', 'completed', null],
+          ['implementation', 'blocked', null],
+        ],
+      );
+      await assert.rejects(
+        () =>
+          service.retryCurrentStage({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: packet.workId,
+            attemptId: packet.attemptId,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            idempotencyKey: 'retry-missing-worktree',
+            targetNodeId: 'implementation',
+            now: 2_500,
+          }),
+        /trigger conflict/i,
+      );
+      assert.equal(desktopWakes.length, 0);
       await assert.rejects(
         () =>
           service.reportImplementation({
@@ -981,6 +1407,7 @@ describe(
         attemptId: bundle.attempt.attemptId,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         idempotencyKey: 'replay-authorized-consensus-flow',
+        targetNodeId: 'consensus',
         now: 6_550,
       });
       assert.equal(replay.action, 'replay_review_stage');

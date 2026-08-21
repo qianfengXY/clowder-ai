@@ -13,6 +13,7 @@ import {
   type DesktopDevelopmentPhase,
   type DesktopDevelopmentResumePacket,
   type DesktopDevelopmentWorkflowNode,
+  type DesktopDevelopmentWorkflowNodeId,
   type DesktopReviewConsensusAuthorization,
   type DesktopSessionBinding,
   type FeatureDesignDocumentsView,
@@ -55,6 +56,7 @@ import {
 import { canContinueReviewLoop, deriveReviewLoopGate } from './review-loop-policy.js';
 import { featureTitleForReview } from './review-round-display-context.js';
 import type { IReviewRoundStageDispatcher } from './review-round-stage-dispatcher.js';
+import { WorkMutationCoordinator } from './work-mutation-coordinator.js';
 import { verifyWorkspacePath, type WorkspacePathVerifier } from './workspace-path-verifier.js';
 
 const CONSUMER_ID = 'f289_desktop_development_loop' as const;
@@ -155,12 +157,65 @@ export interface AuthorizeReviewConsensusInput extends ApproveReviewContinuation
   readonly instruction: string;
 }
 
-export interface RetryDesktopDevelopmentStageInput extends ApproveReviewContinuationInput {}
+export interface RetryDesktopDevelopmentStageInput extends ApproveReviewContinuationInput {
+  readonly targetNodeId: DesktopDevelopmentWorkflowNodeId;
+}
 
 export interface RetryDesktopDevelopmentStageResult {
   readonly work: DesktopDevelopmentResumePacket;
   readonly action: 'wake_desktop' | 'replay_review_stage';
   readonly target: string;
+}
+
+const REVIEW_RETRY_PHASES = new Set<DesktopDevelopmentPhase>(['independent_review', 'cross_review']);
+const DESKTOP_RETRY_PHASES = new Set<DesktopDevelopmentPhase>([
+  'implementing',
+  'implementation_ready',
+  'fix_required',
+  'awaiting_manual_merge_confirmation',
+  'auto_merge_ready',
+]);
+
+function requireTriggerableWorkflowNode(
+  work: DesktopDevelopmentResumePacket,
+  targetNodeId: DesktopDevelopmentWorkflowNodeId,
+): DesktopDevelopmentWorkflowNode {
+  const targetNode = work.workflowNodes.find((node) => node.status === 'active' || node.status === 'blocked');
+  const currentStatus = targetNode?.status === 'active' || targetNode?.status === 'blocked';
+  const directAction =
+    targetNode?.manualAction === 'wake_desktop' || targetNode?.manualAction === 'replay_review_stage';
+  if (!targetNode || targetNode.id !== targetNodeId || !currentStatus || !directAction) {
+    throw new Error(`Workflow node trigger conflict: ${targetNodeId} is not the current triggerable node`);
+  }
+  return targetNode;
+}
+
+function reviewNodeIdForPhase(phase: ReviewRoundSafeView['round']['phase']): DesktopDevelopmentWorkflowNodeId | null {
+  if (phase === 'independent') return 'independent_review';
+  if (phase === 'cross_review') return 'cross_review';
+  if (phase === 'consensus_ready') return 'consensus';
+  return null;
+}
+
+function assertReviewReplaySnapshot(
+  input: RetryDesktopDevelopmentStageInput,
+  expectedWork: DesktopDevelopmentResumePacket,
+  managed: ManagedWorkConsumerSnapshot,
+  review: ReviewRoundSafeView | null,
+): asserts review is ReviewRoundSafeView {
+  const matchesExpectedRound =
+    review?.currentForWork &&
+    review.round.attemptId === input.attemptId &&
+    review.round.roundId === expectedWork.reviewRoundId &&
+    review.round.version === expectedWork.reviewRoundVersion;
+  const currentNodeId = review ? reviewNodeIdForPhase(review.round.phase) : null;
+  if (
+    managed.state.version !== input.expectedManagedWorkVersion ||
+    !matchesExpectedRound ||
+    currentNodeId !== input.targetNodeId
+  ) {
+    throw new Error(`Workflow node trigger conflict: ${input.targetNodeId} is no longer the current Review stage`);
+  }
 }
 
 export interface ReadDesktopWorkInput {
@@ -264,6 +319,7 @@ export class DesktopDevelopmentLoopService {
     private readonly workspacePathVerifier: WorkspacePathVerifier = verifyWorkspacePath,
     private readonly designBranchResolver: DesignBranchResolver = resolveDesignBranch,
     private readonly designDocumentsResolver: DesignDocumentsResolver = resolveDesignDocuments,
+    private readonly workMutations: WorkMutationCoordinator = new WorkMutationCoordinator(),
   ) {}
 
   async readProjectDesignAuthority(input: {
@@ -706,6 +762,10 @@ export class DesktopDevelopmentLoopService {
   }
 
   async connect(input: ConnectDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.connectLocked(input));
+  }
+
+  private async connectLocked(input: ConnectDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     await this.assertWorkspaceBinding(project, input.workspace);
@@ -810,6 +870,10 @@ export class DesktopDevelopmentLoopService {
   }
 
   async heartbeat(input: HeartbeatDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.heartbeatLocked(input));
+  }
+
+  private async heartbeatLocked(input: HeartbeatDesktopWorkInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     if (input.workspace) await this.assertWorkspaceBinding(project, input.workspace);
@@ -829,6 +893,12 @@ export class DesktopDevelopmentLoopService {
   }
 
   async reportImplementation(input: ReportDesktopImplementationInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.reportImplementationLocked(input));
+  }
+
+  private async reportImplementationLocked(
+    input: ReportDesktopImplementationInput,
+  ): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
@@ -930,6 +1000,10 @@ export class DesktopDevelopmentLoopService {
   }
 
   async confirmMerge(input: ConfirmDesktopMergeInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.confirmMergeLocked(input));
+  }
+
+  private async confirmMergeLocked(input: ConfirmDesktopMergeInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
@@ -971,6 +1045,10 @@ export class DesktopDevelopmentLoopService {
   }
 
   async reportMerged(input: ReportDesktopMergedInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.reportMergedLocked(input));
+  }
+
+  private async reportMergedLocked(input: ReportDesktopMergedInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
@@ -1024,6 +1102,10 @@ export class DesktopDevelopmentLoopService {
   }
 
   async recordAcceptance(input: RecordDesktopAcceptanceInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.recordAcceptanceLocked(input));
+  }
+
+  private async recordAcceptanceLocked(input: RecordDesktopAcceptanceInput): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const now = input.now ?? Date.now();
     await this.requireConfiguredProject(input.projectId, input.ownerUserId);
@@ -1073,6 +1155,12 @@ export class DesktopDevelopmentLoopService {
   }
 
   async approveReviewContinuation(input: ApproveReviewContinuationInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.approveReviewContinuationLocked(input));
+  }
+
+  private async approveReviewContinuationLocked(
+    input: ApproveReviewContinuationInput,
+  ): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const identity = this.managedIdentity(input);
@@ -1113,6 +1201,12 @@ export class DesktopDevelopmentLoopService {
   }
 
   async recordArchitectureDecision(input: RecordArchitectureDecisionInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.recordArchitectureDecisionLocked(input));
+  }
+
+  private async recordArchitectureDecisionLocked(
+    input: RecordArchitectureDecisionInput,
+  ): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     const project = await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const identity = this.managedIdentity(input);
@@ -1185,6 +1279,12 @@ export class DesktopDevelopmentLoopService {
   }
 
   async authorizeReviewConsensus(input: AuthorizeReviewConsensusInput): Promise<DesktopDevelopmentResumePacket> {
+    return this.withWorkMutationLock(input, () => this.authorizeReviewConsensusLocked(input));
+  }
+
+  private async authorizeReviewConsensusLocked(
+    input: AuthorizeReviewConsensusInput,
+  ): Promise<DesktopDevelopmentResumePacket> {
     this.assertProtocol(input.protocolVersion);
     await this.requireConfiguredProject(input.projectId, input.ownerUserId);
     const identity = this.managedIdentity(input);
@@ -1267,6 +1367,12 @@ export class DesktopDevelopmentLoopService {
   }
 
   async retryCurrentStage(input: RetryDesktopDevelopmentStageInput): Promise<RetryDesktopDevelopmentStageResult> {
+    return this.withWorkMutationLock(input, () => this.retryCurrentStageLocked(input));
+  }
+
+  private async retryCurrentStageLocked(
+    input: RetryDesktopDevelopmentStageInput,
+  ): Promise<RetryDesktopDevelopmentStageResult> {
     this.assertProtocol(input.protocolVersion);
     const work = await this.readWork(input);
     if (work.attemptId !== input.attemptId) {
@@ -1278,20 +1384,20 @@ export class DesktopDevelopmentLoopService {
       );
     }
 
-    if (work.phase === 'independent_review' || work.phase === 'cross_review') {
-      const target = await this.replayCurrentReviewStage(input);
+    const targetNode = requireTriggerableWorkflowNode(work, input.targetNodeId);
+
+    if (REVIEW_RETRY_PHASES.has(work.phase)) {
+      if (targetNode.manualAction !== 'replay_review_stage') {
+        throw new Error(`Workflow node trigger conflict: ${input.targetNodeId} cannot replay the current Review stage`);
+      }
+      const target = await this.replayCurrentReviewStage(input, work);
       return { work: await this.readWork(input), action: 'replay_review_stage', target };
     }
 
-    if (
-      work.phase === 'ready_for_desktop' ||
-      work.phase === 'implementing' ||
-      work.phase === 'implementation_ready' ||
-      work.phase === 'fix_required' ||
-      work.phase === 'approved_for_merge' ||
-      work.phase === 'awaiting_manual_merge_confirmation' ||
-      work.phase === 'auto_merge_ready'
-    ) {
+    if (DESKTOP_RETRY_PHASES.has(work.phase)) {
+      if (targetNode.manualAction !== 'wake_desktop') {
+        throw new Error(`Workflow node trigger conflict: ${input.targetNodeId} cannot wake the current Desktop stage`);
+      }
       await this.wakeDesktopForCurrentStage(input, work);
       return { work: await this.readWork(input), action: 'wake_desktop', target: 'ChatGPT Desktop 原绑定窗口' };
     }
@@ -1439,8 +1545,11 @@ export class DesktopDevelopmentLoopService {
     };
   }
 
-  private async replayCurrentReviewStage(input: RetryDesktopDevelopmentStageInput): Promise<string> {
-    const [managed, review] = await Promise.all([
+  private async replayCurrentReviewStage(
+    input: RetryDesktopDevelopmentStageInput,
+    expectedWork: DesktopDevelopmentResumePacket,
+  ): Promise<string> {
+    const [managed, initialReview] = await Promise.all([
       this.managedWork.read(this.managedIdentity(input)),
       this.reviewRounds.readCurrentSafe({
         ownerUserId: input.ownerUserId,
@@ -1448,14 +1557,21 @@ export class DesktopDevelopmentLoopService {
         workId: input.workId,
       }),
     ]);
-    if (!review || !review.currentForWork || review.round.attemptId !== input.attemptId) {
-      throw new Error('Current Review round is unavailable for replay');
-    }
-    if (review.round.phase === 'complete') throw new Error('Completed Review cannot be replayed as an active stage');
-
+    assertReviewReplaySnapshot(input, expectedWork, managed, initialReview);
     const context = await this.resolveWorkflowDisplayContext(input.ownerUserId, input.projectId, managed);
+    const review = await this.reviewRounds.readCurrentSafe({
+      ownerUserId: input.ownerUserId,
+      projectId: input.projectId,
+      workId: input.workId,
+    });
+    assertReviewReplaySnapshot(input, expectedWork, managed, review);
     const consensusAuthorization = consensusAuthorizationForReview(managed, review);
-    const stage = review.round.phase === 'consensus_ready' ? 'consensus' : review.round.phase;
+    const stage =
+      input.targetNodeId === 'consensus'
+        ? 'consensus'
+        : input.targetNodeId === 'cross_review'
+          ? 'cross_review'
+          : 'independent';
     const completedReviewerCatIds =
       stage === 'independent'
         ? review.round.independentFinishedCatIds
@@ -1866,6 +1982,13 @@ export class DesktopDevelopmentLoopService {
     }
   }
 
+  private async withWorkMutationLock<T>(
+    input: { readonly projectId: string; readonly workId: string },
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.workMutations.run(input, operation);
+  }
+
   private assertProtocol(protocolVersion: number): void {
     if (protocolVersion !== DESKTOP_DEVELOPMENT_PROTOCOL_VERSION) {
       throw new Error(
@@ -1949,7 +2072,9 @@ function buildWorkflowProjectionContext(input: {
   readonly design: ProjectFeatureDesignAuthorityView;
 }): WorkflowProjectionContext {
   const attemptId = input.managed.attempt.attemptId;
-  const review = input.review?.round.attemptId === attemptId && input.review.currentForWork ? input.review : null;
+  const attemptReview =
+    input.review?.round.attemptId === attemptId && input.review.currentForWork ? input.review : null;
+  const review = attemptReview?.round.exactSha === input.session.workspace.currentSha ? attemptReview : null;
   return {
     managed: input.managed,
     session: input.session,
@@ -1976,30 +2101,30 @@ function designWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopm
 }
 
 function implementationWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
-  const completed = Boolean(context.implementationAt || context.review);
-  const unavailable =
-    context.phase === 'awaiting_design_branch' ||
+  const current =
     context.phase === 'ready_for_desktop' ||
-    !context.session.workspace.worktreePresent ||
-    context.session.status !== 'active';
-  let status: DesktopDevelopmentWorkflowNode['status'] = 'active';
-  if (completed) status = 'completed';
-  else if (unavailable) status = 'blocked';
+    context.phase === 'implementing' ||
+    context.phase === 'implementation_ready';
+  const wakeable = context.phase === 'implementing' || context.phase === 'implementation_ready';
+  let status: DesktopDevelopmentWorkflowNode['status'] = 'completed';
+  if (context.phase === 'awaiting_design_branch') status = 'pending';
+  else if (current) status = context.phase === 'ready_for_desktop' ? 'blocked' : 'active';
   return {
     id: 'implementation',
     status,
     actor: 'chatgpt_desktop',
     startedAt: context.managed.attempt.createdAt,
-    completedAt: context.implementationAt,
-    manualAction: completed ? null : 'wake_desktop',
+    completedAt: status === 'completed' ? context.implementationAt : null,
+    manualAction: wakeable ? 'wake_desktop' : null,
   };
 }
 
 function independentReviewWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
-  const active = context.review?.round.phase === 'independent';
+  const reviewPhase = context.review?.round.phase;
+  const active = context.phase === 'independent_review' && reviewPhase === 'independent';
   let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
   if (active) status = 'active';
-  else if (context.review) status = 'completed';
+  else if (reviewPhase && reviewPhase !== 'independent') status = 'completed';
   return {
     id: 'independent_review',
     status,
@@ -2014,7 +2139,7 @@ function independentReviewWorkflowNode(context: WorkflowProjectionContext): Desk
 
 function crossReviewWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
   const phase = context.review?.round.phase;
-  const active = phase === 'cross_review';
+  const active = context.phase === 'cross_review' && phase === 'cross_review';
   let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
   if (active) status = 'active';
   else if (phase === 'consensus_ready' || phase === 'complete') status = 'completed';
@@ -2032,7 +2157,7 @@ function crossReviewWorkflowNode(context: WorkflowProjectionContext): DesktopDev
 
 function consensusWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
   const phase = context.review?.round.phase;
-  const active = phase === 'consensus_ready';
+  const active = context.phase === 'cross_review' && phase === 'consensus_ready';
   let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
   if (active) status = 'active';
   else if (phase === 'complete') status = 'completed';
@@ -2083,7 +2208,10 @@ function mergeWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopme
     actor: 'chatgpt_desktop',
     startedAt: context.consensusApproved ? (context.review?.round.completedAt ?? null) : null,
     completedAt: context.mergedAt,
-    manualAction: context.consensusApproved && !context.mergedAt ? 'wake_desktop' : null,
+    manualAction:
+      context.phase === 'awaiting_manual_merge_confirmation' || context.phase === 'auto_merge_ready'
+        ? 'wake_desktop'
+        : null,
   };
 }
 

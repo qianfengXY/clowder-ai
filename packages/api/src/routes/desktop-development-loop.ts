@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { DESKTOP_DEVELOPMENT_PROTOCOL_VERSION } from '@cat-cafe/shared';
+import { DESKTOP_DEVELOPMENT_PROTOCOL_VERSION, DESKTOP_DEVELOPMENT_WORKFLOW_NODE_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { DesktopDevelopmentLoopService } from '../domains/desktop-development-loop/desktop-development-loop-service.js';
@@ -113,7 +113,8 @@ const reviewContinuationSchema = z
     idempotencyKey: idSchema,
   })
   .strict();
-const retryCurrentStageSchema = reviewContinuationSchema;
+const workflowNodeIdSchema = z.enum(DESKTOP_DEVELOPMENT_WORKFLOW_NODE_IDS);
+const retryCurrentStageSchema = reviewContinuationSchema.extend({ targetNodeId: workflowNodeIdSchema });
 const architectureDecisionSchema = reviewContinuationSchema
   .extend({
     findingId: idSchema,
@@ -186,7 +187,7 @@ export const desktopDevelopmentLoopRoutes: FastifyPluginAsync<DesktopDevelopment
     }
     const status = /not found/i.test(message)
       ? 404
-      : /conflict|belongs|binding|lease|configured|repository|current committed|requires/i.test(message)
+      : /conflict|stale attempt|belongs|binding|lease|configured|repository|current committed|requires/i.test(message)
         ? 409
         : 400;
     return reply.status(status).send({ error: message });

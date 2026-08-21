@@ -26,15 +26,18 @@ export type DesktopDevelopmentPhase =
   | 'accepted'
   | 'rejected';
 
-export type DesktopDevelopmentWorkflowNodeId =
-  | 'design'
-  | 'implementation'
-  | 'independent_review'
-  | 'cross_review'
-  | 'consensus'
-  | 'handoff'
-  | 'merge'
-  | 'acceptance';
+export const DESKTOP_DEVELOPMENT_WORKFLOW_NODE_IDS = [
+  'design',
+  'implementation',
+  'independent_review',
+  'cross_review',
+  'consensus',
+  'handoff',
+  'merge',
+  'acceptance',
+] as const;
+
+export type DesktopDevelopmentWorkflowNodeId = (typeof DESKTOP_DEVELOPMENT_WORKFLOW_NODE_IDS)[number];
 
 export type DesktopDevelopmentWorkflowNodeStatus = 'pending' | 'active' | 'blocked' | 'completed';
 

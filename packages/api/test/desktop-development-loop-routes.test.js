@@ -287,6 +287,9 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
       },
       retryCurrentStage: async (input) => {
         calls.push(['retryCurrentStage', input]);
+        if (input.targetNodeId === 'merge') {
+          throw new Error('Workflow node trigger conflict: merge is not the current triggerable node');
+        }
         return { work: packet, action: 'wake_desktop', target: 'ChatGPT Desktop 原绑定窗口' };
       },
     };
@@ -641,6 +644,19 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
 
   test('re-triggers only the current workflow stage through the authenticated Cat Cafe surface', async () => {
     const { app, calls } = await createApp();
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/retry-current-stage',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-1',
+        expectedManagedWorkVersion: 2,
+        idempotencyKey: 'manual-stage-retry-missing-node',
+      },
+    });
+    assert.equal(invalid.statusCode, 400);
+
     let response = await app.inject({
       method: 'POST',
       url: '/api/external-projects/project-1/development-loop/works/work-1/retry-current-stage',
@@ -649,6 +665,7 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         attemptId: 'attempt-1',
         expectedManagedWorkVersion: 2,
         idempotencyKey: 'manual-stage-retry-1',
+        targetNodeId: 'implementation',
       },
     });
     assert.equal(response.statusCode, 401);
@@ -662,11 +679,27 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
         attemptId: 'attempt-1',
         expectedManagedWorkVersion: 2,
         idempotencyKey: 'manual-stage-retry-1',
+        targetNodeId: 'implementation',
       },
     });
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().action, 'wake_desktop');
     assert.equal(response.json().work.workId, 'work-1');
+
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/project-1/development-loop/works/work-1/retry-current-stage',
+      headers: { 'x-cat-cafe-user': 'operator-1' },
+      payload: {
+        protocolVersion: 1,
+        attemptId: 'attempt-1',
+        expectedManagedWorkVersion: 2,
+        idempotencyKey: 'manual-stage-retry-future-node',
+        targetNodeId: 'merge',
+      },
+    });
+    assert.equal(conflict.statusCode, 409);
+    assert.match(conflict.json().error, /trigger conflict/i);
     assert.deepEqual(calls, [
       [
         'retryCurrentStage',
@@ -675,6 +708,20 @@ describe('F289 ChatGPT Desktop service-principal routes', () => {
           attemptId: 'attempt-1',
           expectedManagedWorkVersion: 2,
           idempotencyKey: 'manual-stage-retry-1',
+          targetNodeId: 'implementation',
+          projectId: 'project-1',
+          workId: 'work-1',
+          ownerUserId: 'operator-1',
+        },
+      ],
+      [
+        'retryCurrentStage',
+        {
+          protocolVersion: 1,
+          attemptId: 'attempt-1',
+          expectedManagedWorkVersion: 2,
+          idempotencyKey: 'manual-stage-retry-future-node',
+          targetNodeId: 'merge',
           projectId: 'project-1',
           workId: 'work-1',
           ownerUserId: 'operator-1',
