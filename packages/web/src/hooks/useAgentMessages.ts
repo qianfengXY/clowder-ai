@@ -284,6 +284,10 @@ interface AgentMsg {
   toolName?: string;
   /** Tool input params (for 'tool_use' events from backend) */
   toolInput?: Record<string, unknown>;
+  /** Native provider pair key shared by tool_use and tool_result. */
+  toolUseId?: string;
+  /** Provider-reported terminal status for tool_result. */
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
   origin?: 'stream' | 'callback';
   /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
@@ -305,6 +309,7 @@ interface AgentMsg {
     targetCats?: string[];
     /** Durable child identity projected onto the live bubble before history hydration. */
     turnExecution?: NonNullable<NonNullable<ChatMessage['extra']>['turnExecution']>;
+    executionTimeline?: NonNullable<NonNullable<ChatMessage['extra']>['executionTimeline']>;
     /** Bodyless child executions that assisted the visible child. */
     auxiliaryTurnExecutions?: NonNullable<NonNullable<ChatMessage['extra']>['auxiliaryTurnExecutions']>;
   };
@@ -501,6 +506,8 @@ export interface BackgroundAgentMessage {
   origin?: 'stream' | 'callback';
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  toolUseId?: string;
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   error?: string;
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
@@ -524,6 +531,7 @@ export interface BackgroundAgentMessage {
     targetCats?: string[];
     /** Durable child identity projected onto the live bubble before history hydration. */
     turnExecution?: NonNullable<NonNullable<ChatMessage['extra']>['turnExecution']>;
+    executionTimeline?: NonNullable<NonNullable<ChatMessage['extra']>['executionTimeline']>;
     /** Bodyless child executions that assisted the visible child. */
     auxiliaryTurnExecutions?: NonNullable<NonNullable<ChatMessage['extra']>['auxiliaryTurnExecutions']>;
   };
@@ -1318,6 +1326,7 @@ export function consumeBackgroundSystemInfo(
           // Explicit absence invalidates any cached child under the same parent.
           turnInvocationId,
           freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
+          ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
           startedAt: Date.now(),
           taskProgress: {
             tasks: [],
@@ -2892,6 +2901,23 @@ export function handleBackgroundAgentMessage(
 
   if (msg.type === 'done') {
     stopTrackedStream(streamKey, msg, options);
+    if (msg.invocationId && msg.extra?.executionTimeline) {
+      const event = adaptIncomingToBubbleEvent(msg, { sourcePath: 'background' });
+      if (event) {
+        const threadState = options.store.getThreadState(msg.threadId);
+        const result = applyBubbleEventWithRecovery({
+          threadId: msg.threadId,
+          event,
+          currentMessages: threadState.messages,
+        });
+        if (result.recoveryAction === 'none' && result.nextMessages !== threadState.messages) {
+          options.store.replaceThreadMessages(msg.threadId, result.nextMessages, threadState.hasMore);
+        }
+        if (result.violations.length > 0) {
+          for (const violation of result.violations) recordBubbleInvariantViolation(violation, 'warn');
+        }
+      }
+    }
     const currentStatus = options.store.getThreadState(msg.threadId).catStatuses[msg.catId];
     if (currentStatus !== 'error') {
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
@@ -2913,11 +2939,19 @@ export function handleBackgroundAgentMessage(
   }
 
   if (msg.type === 'status') {
+    if (msg.extra?.executionTimeline) {
+      options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+        executionTimeline: msg.extra.executionTimeline,
+      });
+    }
     const lifecycle = appServerLifecycleFromStatus(msg.metadata);
     if (lifecycle) {
       const status = appServerStageStatus(lifecycle.stage);
       if (status) options.store.updateThreadCatStatus(msg.threadId, msg.catId, status);
-      options.store.setThreadCatInvocation(msg.threadId, msg.catId, { appServerLifecycle: lifecycle });
+      options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+        appServerLifecycle: lifecycle,
+        ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
+      });
       return;
     }
     if (isAppServerRecoveryStatus(msg.metadata)) {
@@ -2947,6 +2981,9 @@ export function handleBackgroundAgentMessage(
       type: 'tool_use',
       label: `${msg.catId} → ${toolName}`,
       ...(detail ? { detail } : {}),
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      toolName,
+      startTimeMs: msg.timestamp,
       timestamp: msg.timestamp,
     };
 
@@ -3006,6 +3043,9 @@ export function handleBackgroundAgentMessage(
       label: `${msg.catId} ← result`,
       detail,
       ...(resultMeta ? { resultMeta } : {}),
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
+      endTimeMs: msg.timestamp,
       timestamp: msg.timestamp,
     };
 
@@ -4571,6 +4611,9 @@ export function useAgentMessages() {
       resetTimeout();
 
       if (msg.type === 'status') {
+        if (msg.extra?.executionTimeline) {
+          setCatInvocation(msg.catId, { executionTimeline: msg.extra.executionTimeline });
+        }
         const lifecycle = appServerLifecycleFromStatus(msg.metadata);
         if (lifecycle) {
           const status = appServerStageStatus(lifecycle.stage);
@@ -5001,6 +5044,9 @@ export function useAgentMessages() {
           type: 'tool_use',
           label: `${msg.catId} → ${toolName}`,
           ...(detail ? { detail } : {}),
+          ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+          toolName,
+          ...(typeof msg.timestamp === 'number' ? { startTimeMs: msg.timestamp } : {}),
           timestamp: Date.now(),
         };
         let toolUseReducerHandled = false;
@@ -5084,6 +5130,9 @@ export function useAgentMessages() {
           label: `${msg.catId} ← result`,
           detail,
           ...(resultMeta ? { resultMeta } : {}),
+          ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+          ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
+          ...(typeof msg.timestamp === 'number' ? { endTimeMs: msg.timestamp } : {}),
           timestamp: Date.now(),
         };
         let toolResultReducerHandled = false;
@@ -5589,6 +5638,7 @@ export function useAgentMessages() {
                 // Explicit absence invalidates any cached child under the same parent.
                 turnInvocationId,
                 freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
+                ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
                 startedAt: Date.now(),
                 taskProgress: {
                   tasks: [],
@@ -5882,7 +5932,10 @@ export function useAgentMessages() {
             if (lifecycle) {
               const status = appServerStageStatus(lifecycle.stage);
               if (status) setCatStatus(msg.catId, status);
-              setCatInvocation(msg.catId, { appServerLifecycle: lifecycle });
+              setCatInvocation(msg.catId, {
+                appServerLifecycle: lifecycle,
+                ...(msg.extra?.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
+              });
             }
             consumed = true;
           } else if (parsed?.type === 'app_server_recovery') {

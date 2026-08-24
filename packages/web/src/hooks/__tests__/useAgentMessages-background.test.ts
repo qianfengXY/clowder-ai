@@ -110,6 +110,61 @@ describe('background thread socket handling', () => {
       expect(toasts[0].threadId).toBe('thread-bg');
     });
 
+    it('merges the completed execution timeline into a background assistant bubble', () => {
+      const startedAt = Date.now();
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        content: '处理中',
+        invocationId: 'inv-timeline-bg',
+        timestamp: startedAt + 100,
+        extra: {
+          executionTimeline: {
+            v: 1,
+            startedAt,
+            status: 'running',
+            steps: [{ key: 'request_accepted', startedAt, status: 'running' }],
+          },
+        },
+      });
+
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        invocationId: 'inv-timeline-bg',
+        isFinal: true,
+        timestamp: startedAt + 2_000,
+        extra: {
+          executionTimeline: {
+            v: 1,
+            startedAt,
+            completedAt: startedAt + 2_000,
+            status: 'completed',
+            steps: [
+              { key: 'request_accepted', startedAt, completedAt: startedAt + 500, status: 'completed' },
+              {
+                key: 'completed',
+                startedAt: startedAt + 2_000,
+                completedAt: startedAt + 2_000,
+                status: 'completed',
+              },
+            ],
+          },
+        },
+      });
+
+      const assistant = useChatStore
+        .getState()
+        .getThreadState('thread-bg')
+        .messages.find((message) => message.type === 'assistant');
+      expect(assistant?.extra?.executionTimeline).toMatchObject({
+        status: 'completed',
+        completedAt: startedAt + 2_000,
+      });
+    });
+
     it('projects the runtime member name in background completion toasts', () => {
       simulateBackgroundMessage(
         {
@@ -1055,6 +1110,7 @@ describe('background thread socket handling', () => {
         threadId: 'thread-bg',
         toolName: 'TodoWrite',
         toolInput: { tasks: ['A', 'B'] },
+        toolUseId: 'tool-pair-1',
         timestamp: now,
       });
 
@@ -1167,6 +1223,7 @@ describe('background thread socket handling', () => {
         threadId: 'thread-bg',
         toolName: 'TodoWrite',
         toolInput: { tasks: ['A', 'B'] },
+        toolUseId: 'tool-pair-1',
         timestamp: now,
       });
 
@@ -1175,6 +1232,8 @@ describe('background thread socket handling', () => {
         catId: 'opus',
         threadId: 'thread-bg',
         content: 'ok',
+        toolUseId: 'tool-pair-1',
+        toolResultStatus: 'ok',
         timestamp: now + 1,
       });
 
@@ -1184,6 +1243,16 @@ describe('background thread socket handling', () => {
       expect(ts.messages[0]?.toolEvents).toHaveLength(2);
       expect(ts.messages[0]?.toolEvents?.[0]?.type).toBe('tool_use');
       expect(ts.messages[0]?.toolEvents?.[1]?.type).toBe('tool_result');
+      expect(ts.messages[0]?.toolEvents?.[0]).toMatchObject({
+        toolUseId: 'tool-pair-1',
+        toolName: 'TodoWrite',
+        startTimeMs: now,
+      });
+      expect(ts.messages[0]?.toolEvents?.[1]).toMatchObject({
+        toolUseId: 'tool-pair-1',
+        status: 'ok',
+        endTimeMs: now + 1,
+      });
     });
 
     it('web_search system_info adopts existing streaming assistant on active→background transition', () => {

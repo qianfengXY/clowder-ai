@@ -66,6 +66,34 @@ describe('Codex active path — tool work-log + text converge', () => {
     expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it('does not manufacture exact tool timing when provider timestamps are absent', () => {
+    const PARENT = 'parent-no-tool-time';
+    const TURN = 'turn-no-tool-time';
+
+    useChatStore.setState({
+      catInvocations: { codex: { invocationId: PARENT, turnInvocationId: TURN } },
+    });
+
+    harness.render();
+    harness.send({ ...tool(PARENT, 1_000, TURN), toolUseId: 'tool-no-time', timestamp: undefined });
+    harness.send({
+      type: 'tool_result',
+      catId: 'codex',
+      threadId: THREAD,
+      content: 'ok',
+      invocationId: PARENT,
+      turnInvocationId: TURN,
+      toolUseId: 'tool-no-time',
+      toolResultStatus: 'ok',
+      timestamp: undefined,
+    });
+
+    const events = flatCodexStreamBubbles()[0]?.toolEvents;
+    expect(events).toHaveLength(2);
+    expect(events?.[0]?.startTimeMs).toBeUndefined();
+    expect(events?.[1]?.endTimeMs).toBeUndefined();
+  });
+
   it('[multi-round-trip] two tool+text round-trips on one turn stay ONE stream bubble', () => {
     const PARENT = 'parent-inv-a2a';
     const TURN = 'turn-inv-codex';

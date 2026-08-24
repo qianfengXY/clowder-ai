@@ -3467,6 +3467,7 @@ export async function* routeSerial(
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                ...(doneMsg?.extra?.executionTimeline ? { executionTimeline: doneMsg.extra.executionTimeline } : {}),
               },
             };
             let storedMsg = null;
@@ -3588,6 +3589,7 @@ export async function* routeSerial(
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                ...(doneMsg?.extra?.executionTimeline ? { executionTimeline: doneMsg.extra.executionTimeline } : {}),
               };
               if (Object.keys(extraParts).length > 0) metadataPatch.extra = extraParts;
 
@@ -4190,6 +4192,7 @@ export async function* routeSerial(
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                ...(doneMsg?.extra?.executionTimeline ? { executionTimeline: doneMsg.extra.executionTimeline } : {}),
               },
             };
             const answerBearingNoText =

@@ -100,9 +100,10 @@ export function adaptIncomingToBubbleEvent(
   // #814: Propagate isExplicitPost so chatStore findAssistantDuplicate can
   // skip merge for live socket events (not just hydration).
   if (msg.extra?.isExplicitPost) payload.isExplicitPost = true;
-  if (msg.extra?.turnExecution || msg.extra?.auxiliaryTurnExecutions) {
+  if (msg.extra?.turnExecution || msg.extra?.executionTimeline || msg.extra?.auxiliaryTurnExecutions) {
     payload.extra = {
       ...(msg.extra.turnExecution ? { turnExecution: msg.extra.turnExecution } : {}),
+      ...(msg.extra.executionTimeline ? { executionTimeline: msg.extra.executionTimeline } : {}),
       ...(msg.extra.auxiliaryTurnExecutions ? { auxiliaryTurnExecutions: msg.extra.auxiliaryTurnExecutions } : {}),
     };
   }

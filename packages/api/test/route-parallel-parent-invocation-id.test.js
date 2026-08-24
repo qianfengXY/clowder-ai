@@ -219,6 +219,8 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
         parentInvocationId: outerParentInvocationId,
         executionKind: 'ordinary',
       });
+      assert.equal(call.extra?.executionTimeline?.status, 'completed');
+      assert.equal(call.extra?.executionTimeline?.v, 1);
     }
     const children = await turnExecutionStore.listByParent(outerParentInvocationId);
     assert.equal(children.length, 2);

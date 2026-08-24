@@ -453,6 +453,34 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f254-turn-execution-timeline",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F254-side-effect-freshness-gate.md",
+      "anchor": "旅程 5: 每轮回复的执行过程与耗时"
+    },
+    "structureSource": {
+      "path": "docs/features/F254-side-effect-freshness-gate.md",
+      "anchor": "场景 A：猫猫正在执行"
+    },
+    "bodySource": {
+      "path": "docs/features/F254-side-effect-freshness-gate.md",
+      "anchor": "场景 B：回复完成"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "想知道这一轮时间花在哪里？查看回复气泡里的「执行过程」：运行中会自动展开，完成后也能随时展开看阶段和工具耗时。",
+    "action": {
+      "type": "open_source",
+      "label": "查看说明",
+      "sourceRef": {
+        "path": "docs/features/F254-side-effect-freshness-gate.md",
+        "anchor": "旅程 5: 每轮回复的执行过程与耗时"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f258-visible-cafe",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "F258: 看得见的猫咖 Visible Café" },
