@@ -196,7 +196,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 - [x] AC-R3: 新 SHA 使旧 round stale；有 open finding 时不能 merge；零 finding 只批准最新 SHA。（work-current + atomic consensus regression）
 - [x] AC-R4: 同一功能 Review 会话可连续承载多个 delivery cycle、attempt 与 round；不同功能互不混流。（`project-review-hub-service.test.js`、`desktop-development-loop-service.test.js`）
 - [x] AC-R5: finding 必须携带方案引用与范围；严重架构冲突在 Cat Café 等待用户决策，不能被 Review 建议暗中改写方案。（`review-round-callback-routes.test.js`、`review-round-tools.test.ts`、`review-loop-policy.test.js`）
-- [x] AC-R6: 第 15 次及之后每组 15 次 Review 未清零时等待用户续审批准；Desktop IPC 只有在任务实际出现该轮消息后才清除 durable outbox。（`review-loop-policy.test.js`、`codex-desktop-task-launcher.test.js`）
+- [x] AC-R6: 第 15 次及之后每组 15 次 Review 未清零时等待用户续审批准；Desktop IPC 只有在任务实际出现该轮消息后才清除 durable outbox。owner 已确认但 turn 暂不可读时只重验、不重发，已有 owner 成功收件后不再 deep-link 抢占 Codex 焦点。（`review-loop-policy.test.js`、`codex-desktop-task-launcher.test.js`）
 - [x] AC-R7: Mission Hub 展示服务端推导的完整 Attempt 链路、负责人、Review 进度与迁移时间；当前 Desktop/Review 节点可由用户幂等重投，过期 version 被拒绝，人工门禁不可被通用重试绕过。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`DesktopDevelopmentPanel.tsx`）
 - [x] AC-R8: 共识无法收敛时，用户可为当前 round + exact SHA 写入不可变裁决授权；服务端重投原 recorder 并暴露授权状态，不新增 reviewer，也不放宽合入与验收门禁。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`、`review-round-stage-dispatcher.test.js`、`desktop-development-form.test.ts`）
 - [x] AC-R9: Review 系统消息保持短小，只投递准确身份/阶段/双 SHA 并加载统一 skill；模板与稳定强制约束不重复嵌入每条消息。（`review-round-stage-dispatcher.test.js`、`chatgpt-review-rounds/SKILL.md`）

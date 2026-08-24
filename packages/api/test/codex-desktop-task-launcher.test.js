@@ -254,7 +254,7 @@ test('Review completion forwards one visible turn to the current Desktop owner',
   assert.equal(goal.params.objective, '[Review 系统消息] Traqen · F006');
   assert.equal(goal.params.status, 'paused');
   assert.deepEqual(delivered, [{ threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' }]);
-  assert.deepEqual(opened, ['bound-thread-f006']);
+  assert.deepEqual(opened, []);
 });
 
 test('Review completion opens a dormant bound task and retries owner discovery', async () => {
@@ -282,7 +282,7 @@ test('Review completion opens a dormant bound task and retries owner discovery',
 
   assert.equal(sends, 2);
   assert.equal(messageIds[0], messageIds[1]);
-  assert.deepEqual(opened, ['dormant-thread-f006', 'dormant-thread-f006']);
+  assert.deepEqual(opened, ['dormant-thread-f006']);
 });
 
 test('implementation report parks the goal and tells the owner turn to complete it', async () => {
@@ -366,7 +366,7 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
   fail = false;
   await launcher.recoverPendingActivations();
   assert.deepEqual(delivered, [{ threadId: 'bound-thread-f006', objective: '[Review 系统消息] Traqen · F006' }]);
-  assert.deepEqual(opened, ['bound-thread-f006']);
+  assert.deepEqual(opened, []);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
   assert.equal(values.has('desktop-development:native-wake:bound-thread-f006'), false);
 });
@@ -429,7 +429,7 @@ test('overlapping recovery passes deliver a pending Desktop turn only once', asy
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
 });
 
-test('an IPC acknowledgement is not final until the Desktop turn is observable', async () => {
+test('an acknowledged Desktop turn is verified without re-sending or stealing focus', async () => {
   const { CodexDesktopTaskLauncher } = await import(
     '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
   );
@@ -452,12 +452,14 @@ test('an IPC acknowledgement is not final until the Desktop turn is observable',
     smembers: async (key) => [...(sets.get(key) ?? [])],
   };
   const messageIds = [];
+  const opened = [];
   let observable = false;
   const launcher = new CodexDesktopTaskLauncher(redis, {
     recoveryIntervalMs: 0,
     goalSessionFactory: async () => new FakeNativeSession(),
     sendDesktopTurn: async (_threadId, _objective, clientUserMessageId) => messageIds.push(clientUserMessageId),
     verifyDesktopTurn: async () => observable,
+    openThread: async (threadId) => opened.push(threadId),
   });
   const activation = {
     threadId: 'bound-thread-f006',
@@ -467,11 +469,19 @@ test('an IPC acknowledgement is not final until the Desktop turn is observable',
 
   await launcher.activate(activation);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
+  assert.equal(messageIds.length, 1);
+  assert.deepEqual(opened, []);
+  assert.match(values.get('desktop-development:native-wake:bound-thread-f006'), /"deliveryAcknowledgedAt":/);
+
+  await launcher.recoverPendingActivations();
+  assert.equal(messageIds.length, 1);
+  assert.deepEqual(opened, []);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
 
   observable = true;
   await launcher.recoverPendingActivations();
-  assert.equal(messageIds.length, 2);
-  assert.equal(messageIds[0], messageIds[1]);
+  assert.equal(messageIds.length, 1);
+  assert.deepEqual(opened, []);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
 });
 

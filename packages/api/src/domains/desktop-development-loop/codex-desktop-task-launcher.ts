@@ -102,6 +102,16 @@ type DesktopTaskGoalSignal =
   | ({ readonly kind: 'activate' } & DesktopTaskActivationInput)
   | ({ readonly kind: 'pause' } & DesktopTaskPauseInput);
 
+type PendingDesktopTaskGoalSignal = DesktopTaskGoalSignal & {
+  /**
+   * The owning Desktop window accepted this exact start-turn request. Until
+   * the turn becomes readable, recovery may verify it but must not send it a
+   * second time.
+   */
+  readonly deliveryAcknowledgedAt?: number;
+  readonly clientUserMessageId?: string;
+};
+
 export function buildDesktopTaskName(featureId: string, title: string): string {
   const normalizedFeatureId = featureId.trim().toUpperCase();
   const featurePrefix = normalizedFeatureId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -255,8 +265,16 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       return;
     }
     try {
-      const input = parseGoalSignal(JSON.parse(raw));
+      const input = parsePendingGoalSignal(JSON.parse(raw));
       if (!input) throw new Error('Invalid pending ChatGPT Desktop goal signal');
+      if (input.kind === 'activate' && input.deliveryAcknowledgedAt !== undefined) {
+        const clientUserMessageId =
+          input.clientUserMessageId ?? deterministicDesktopTurnMessageId(input.threadId, input.objective);
+        if (await this.verifyDesktopTurn(input.threadId, input.sourcePath, input.objective, clientUserMessageId)) {
+          await this.clearPendingWake(threadId);
+        }
+        return;
+      }
       await this.deliverGoalSignal(input);
       await this.clearPendingWake(threadId);
     } catch {
@@ -371,12 +389,35 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       });
     });
     await this.sendDesktopTurnToOwner(input.threadId, input.objective, clientUserMessageId);
+    await this.markActivationDeliveryAcknowledged(input, clientUserMessageId);
     if (!(await this.verifyDesktopTurn(input.threadId, input.sourcePath, input.objective, clientUserMessageId))) {
       throw new Error('ChatGPT Desktop acknowledged the Review notification but the turn was not persisted');
     }
-    // Delivery already succeeded. A focus failure must not retain the outbox and
-    // duplicate the turn on recovery.
-    await this.openThread(input.threadId).catch(() => undefined);
+  }
+
+  private async markActivationDeliveryAcknowledged(
+    input: DesktopTaskActivationInput,
+    clientUserMessageId: string,
+  ): Promise<void> {
+    if (!this.redis) return;
+    const key = this.pendingWakeKey(input.threadId);
+    const raw = await this.redis.get(key);
+    const pending = raw ? parsePendingGoalSignal(JSON.parse(raw)) : null;
+    if (
+      pending?.kind !== 'activate' ||
+      pending.sourcePath !== input.sourcePath ||
+      pending.objective !== input.objective
+    ) {
+      return;
+    }
+    await this.redis.set(
+      key,
+      JSON.stringify({
+        ...pending,
+        deliveryAcknowledgedAt: Date.now(),
+        clientUserMessageId,
+      } satisfies PendingDesktopTaskGoalSignal),
+    );
   }
 
   private async sendDesktopTurnToOwner(
@@ -852,13 +893,22 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function parseGoalSignal(value: unknown): DesktopTaskGoalSignal | null {
+function parsePendingGoalSignal(value: unknown): PendingDesktopTaskGoalSignal | null {
   const input = asRecord(value);
   if (typeof input?.threadId !== 'string' || typeof input.sourcePath !== 'string') return null;
   if (input.kind === 'pause') return { kind: 'pause', threadId: input.threadId, sourcePath: input.sourcePath };
   // Records written before goal pausing was introduced are activation records.
   if ((input.kind === undefined || input.kind === 'activate') && typeof input.objective === 'string') {
-    return { kind: 'activate', threadId: input.threadId, sourcePath: input.sourcePath, objective: input.objective };
+    return {
+      kind: 'activate',
+      threadId: input.threadId,
+      sourcePath: input.sourcePath,
+      objective: input.objective,
+      ...(typeof input.deliveryAcknowledgedAt === 'number' && Number.isFinite(input.deliveryAcknowledgedAt)
+        ? { deliveryAcknowledgedAt: input.deliveryAcknowledgedAt }
+        : {}),
+      ...(typeof input.clientUserMessageId === 'string' ? { clientUserMessageId: input.clientUserMessageId } : {}),
+    };
   }
   return null;
 }
