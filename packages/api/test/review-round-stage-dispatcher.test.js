@@ -214,6 +214,79 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.deepEqual(await redis.smembers('desktop-development:pending-review-stage-dispatches'), []);
   });
 
+  test('can defer startup recovery until message ingress is ready', async () => {
+    const { ReviewRoundStageDispatcher } = await import(
+      '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'
+    );
+    const values = new Map();
+    const sets = new Map();
+    const redis = {
+      get: async (key) => values.get(key) ?? null,
+      set: async (key, value) => {
+        values.set(key, value);
+        return 'OK';
+      },
+      del: async (key) => (values.delete(key) ? 1 : 0),
+      sadd: async (key, value) => {
+        const members = sets.get(key) ?? new Set();
+        members.add(value);
+        sets.set(key, members);
+        return 1;
+      },
+      srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+      smembers: async (key) => [...(sets.get(key) ?? [])],
+    };
+    const input = {
+      stage: 'independent',
+      ownerUserId: 'owner-1',
+      projectId: 'project-1',
+      reviewHubThreadId: 'project-feature-review:project-1:backlog-1',
+      roundId: 'round-deferred-recovery',
+      exactSha: 'f'.repeat(40),
+      reviewerCatIds: ['cat-codex'],
+      recorderCatId: 'cat-codex',
+      displayContext: {
+        projectName: 'Traqen',
+        repository: 'qianfengXY/Traqen',
+        backlogItemId: 'backlog-1',
+        featureId: 'F006',
+        featureTitle: 'Workspace capability settings',
+        attemptNumber: 11,
+        designBranch: 'design/f006-workspace-capability',
+        designExactSha: 'e'.repeat(40),
+        designDocuments: ['docs/design/f006.md'],
+      },
+    };
+    const seedDispatcher = new ReviewRoundStageDispatcher(
+      {
+        sendMessage: async () => ({ statusCode: 503, body: 'not ready' }),
+        resolveMentionHandle: () => '@gpt',
+      },
+      { redis, recoveryIntervalMs: 0 },
+    );
+    await seedDispatcher.dispatch(input);
+
+    const recovered = [];
+    const deferredDispatcher = new ReviewRoundStageDispatcher(
+      {
+        sendMessage: async (request) => {
+          recovered.push(request);
+          return { statusCode: 200, body: '{"status":"processing"}' };
+        },
+        resolveMentionHandle: () => '@gpt',
+      },
+      { redis, recoveryIntervalMs: 60_000, autoStartRecovery: false },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(recovered.length, 0);
+
+    deferredDispatcher.startRecovery();
+    deferredDispatcher.startRecovery();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(recovered.length, 1);
+    assert.deepEqual(await redis.smembers('desktop-development:pending-review-stage-dispatches'), []);
+  });
+
   test('keeps a queued stage durable and performs a bounded automatic recovery start', async () => {
     const { ReviewRoundStageDispatcher } = await import(
       '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'

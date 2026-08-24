@@ -61,6 +61,7 @@ export interface ReviewRoundStageDispatcherDeps {
 interface ReviewRoundStageDispatcherOptions {
   readonly redis?: RedisClient;
   readonly recoveryIntervalMs?: number;
+  readonly autoStartRecovery?: boolean;
 }
 
 interface PendingReviewStageDispatch {
@@ -81,22 +82,29 @@ const MAX_AUTOMATIC_RECOVERY_ATTEMPTS = 3;
  */
 export class ReviewRoundStageDispatcher implements IReviewRoundStageDispatcher {
   private readonly redis?: RedisClient;
+  private readonly recoveryIntervalMs: number;
   private readonly active = new Map<string, Promise<void>>();
   private readonly latestDispatchByThread = new Map<string, string>();
+  private recoveryStarted = false;
 
   constructor(
     private readonly deps: ReviewRoundStageDispatcherDeps,
     options: ReviewRoundStageDispatcherOptions = {},
   ) {
     this.redis = options.redis;
-    if (this.redis && options.recoveryIntervalMs !== 0) {
-      const interval = setInterval(
-        () => void this.recoverPendingDispatches().catch(() => undefined),
-        options.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS,
-      );
-      interval.unref();
-      queueMicrotask(() => void this.recoverPendingDispatches().catch(() => undefined));
-    }
+    this.recoveryIntervalMs = options.recoveryIntervalMs ?? DEFAULT_RECOVERY_INTERVAL_MS;
+    if (options.autoStartRecovery !== false) this.startRecovery();
+  }
+
+  startRecovery(): void {
+    if (!this.redis || this.recoveryIntervalMs === 0 || this.recoveryStarted) return;
+    this.recoveryStarted = true;
+    const interval = setInterval(
+      () => void this.recoverPendingDispatches().catch(() => undefined),
+      this.recoveryIntervalMs,
+    );
+    interval.unref();
+    queueMicrotask(() => void this.recoverPendingDispatches().catch(() => undefined));
   }
 
   dispatch(input: ReviewRoundDispatchInput): Promise<void> {

@@ -4343,6 +4343,9 @@ async function main(): Promise<void> {
   let reviewRoundCoordinatorService:
     | import('./domains/desktop-development-loop/review-round-coordinator-service.js').ReviewRoundCoordinatorService
     | undefined;
+  let reviewRoundDispatcher:
+    | import('./domains/desktop-development-loop/review-round-stage-dispatcher.js').ReviewRoundStageDispatcher
+    | undefined;
   if (redis && workflowSopStore) {
     const [serviceMod, coordinatorMod, dispatcherMod, sessionMod, managedWorkMod, reviewRoundMod] = await Promise.all([
       import('./domains/desktop-development-loop/desktop-development-loop-service.js'),
@@ -4354,7 +4357,7 @@ async function main(): Promise<void> {
     ]);
     managedWorkConsumerPort = new managedWorkMod.RedisManagedWorkConsumerPort(redis);
     reviewRoundStore = new reviewRoundMod.RedisReviewRoundStore(redis);
-    const reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher(
+    reviewRoundDispatcher = new dispatcherMod.ReviewRoundStageDispatcher(
       {
         sendMessage: async ({ headers, payload }) => {
           const response = await app.inject({
@@ -4367,7 +4370,7 @@ async function main(): Promise<void> {
         },
         resolveMentionHandle: primaryMentionHandleForCatId,
       },
-      { redis },
+      { redis, autoStartRecovery: false },
     );
     const { CodexDesktopTaskLauncher } = await import(
       './domains/desktop-development-loop/codex-desktop-task-launcher.js'
@@ -4971,6 +4974,7 @@ async function main(): Promise<void> {
   }
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
+  reviewRoundDispatcher?.startRecovery();
   memoryServices.indexBuilder?.startPassageEmbeddingWarmup();
 
   // F156: Friendly hint for private network access
