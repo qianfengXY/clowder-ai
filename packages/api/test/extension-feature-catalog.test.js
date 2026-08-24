@@ -19,6 +19,8 @@ test('extension catalog validates EXT IDs and projects backlog rows', async () =
             status: 'implementation',
             owner: 'CodeX',
             specPath: 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md',
+            designPath: 'docs/design/EXT-001-chatgpt-desktop-development-loop.md',
+            planPath: 'feature-specs/2026-08-05-chatgpt-desktop-development-loop.md',
             legacyIds: ['F289'],
           },
         ],
@@ -32,8 +34,38 @@ test('extension catalog validates EXT IDs and projects backlog rows', async () =
 
     assert.equal(entries[0].id, 'EXT-001');
     assert.deepEqual(entries[0].legacyIds, ['F289']);
+    assert.equal(entries[0].designPath, 'docs/design/EXT-001-chatgpt-desktop-development-loop.md');
+    assert.equal(entries[0].planPath, 'feature-specs/2026-08-05-chatgpt-desktop-development-loop.md');
     assert.equal(rows[0].kind, 'extension');
     assert.equal(rows[0].link, 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('extension catalog rejects document paths outside approved repository roots', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cat-cafe-extension-catalog-path-'));
+  const catalogPath = join(root, 'catalog.json');
+  try {
+    await writeFile(
+      catalogPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        extensions: [
+          {
+            id: 'EXT-001',
+            name: 'ChatGPT Desktop Development Loop',
+            status: 'implementation',
+            owner: 'CodeX',
+            specPath: 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md',
+            planPath: '../private-plan.md',
+            legacyIds: ['F289'],
+          },
+        ],
+      }),
+    );
+    const { readExtensionFeatureCatalog } = await import('../dist/routes/extension-feature-catalog.js');
+    await assert.rejects(() => readExtensionFeatureCatalog(catalogPath), /repository-relative/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

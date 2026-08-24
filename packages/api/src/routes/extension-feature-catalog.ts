@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve, sep, win32 } from 'node:path';
 import type { BacklogFeatureRow } from './backlog-doc-import.js';
 
 export const EXTENSION_FEATURE_ID_PATTERN = /^EXT-\d{3}$/;
@@ -116,23 +116,29 @@ function optionalDocumentPath(value: unknown, label: string): string | undefined
 }
 
 function validateDocumentPath(value: string): string {
-  const normalizedPath = normalize(value);
+  const normalizedPath = normalize(value).replaceAll('\\', '/');
+  const hasAllowedRoot = normalizedPath.startsWith('docs/') || normalizedPath.startsWith('feature-specs/');
   if (
     isAbsolute(value) ||
+    win32.isAbsolute(value) ||
     normalizedPath === '..' ||
-    normalizedPath.startsWith(`..${sep}`) ||
-    !normalizedPath.startsWith(`docs${sep}`) ||
+    normalizedPath.startsWith('../') ||
+    !hasAllowedRoot ||
     !normalizedPath.endsWith('.md')
   ) {
-    throw new Error(`Extension document path must be a repository-relative docs/*.md path: ${value}`);
+    throw new Error(
+      `Extension document path must be a repository-relative docs/*.md or feature-specs/*.md path: ${value}`,
+    );
   }
-  return value.replaceAll('\\', '/');
+  return normalizedPath;
 }
 
 function resolveCatalogDocumentPath(root: string, relativePath: string): string {
   const resolved = resolve(root, relativePath);
-  const docsRoot = `${resolve(root, 'docs')}${sep}`;
-  if (!resolved.startsWith(docsRoot)) throw new Error(`Extension document path escapes docs/: ${relativePath}`);
+  const allowedRoots = [resolve(root, 'docs'), resolve(root, 'feature-specs')];
+  if (!allowedRoots.some((allowedRoot) => resolved.startsWith(`${allowedRoot}${sep}`))) {
+    throw new Error(`Extension document path escapes its allowed repository roots: ${relativePath}`);
+  }
   return resolved;
 }
 
