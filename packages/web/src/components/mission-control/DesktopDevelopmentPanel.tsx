@@ -14,6 +14,8 @@ import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { DesktopDevelopmentWorkflowGraph } from './DesktopDevelopmentWorkflowGraph';
 import { buildDesktopAcceptanceRequest, buildDesktopConsensusAuthorizationRequest } from './desktop-development-form';
+import { type PendingDecisionItem, PendingDecisionQueue } from './PendingDecisionQueue';
+import { WorkflowStepper } from './WorkflowStepper';
 
 type DevelopmentLaunchStatus =
   | 'available'
@@ -47,6 +49,12 @@ interface ProjectDevelopmentLaunchState {
     | { readonly status: 'failed'; readonly error: string };
 }
 
+/** 批次 4 · A6 — 操作反馈带 severity，替代原先无区分的底部单行文本 */
+interface PanelNotice {
+  readonly kind: 'success' | 'error';
+  readonly text: string;
+}
+
 export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
   const router = useRouter();
   const { projects, setProjects } = useExternalProjectStore();
@@ -62,10 +70,13 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [works, setWorks] = useState<readonly DesktopDevelopmentResumePacket[]>([]);
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const [notice, setNotice] = useState<PanelNotice | null>(null);
+  const notifySuccess = (text: string) => setNotice({ kind: 'success', text });
+  const notifyError = (text: string) => setNotice({ kind: 'error', text });
   const [editingReviewCats, setEditingReviewCats] = useState(false);
   const [reviewerIds, setReviewerIds] = useState<string[]>([]);
   const [reviewRecorderId, setReviewRecorderId] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
   const binding = project.desktopDevelopment;
   const { cats } = useCatData();
   const catNames = useMemo(() => new Map(cats.map((cat) => [cat.id, cat.displayName])), [cats]);
@@ -114,14 +125,14 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     } catch (error) {
       setWorks([]);
       setLaunchStates([]);
-      setStatus(error instanceof Error ? error.message : '无法读取开发轮次');
+      notifyError(error instanceof Error ? error.message : '无法读取开发轮次');
     } finally {
       setWorksLoading(false);
     }
   }, [project.desktopDevelopment, project.id]);
 
   useEffect(() => {
-    setStatus(null);
+    setNotice(null);
     void loadWorks();
   }, [loadWorks]);
 
@@ -143,7 +154,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         setCurrentThread(body.thread.threadId);
         router.push(`/thread/${encodeURIComponent(body.thread.threadId)}`);
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : '无法打开 Review 会话');
+        notifyError(error instanceof Error ? error.message : '无法打开 Review 会话');
       }
     },
     [project.id, project.sourcePath, router, setCurrentProject, setCurrentThread, setThreads],
@@ -152,7 +163,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const enableAutomaticMerge = async () => {
     if (!binding) return;
     setBusy(true);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(`/api/external-projects/${project.id}/development-loop`, {
         method: 'PATCH',
@@ -162,9 +173,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as { project?: ExternalProject; error?: string };
       if (!response.ok || !body.project) throw new Error(body.error ?? '无法启用自动合入');
       setProjects(projects.map((item) => (item.id === body.project?.id ? body.project : item)));
-      setStatus('此项目已启用自动合入；最终验收仍需你确认');
+      notifySuccess('此项目已启用自动合入；最终验收仍需你确认');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法启用自动合入');
+      notifyError(error instanceof Error ? error.message : '无法启用自动合入');
     } finally {
       setBusy(false);
     }
@@ -191,11 +202,11 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     const uniqueReviewers = [...new Set(reviewerIds)];
     const validationError = validateReviewCatSelection(uniqueReviewers, reviewRecorderId);
     if (validationError) {
-      setStatus(validationError);
+      notifyError(validationError);
       return;
     }
     setBusy(true);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(`/api/external-projects/${project.id}/development-loop`, {
         method: 'PATCH',
@@ -210,9 +221,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       if (!response.ok || !body.project) throw new Error(body.error ?? '无法保存 Review 猫猫配置');
       setProjects(projects.map((item) => (item.id === body.project?.id ? body.project : item)));
       setEditingReviewCats(false);
-      setStatus('Review 猫猫配置已保存，将从下一轮检视开始生效');
+      notifySuccess('Review 猫猫配置已保存，将从下一轮检视开始生效');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法保存 Review 猫猫配置');
+      notifyError(error instanceof Error ? error.message : '无法保存 Review 猫猫配置');
     } finally {
       setBusy(false);
     }
@@ -220,7 +231,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
 
   const recordAcceptance = async (work: DesktopDevelopmentResumePacket, accepted: boolean) => {
     setAcceptingWorkId(work.workId);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/acceptance`,
@@ -233,13 +244,13 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录最终验收');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(
+      notifySuccess(
         accepted
           ? '最终验收已通过；本轮交付已闭环'
           : '最终验收未通过；证据已保留。可直接点击“从返工入口开启”；如果方案也需调整，请先提交方案分支。',
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法记录最终验收');
+      notifyError(error instanceof Error ? error.message : '无法记录最终验收');
     } finally {
       setAcceptingWorkId(null);
     }
@@ -248,7 +259,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const startNextDeliveryCycle = async (launchState: ProjectDevelopmentLaunchState) => {
     if (!binding) return;
     setStartingDeliveryItemId(launchState.backlogItemId);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(launchState.backlogItemId)}/start`,
@@ -260,14 +271,16 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       );
       const body = (await response.json()) as { state?: ProjectDevelopmentLaunchState; error?: string };
       if (!response.ok || !body.state) throw new Error(body.error ?? '无法开启新交付轮次');
-      setStatus(
-        body.state.desktopTask?.status === 'failed'
-          ? `新交付轮次已开启，但唤醒 Desktop 失败：${body.state.desktopTask.error}`
-          : `${launchState.featureId} 已开启新交付轮次；历史证据保留，原 ChatGPT Desktop 窗口已收到继续任务。`,
-      );
+      if (body.state.desktopTask?.status === 'failed') {
+        notifyError(`新交付轮次已开启，但唤醒 Desktop 失败：${body.state.desktopTask.error}`);
+      } else {
+        notifySuccess(
+          `${launchState.featureId} 已开启新交付轮次；历史证据保留，原 ChatGPT Desktop 窗口已收到继续任务。`,
+        );
+      }
       await loadWorks();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法开启新交付轮次');
+      notifyError(error instanceof Error ? error.message : '无法开启新交付轮次');
     } finally {
       setStartingDeliveryItemId(null);
     }
@@ -275,7 +288,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
 
   const approveReviewContinuation = async (work: DesktopDevelopmentResumePacket) => {
     setReviewDecisionKey(`${work.workId}:continue`);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/review-continuation`,
@@ -293,9 +306,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法批准继续 Review');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(`已批准继续 Review，新的上限为 Attempt #${body.reviewContinuationApprovedThroughAttempt}`);
+      notifySuccess(`已批准继续 Review，新的上限为 Attempt #${body.reviewContinuationApprovedThroughAttempt}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法批准继续 Review');
+      notifyError(error instanceof Error ? error.message : '无法批准继续 Review');
     } finally {
       setReviewDecisionKey(null);
     }
@@ -307,7 +320,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     decision: 'keep_original_plan' | 'approve_plan_change',
   ) => {
     setReviewDecisionKey(`${work.workId}:${findingId}`);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/architecture-decision`,
@@ -327,9 +340,9 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
       if (!response.ok || body.error) throw new Error(body.error ?? '无法记录架构决策');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
-      setStatus(decision === 'keep_original_plan' ? '已决定保持当前方案分支版本' : '已确认方案分支已更新');
+      notifySuccess(decision === 'keep_original_plan' ? '已决定保持当前方案分支版本' : '已确认方案分支已更新');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法记录架构决策');
+      notifyError(error instanceof Error ? error.message : '无法记录架构决策');
     } finally {
       setReviewDecisionKey(null);
     }
@@ -337,7 +350,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
 
   const retryCurrentStage = async (work: DesktopDevelopmentResumePacket) => {
     setRetryingWorkId(work.workId);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/retry-current-stage`,
@@ -360,11 +373,11 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       };
       if (!response.ok || !body.work) throw new Error(body.error ?? '无法再次触发当前节点');
       setWorks((current) => current.map((item) => (item.workId === body.work?.workId ? body.work : item)));
-      setStatus(
+      notifySuccess(
         `已登记并再次触发当前节点（目标：${body.target ?? '当前负责人'}）。节点变为“已完成”才表示服务端确认进入下一步。`,
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法再次触发当前节点');
+      notifyError(error instanceof Error ? error.message : '无法再次触发当前节点');
     } finally {
       setRetryingWorkId(null);
     }
@@ -373,7 +386,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const authorizeReviewConsensus = async (work: DesktopDevelopmentResumePacket) => {
     const instruction = consensusInstructions[work.workId] ?? '';
     setReviewDecisionKey(`${work.workId}:consensus`);
-    setStatus(null);
+    setNotice(null);
     try {
       const response = await apiFetch(
         `/api/external-projects/${project.id}/development-loop/works/${work.workId}/consensus-authorization`,
@@ -387,13 +400,67 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       if (!response.ok || body.error) throw new Error(body.error ?? '无法授权提交最终检视意见');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
       setConsensusInstructions((current) => ({ ...current, [work.workId]: '' }));
-      setStatus('已授权共识记录猫按你的裁决提交最终检视意见');
+      notifySuccess('已授权共识记录猫按你的裁决提交最终检视意见');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法授权提交最终检视意见');
+      notifyError(error instanceof Error ? error.message : '无法授权提交最终检视意见');
     } finally {
       setReviewDecisionKey(null);
     }
   };
+
+  const worksById = useMemo(() => new Map(works.map((work) => [work.workId, work])), [works]);
+
+  /** 批次 3 — 聚合四类必须用户拍板的事项，置顶为"待你处理"队列 */
+  const pendingDecisions = useMemo<PendingDecisionItem[]>(() => {
+    const result: PendingDecisionItem[] = [];
+    for (const launchState of launchStates) {
+      const candidate = launchState.managedWork ? worksById.get(launchState.managedWork.workId) : undefined;
+      const work = candidate?.attemptId === launchState.managedWork?.attemptId ? candidate : undefined;
+      if (!work) continue;
+      const base = {
+        backlogItemId: launchState.backlogItemId,
+        featureId: launchState.featureId,
+        title: launchState.title,
+        work,
+      };
+      if (work.acceptancePending) result.push({ ...base, kind: 'acceptance' });
+      if (work.architectureDecisionPending) result.push({ ...base, kind: 'architecture' });
+      if (work.reviewContinuationPending) result.push({ ...base, kind: 'continuation' });
+      if (work.reviewPhase === 'consensus_ready' && !work.consensusAuthorization) {
+        result.push({ ...base, kind: 'consensus' });
+      }
+    }
+    return result;
+  }, [launchStates, worksById]);
+
+  /** 批次 4 — 功能卡片默认折叠；队列跳转时先展开再滚动定位 */
+  const [expandedFeatures, setExpandedFeatures] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleFeature = useCallback((backlogItemId: string) => {
+    setExpandedFeatures((current) => {
+      const next = new Set(current);
+      if (next.has(backlogItemId)) {
+        next.delete(backlogItemId);
+      } else {
+        next.add(backlogItemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const jumpToFeature = useCallback((backlogItemId: string) => {
+    setExpandedFeatures((current) => {
+      if (current.has(backlogItemId)) return current;
+      const next = new Set(current);
+      next.add(backlogItemId);
+      return next;
+    });
+    window.setTimeout(() => {
+      document
+        .getElementById(`dev-loop-feature-${backlogItemId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }, []);
 
   if (!binding) {
     return (
@@ -407,15 +474,42 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   }
 
   const pilotCount = binding.successfulManualPilotCount;
-  const worksById = new Map(works.map((work) => [work.workId, work]));
   return (
     <section className="space-y-4 rounded-xl bg-[var(--console-card-bg)] p-3 sm:p-5">
+      {/* 批次 2 — 绑定摘要条：默认一行摘要，完整绑定信息与配置折叠到"绑定与设置" */}
       <div>
-        <h3 className="text-sm font-semibold text-cafe">ChatGPT Desktop 开发闭环</h3>
-        <p className="mt-1 text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-cafe">ChatGPT Desktop 开发闭环</h3>
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-cafe-secondary">
+              <span className="break-all font-medium text-cafe">{binding.repository.fullName}</span>
+              <span aria-hidden="true">·</span>
+              <span>{binding.defaultBranch}</span>
+              <span aria-hidden="true">·</span>
+              <span>{binding.mergeMode === 'automatic' ? '自动合入' : '人工确认合入'}</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                Review：{binding.defaultReviewers.map((reviewer) => catNames.get(reviewer) ?? reviewer).join('、')}
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-expanded={showSettings}
+            onClick={() => setShowSettings((value) => !value)}
+            className="console-button-secondary shrink-0"
+            data-testid="desktop-binding-settings-toggle"
+          >
+            {showSettings ? '收起设置' : '绑定与设置'}
+          </button>
+        </div>
       </div>
 
-      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {showSettings && (
+      <div className="space-y-4 rounded-lg bg-[var(--console-shell-bg)] p-3">
+      <p className="text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
+
+      <dl className="console-data-grid">
         <Info label="Cat Café 项目 ID" value={project.id} />
         <Info label="GitHub 仓库" value={binding.repository.fullName} />
         <Info label="默认分支" value={binding.defaultBranch} />
@@ -430,12 +524,12 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
 
       <div>
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-medium text-cafe-secondary">默认 Review 猫猫</div>
+          <div className="text-xs font-semibold text-cafe">默认 Review 猫猫</div>
           <button
             type="button"
             onClick={toggleReviewCatEditor}
             disabled={busy}
-            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-micro font-medium text-cafe-secondary disabled:opacity-40"
+            className="console-button-secondary disabled:opacity-40"
           >
             {editingReviewCats ? '取消配置' : '配置'}
           </button>
@@ -457,7 +551,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
           提交最终检视意见。
         </p>
         {editingReviewCats && (
-          <div className="mt-3 space-y-3 rounded-[10px] bg-[var(--console-shell-bg)] p-3">
+          <div className="mt-3 space-y-3 rounded-lg bg-[var(--console-card-bg)] p-3">
             <fieldset>
               <legend className="text-xs font-medium text-cafe-secondary">参与 Review（至少两只）</legend>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -498,7 +592,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               <select
                 value={reviewRecorderId}
                 onChange={(event) => setReviewRecorderId(event.target.value)}
-                className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                className="mt-1 w-full rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
               >
                 {reviewerIds.map((reviewerId) => (
                   <option key={reviewerId} value={reviewerId}>
@@ -514,7 +608,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               type="button"
               onClick={() => void saveReviewCats()}
               disabled={busy || reviewerIds.length < 2 || !reviewerIds.includes(reviewRecorderId)}
-              className="rounded-lg bg-[var(--mc-accent)] px-4 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+              className="console-button-primary disabled:opacity-40"
             >
               {busy ? '保存中...' : '保存 Review 配置'}
             </button>
@@ -522,14 +616,40 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         )}
       </div>
 
+      {pilotCount >= 2 && binding.mergeMode === 'manual_confirm_in_chatgpt' && (
+        <button
+          type="button"
+          onClick={() => void enableAutomaticMerge()}
+          disabled={busy}
+          className="console-button-secondary disabled:opacity-40"
+        >
+          为此项目启用自动合入
+        </button>
+      )}
+      </div>
+      )}
+
+      {!worksLoading && (
+        <PendingDecisionQueue
+          items={pendingDecisions}
+          acceptingWorkId={acceptingWorkId}
+          decisionBusy={reviewDecisionKey !== null}
+          onAccept={(work, accepted) => void recordAcceptance(work, accepted)}
+          onApproveContinuation={(work) => void approveReviewContinuation(work)}
+          onJump={jumpToFeature}
+        />
+      )}
+
+      {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
+
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-medium text-cafe-secondary">开发与验收轮次</div>
+          <div className="text-xs font-semibold text-cafe">开发与验收轮次</div>
           <button
             type="button"
             onClick={() => void loadWorks()}
             disabled={worksLoading}
-            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-micro font-medium text-cafe-secondary disabled:opacity-40"
+            className="console-button-secondary disabled:opacity-40"
           >
             {worksLoading ? '刷新中...' : '刷新状态'}
           </button>
@@ -548,24 +668,65 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
           const windowRef =
             launchState.desktopBinding?.chatRef ??
             (launchState.desktopTask?.status === 'created' ? launchState.desktopTask.threadId : undefined);
+          const expanded = expandedFeatures.has(launchState.backlogItemId);
+          const needsAction = Boolean(
+            work &&
+              (work.acceptancePending ||
+                work.architectureDecisionPending ||
+                work.reviewContinuationPending ||
+                (work.reviewPhase === 'consensus_ready' && !work.consensusAuthorization)),
+          );
           return (
             <article
               key={launchState.backlogItemId}
-              className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-3 sm:px-3"
+              id={`dev-loop-feature-${launchState.backlogItemId}`}
+              className="rounded-lg bg-[var(--console-shell-bg)] px-2 py-2 sm:px-3"
             >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <div className="text-xs font-medium text-cafe">
-                    {launchState.featureId} · {featureDisplayTitle(launchState.featureId, launchState.title)}
+              {/* 批次 4 — 折叠行头部：标题 + 状态 + Stepper 概览，点击展开完整详情 */}
+              <button
+                type="button"
+                onClick={() => toggleFeature(launchState.backlogItemId)}
+                aria-expanded={expanded}
+                className="block w-full rounded-md py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)]"
+                data-testid={`desktop-feature-toggle-${launchState.backlogItemId}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium text-cafe">
+                      {launchState.featureId} · {featureDisplayTitle(launchState.featureId, launchState.title)}
+                    </div>
+                    <div className="mt-1 text-micro text-cafe-secondary">
+                      {describeLaunchStatus(launchState.status)}
+                      {work ? ` · 交付 #${work.deliveryCycleNumber} · 实现 #${work.attemptNumber}` : ''}
+                    </div>
                   </div>
-                  <div className="mt-1 text-micro text-cafe-secondary">{describeLaunchStatus(launchState.status)}</div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {needsAction && (
+                      <span className="rounded-full bg-[var(--semantic-warning-surface)] px-2 py-0.5 text-micro font-semibold text-[var(--semantic-warning)]">
+                        需处理
+                      </span>
+                    )}
+                    {launchState.desktopBinding?.status === 'detached' && (
+                      <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro text-cafe-secondary">
+                        等待重绑
+                      </span>
+                    )}
+                    <span
+                      className={`text-sm text-cafe-secondary transition-transform ${expanded ? 'rotate-180' : ''}`}
+                      aria-hidden="true"
+                    >
+                      ▾
+                    </span>
+                  </div>
                 </div>
-                {launchState.desktopBinding?.status === 'detached' && (
-                  <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
-                    等待新 ChatGPT 会话重新绑定
-                  </span>
+                {work && (
+                  <div className="mt-2">
+                    <WorkflowStepper work={work} />
+                  </div>
                 )}
-              </div>
+              </button>
+              {expanded && (
+              <div className="mt-1 space-y-1">
               <div
                 className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
                 data-testid={`desktop-window-binding-${launchState.backlogItemId}`}
@@ -608,6 +769,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   retrying={retryingWorkId === work.workId}
                   onRetry={() => void retryCurrentStage(work)}
                   onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
+                  defaultCollapsed={false}
                 />
               )}
               {work && work.openFindings.length > 0 && (
@@ -632,7 +794,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                               void recordArchitectureDecision(work, finding.findingId, 'keep_original_plan')
                             }
                             disabled={reviewDecisionKey !== null}
-                            className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+                            className="console-button-secondary disabled:opacity-40"
                           >
                             保持当前方案分支
                           </button>
@@ -642,7 +804,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                               void recordArchitectureDecision(work, finding.findingId, 'approve_plan_change')
                             }
                             disabled={reviewDecisionKey !== null}
-                            className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                            className="console-button-primary disabled:opacity-40"
                           >
                             方案分支已更新，继续
                           </button>
@@ -660,7 +822,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                     type="button"
                     onClick={() => void approveReviewContinuation(work)}
                     disabled={reviewDecisionKey !== null}
-                    className="mt-2 rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                    className="console-button-primary mt-2 disabled:opacity-40"
                   >
                     批准继续 Review
                   </button>
@@ -697,14 +859,14 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                           maxLength={2000}
                           rows={4}
                           placeholder="例如：采纳 GPT 的第 2–5 项；驳回 Kimi 的第 1 项，理由是……"
-                          className="mt-1 w-full resize-y rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-shell-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                          className="mt-1 w-full resize-y rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-shell-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
                         />
                       </label>
                       <button
                         type="button"
                         onClick={() => void authorizeReviewConsensus(work)}
                         disabled={reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()}
-                        className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                        className="console-button-primary disabled:opacity-40"
                       >
                         授权记录猫按此提交
                       </button>
@@ -718,7 +880,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                     type="button"
                     onClick={() => void recordAcceptance(work, true)}
                     disabled={acceptingWorkId === work.workId}
-                    className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                    className="console-button-primary disabled:opacity-40"
                   >
                     验收通过
                   </button>
@@ -726,7 +888,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                     type="button"
                     onClick={() => void recordAcceptance(work, false)}
                     disabled={acceptingWorkId === work.workId}
-                    className="rounded-lg bg-[var(--console-hover-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
+                    className="console-button-secondary disabled:opacity-40"
                   >
                     验收未通过
                   </button>
@@ -738,7 +900,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                     type="button"
                     onClick={() => void startNextDeliveryCycle(launchState)}
                     disabled={startingDeliveryItemId === launchState.backlogItemId}
-                    className="rounded-lg bg-[var(--mc-accent)] px-3 py-2 text-xs font-medium text-[var(--cafe-surface)] disabled:opacity-40"
+                    className="console-button-primary disabled:opacity-40"
                     data-testid={`desktop-next-delivery-${launchState.backlogItemId}`}
                   >
                     {startingDeliveryItemId === launchState.backlogItemId
@@ -752,25 +914,38 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                   </span>
                 </div>
               )}
+              </div>
+              )}
             </article>
           );
         })}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {pilotCount >= 2 && binding.mergeMode === 'manual_confirm_in_chatgpt' && (
-          <button
-            type="button"
-            onClick={() => void enableAutomaticMerge()}
-            disabled={busy}
-            className="rounded-lg bg-[var(--console-shell-bg)] px-4 py-2 text-xs font-medium text-cafe-secondary disabled:opacity-40"
-          >
-            为此项目启用自动合入
-          </button>
-        )}
-      </div>
-      {status && <p className="text-xs text-cafe-secondary">{status}</p>}
     </section>
+  );
+}
+
+function NoticeBanner({ notice, onDismiss }: { notice: PanelNotice; onDismiss: () => void }) {
+  const toneClass =
+    notice.kind === 'error'
+      ? 'bg-[var(--semantic-critical-surface)] text-[var(--semantic-error-text)]'
+      : 'bg-[var(--semantic-success-surface)] text-[var(--semantic-success-text)]';
+  return (
+    <div
+      role={notice.kind === 'error' ? 'alert' : 'status'}
+      className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-xs ${toneClass}`}
+      data-testid={`desktop-dev-notice-${notice.kind}`}
+    >
+      <span className="min-w-0 leading-relaxed">{notice.text}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="关闭提示"
+        className="shrink-0 font-semibold opacity-70 hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
@@ -857,9 +1032,9 @@ function featureDisplayTitle(featureId: string, title: string): string {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-2">
-      <dt className="text-micro text-cafe-secondary">{label}</dt>
-      <dd className="mt-1 break-words text-xs font-medium text-cafe">{value}</dd>
+    <div className="console-data-tile">
+      <dt className="console-data-tile-label">{label}</dt>
+      <dd className="console-data-tile-value break-words">{value}</dd>
     </div>
   );
 }

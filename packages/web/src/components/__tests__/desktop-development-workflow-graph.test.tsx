@@ -115,7 +115,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('shows both entries, the implementation/Review loop, and the active server node', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
 
     expect(container.textContent).toContain('本轮入口：方案新增 / 变更');
     expect(container.textContent).toContain('方案新增 / 方案变更');
@@ -140,7 +140,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('uses measured return rails and keeps inactive route text readable', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
 
     const rails = container.querySelector('[data-testid="workflow-return-rails"]');
     expect(rails?.getAttribute('preserveAspectRatio')).toBeNull();
@@ -157,7 +157,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('previews a node on focus and opens a persistent detail dialog on click', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
 
     const implementation = container.querySelector<HTMLButtonElement>(
       '[data-testid="workflow-graph-node-implementation"]',
@@ -199,6 +199,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
           retrying={false}
           onRetry={() => {}}
           onOpenReview={openReview}
+          defaultCollapsed={false}
         />,
       ),
     );
@@ -218,18 +219,27 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(openReview).toHaveBeenCalledTimes(1);
   });
 
-  it('collapses the graph while keeping its current-stage summary visible', () => {
+  it('starts collapsed by default with the current-stage summary, and expands on demand', () => {
     act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} />));
+
+    expect(container.querySelector('[data-testid="workflow-graph-body"]')).toBeNull();
+    expect(container.textContent).toContain('当前停在：ChatGPT 实现 / 修复 · 等待ChatGPT Desktop');
+    const expandButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('展开流程'),
+    );
+    expect(expandButton?.getAttribute('aria-expanded')).toBe('false');
+
+    act(() => expandButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(container.querySelector('[data-testid="workflow-graph-body"]')).not.toBeNull();
+    expect(container.textContent).toContain('收起流程');
 
     const collapseButton = Array.from(container.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('收起流程'),
     );
-    expect(collapseButton?.getAttribute('aria-expanded')).toBe('true');
-
     act(() => collapseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
     expect(container.querySelector('[data-testid="workflow-graph-body"]')).toBeNull();
-    expect(container.textContent).toContain('当前停在：ChatGPT 实现 / 修复 · 等待ChatGPT Desktop');
     expect(container.textContent).toContain('展开流程');
   });
 
@@ -247,6 +257,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     act(() =>
       root.render(
         <DesktopDevelopmentWorkflowGraph
+          defaultCollapsed={false}
           work={packet({
             deliveryCycleNumber: 2,
             deliveryCycleEntryMode: 'acceptance_rework',
@@ -290,6 +301,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
           work={packet({ phase: 'accepted', workLifecycle: 'accepted' })}
           retrying={false}
           onRetry={() => {}}
+          defaultCollapsed={false}
         />,
       ),
     );

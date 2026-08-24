@@ -86,7 +86,7 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
       {/* Header + Run button */}
       <div className="flex items-center justify-between rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
         <div>
-          <div className="text-sm font-semibold text-cafe">風險預警</div>
+          <div className="text-sm font-semibold text-cafe">风险预警</div>
           <div className="text-micro text-cafe-secondary">对全部 Intent Cards 运行风险检测</div>
         </div>
         <button

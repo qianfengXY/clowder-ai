@@ -102,7 +102,7 @@ export function SliceLadder({ projectId, slices, onUpdate }: SliceLadderProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-cafe">切片計劃</div>
+        <div className="text-sm font-semibold text-cafe">切片计划</div>
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}

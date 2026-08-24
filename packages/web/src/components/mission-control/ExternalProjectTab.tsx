@@ -281,9 +281,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
     { id: 'health', label: '治理健康度' },
     { id: 'features', label: '功能列表' },
     { id: 'progress', label: '派遣进展' },
-    { id: 'risk', label: '風險預警' },
+    { id: 'risk', label: '风险预警' },
     { id: 'resolutions', label: '澄清队列' },
-    { id: 'slices', label: '切片計劃' },
+    { id: 'slices', label: '切片计划' },
     { id: 'reflux', label: '经验回流' },
   ];
 
@@ -330,7 +330,11 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
       {/* Content — inert when stale blocks ALL interaction (mouse + keyboard + focus) to prevent cross-project writes */}
       <div ref={contentRef} className={`min-h-0 flex-1 overflow-auto ${isStale ? 'opacity-60' : ''}`}>
-        <div className="grid min-h-0 grid-cols-1 gap-4 p-3 sm:p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div
+          className={`grid min-h-0 grid-cols-1 gap-4 p-3 sm:p-6 ${
+            subTab === 'development' ? '' : 'xl:grid-cols-[minmax(0,1fr)_300px]'
+          }`}
+        >
           {/* Left column */}
           <div className="space-y-4">
             <DevelopmentTab active={subTab === 'development'} project={project} />
@@ -393,13 +397,15 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
             )}
           </div>
 
-          {/* Right panel */}
-          <div className="space-y-4">
-            <NeedAuditFrame projectId={project.id} frame={auditFrame} onSaved={(frame) => setAuditFrame(frame)} />
-            {selectedCard && subTab === 'audit' && (
-              <IntentCardDetail card={selectedCard} onTriaged={handleCardTriaged} />
-            )}
-          </div>
+          {/* Right panel — 开发闭环子页无关六问定位，让主区吃满宽度 */}
+          {subTab !== 'development' && (
+            <div className="space-y-4">
+              <NeedAuditFrame projectId={project.id} frame={auditFrame} onSaved={(frame) => setAuditFrame(frame)} />
+              {selectedCard && subTab === 'audit' && (
+                <IntentCardDetail card={selectedCard} onTriaged={handleCardTriaged} />
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

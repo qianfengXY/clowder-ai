@@ -37,13 +37,16 @@ export function DesktopDevelopmentWorkflowGraph({
   retrying,
   onRetry,
   onOpenReview,
+  defaultCollapsed = true,
 }: {
   work: DesktopDevelopmentResumePacket;
   retrying: boolean;
   onRetry: () => void;
   onOpenReview?: () => void;
+  /** 批次 4 — 默认收起：概览由 WorkflowStepper 承担，完整泳道图按需展开 */
+  defaultCollapsed?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const nodes = work.workflowNodes ?? [];
   if (nodes.length === 0) return null;
 
