@@ -35,14 +35,12 @@ const STATUS_COLORS: Record<BacklogStatus, string> = {
   done: 'bg-[var(--mc-status-done-bg)] text-[var(--mc-status-done-text)]',
 };
 
-/** Extract feature ID from tags. Supports `feature:f058` (import format) and bare `F058`. */
+/** Extract canonical or fork-extension feature IDs from backlog tags. */
 export function extractFeatureId(tags: readonly string[]): string {
   for (const tag of tags) {
-    // Primary: `feature:f058` format from backlog-doc-import
-    const prefixed = tag.match(/^feature:(f\d+)$/i);
+    const prefixed = tag.match(/^feature:(f\d+|ext-\d+)$/i);
     if (prefixed) return prefixed[1].toUpperCase();
-    // Fallback: bare `F058`
-    if (/^F\d+$/i.test(tag)) return tag.toUpperCase();
+    if (/^(?:F\d+|EXT-\d+)$/i.test(tag)) return tag.toUpperCase();
   }
   return 'Untagged';
 }
@@ -78,7 +76,7 @@ function isFeatureAllDone(featureItems: BacklogItem[]): boolean {
 function extractFeatureName(items: BacklogItem[]): string | null {
   const first = items[0];
   if (!first) return null;
-  const match = first.title.match(/^\[F\d+\]\s*(.+)/);
+  const match = first.title.match(/^\[(?:F\d+|EXT-\d+)\]\s*(.+)/i);
   return match?.[1]?.trim() ?? null;
 }
 
@@ -157,6 +155,11 @@ function FeatureCard({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 text-xs font-semibold text-cafe">{tag}</span>
+          {tag.startsWith('EXT-') && (
+            <span className="shrink-0 rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-semibold text-cafe-secondary">
+              扩展
+            </span>
+          )}
           {featureName && (
             <CompactLabel
               label="Feature 名称"
@@ -192,6 +195,7 @@ function DoneFeatureChip({ tag, featureItems }: { tag: string; featureItems: Bac
       data-testid={`mc-bird-eye-done-chip-${tag}`}
     >
       <span className="font-medium">{tag}</span>
+      {tag.startsWith('EXT-') && <span className="font-medium">扩展</span>}
       {featureName && (
         <CompactLabel
           label="Feature 名称"

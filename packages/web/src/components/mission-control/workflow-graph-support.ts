@@ -1,6 +1,6 @@
 import type { DesktopDevelopmentResumePacket, DesktopDevelopmentWorkflowNode } from '@cat-cafe/shared';
 
-/** F289 泳道图（时间轴版）共享类型与纯函数 — 从 DesktopDevelopmentWorkflowGraph 拆出（350 行限制） */
+/** EXT-001 泳道图（时间轴版）共享类型与纯函数 — 从 DesktopDevelopmentWorkflowGraph 拆出（350 行限制） */
 
 export type GraphStatus = DesktopDevelopmentWorkflowNode['status'] | 'inactive';
 

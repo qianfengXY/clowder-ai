@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
-describe('F289 ReviewRound callback routes', () => {
+describe('EXT-001 ReviewRound callback routes', () => {
   let app;
 
   afterEach(async () => {

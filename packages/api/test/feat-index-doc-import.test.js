@@ -175,3 +175,55 @@ test('unreadable BACKLOG.md does not crash importer', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('extension catalog entries join the unified feature index after canonical features', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'feat-index-doc-import-'));
+  const previousCwd = process.cwd();
+  try {
+    await createRepoSkeleton(root);
+    await mkdir(join(root, 'docs', 'extensions'), { recursive: true });
+    await writeFile(
+      join(root, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|----|------|--------|-------|------|',
+        '| F289 | Canonical Data Root | in-progress | Maine Coon | [F289](features/F289-canonical-data-root.md) |',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(root, 'docs', 'extensions', 'catalog.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        extensions: [
+          {
+            id: 'EXT-001',
+            name: 'ChatGPT Desktop Development Loop',
+            status: 'implementation',
+            owner: 'CodeX',
+            specPath: 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md',
+            legacyIds: ['F289'],
+          },
+        ],
+      }),
+      'utf8',
+    );
+
+    process.chdir(root);
+    const entries = await readFeatIndexEntries();
+    const extension = entries.find((entry) => entry.featId === 'EXT-001');
+
+    assert.ok(entries.find((entry) => entry.featId === 'F289'));
+    assert.deepEqual(extension, {
+      featId: 'EXT-001',
+      name: 'ChatGPT Desktop Development Loop',
+      status: 'implementation',
+      kind: 'extension',
+      owner: 'CodeX',
+    });
+    assert.ok(entries.findIndex((entry) => entry.featId === 'F289') < entries.findIndex((entry) => entry.featId === 'EXT-001'));
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});

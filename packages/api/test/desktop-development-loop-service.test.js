@@ -8,11 +8,11 @@ const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 const DESIGN_SHA = 'd'.repeat(40);
 const REVISED_DESIGN_SHA = 'e'.repeat(40);
-const DESIGN_BRANCH = 'design/f289-desktop-loop';
-const DESIGN_DOCUMENTS = ['docs/design/f289-desktop-loop.md'];
+const DESIGN_BRANCH = 'design/ext-001-desktop-loop';
+const DESIGN_DOCUMENTS = ['docs/design/ext-001-desktop-loop.md'];
 
 describe(
-  'F289 DesktopDevelopmentLoopService',
+  'EXT-001 DesktopDevelopmentLoopService',
   { skip: !REDIS_URL ? 'REDIS_URL not set' : !REDIS_ISOLATED ? 'Redis isolation flag not set' : false },
   () => {
     let redis;
@@ -116,7 +116,7 @@ describe(
             projectName: 'Example',
             repository: 'owner/repo',
             backlogItemId: 'backlog-1',
-            featureId: 'F289',
+            featureId: 'EXT-001',
             featureTitle: 'Implement the Desktop loop',
             attemptNumber: 1,
             designBranch: DESIGN_BRANCH,
@@ -172,14 +172,14 @@ describe(
           allowPullRequest: true,
         },
       });
-      await workflowStore.upsert('backlog-1', 'F289', {}, 'cat-codex', 'owner-1');
+      await workflowStore.upsert('backlog-1', 'EXT-001', {}, 'cat-codex', 'owner-1');
       const bundle = await workflowStore.getManagedWorkAdmission('owner-1', 'backlog-1');
       backlogItems.push({
         id: 'backlog-1',
         userId: 'owner-1',
         projectId: project.id,
         title: 'Implement the Desktop loop',
-        tags: ['feature:F289'],
+        tags: ['feature:EXT-001'],
         status: 'approved',
       });
       await externalProjects.setProjectDesignBranch(project.id, DESIGN_BRANCH);
@@ -388,7 +388,7 @@ describe(
             projectName: 'Example',
             repository: 'owner/repo',
             backlogItemId: 'backlog-1',
-            featureId: 'F289',
+            featureId: 'EXT-001',
             featureTitle: 'Implement the Desktop loop',
             attemptNumber: 1,
             designBranch: DESIGN_BRANCH,
@@ -1030,7 +1030,7 @@ describe(
       assert.equal(desktopWakes.length, 1);
       assert.equal(desktopWakes[0].threadId, 'chatgpt-thread-f006');
       assert.equal(desktopWakes[0].sourcePath, '/Volumes/WorkSSD/example-worktree');
-      assert.match(desktopWakes[0].objective, /\[Review 系统消息\] Example · F289 · Implement the Desktop loop/);
+      assert.match(desktopWakes[0].objective, /\[Review 系统消息\] Example · EXT-001 · Implement the Desktop loop/);
       assert.match(desktopWakes[0].objective, new RegExp(roundId));
     });
 

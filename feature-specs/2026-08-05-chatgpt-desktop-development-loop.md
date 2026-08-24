@@ -1,10 +1,10 @@
-# F289 ChatGPT Desktop Development Loop — Implementation Plan
+# EXT-001 ChatGPT Desktop Development Loop — Implementation Plan
 
 > **For Codex:** execute in `/Volumes/WorkSSD/cat-cafe-chatgpt-desktop-loop` using the worktree, TDD, quality-gate, request-review and merge-gate workflows. Never develop from `/Volumes/WorkSSD/cat-cafe-runtime`; never edit runtime config or secrets.
 
 **Goal:** deliver a project-scoped, durable Cat Café ↔ ChatGPT Desktop development loop with one reusable Review Hub, replaceable chat bindings, two manual merge pilots and an explicit per-project auto-merge opt-in.
 
-**Architecture:** extend ExternalProject with a versioned F289 binding; resolve one deterministic Review Hub thread per project; reuse F275 work/attempt/terminal truth, F253 ReviewRound semantics and F286 MCP governance. F289 owns the external Desktop session binding because F211 is a CatId/agent-key/Antigravity session registry. Resume Packet is a projection, not another state root.
+**Architecture:** extend ExternalProject with a versioned EXT-001 binding; resolve one deterministic Review Hub thread per project; reuse F275 work/attempt/terminal truth, F253 ReviewRound semantics and F286 MCP governance. EXT-001 owns the external Desktop session binding because F211 is a CatId/agent-key/Antigravity session registry. Resume Packet is a projection, not another state root.
 
 **Finish line:** the integration/recovery suite proves design → Desktop implementation → two-cat exact-SHA review → fix loop → guarded merge → operator acceptance, including deletion/rebinding of both visible chat surfaces.
 
@@ -113,9 +113,9 @@ pnpm check:features
 **Files**
 
 - Keep F211 runtime-session metadata/registration types and validators unchanged
-- Persist external Desktop runtime session/chat provenance in the F289 project/work binding store
+- Persist external Desktop runtime session/chat provenance in the EXT-001 project/work binding store
 
-**Red**: rebind/list/read F289 Desktop sessions; stale epoch denial; source/user spoof denial; source inventory proves F211 remains `antigravity-desktop` only.
+**Red**: rebind/list/read EXT-001 Desktop sessions; stale epoch denial; source/user spoof denial; source inventory proves F211 remains `antigravity-desktop` only.
 
 **Green**: preserve the distinct `chatgpt-desktop-dev` external actor; do not mint a CatId, accept an agent key, or copy Antigravity's execution bridge.
 
@@ -163,7 +163,7 @@ Compose project, F275, session/workspace and latest barrier-safe ReviewRound. Ad
 
 **Red**: two simultaneous next-attempt calls; duplicate evidence; wrong consumer/work; stale version; restart; illegal terminal transition.
 
-**Green**: atomic compare-and-set/idempotency at the F275 boundary. If this port is absent or incompatible, F289 claims return `managed_work_capability_unavailable`; never add a fallback work root.
+**Green**: atomic compare-and-set/idempotency at the F275 boundary. If this port is absent or incompatible, EXT-001 claims return `managed_work_capability_unavailable`; never add a fallback work root.
 
 ## Phase 4 — Durable ReviewRound coordinator
 

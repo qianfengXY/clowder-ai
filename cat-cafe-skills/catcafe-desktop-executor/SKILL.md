@@ -120,8 +120,8 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus
   findings，补测试，提交新 SHA，再次 report。
-- 只实现 `scope=plan_conformance` 且同时引用 `git:refs/heads/<designBranch>@<designExactSha>` 与该功能已选设计文档
-  ref 的 finding；经用户裁决的架构 finding 必须严格服从
+- 只实现 `scope=plan_conformance` 且 `designRefs` 同时引用
+  `git:refs/heads/<designBranch>@<designExactSha>` 与该功能已选设计文档 ref 的 finding；经用户裁决的架构 finding 必须严格服从
   Cat Café 记录的决定。禁止把 Review 中新增的个人偏好、方案外重构或需求扩张带入实现。
 - 对启用该约束前已落库的历史 finding，只能作为迁移证据；继续实现前仍必须配置共用方案分支和功能设计文档。
 - finding 有事实错误或需要产品取舍：保留证据并停下请用户裁决，不能假装修复。
@@ -155,7 +155,7 @@ Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/a
 
 ## 禁止事项
 
-- 不把 GitHub Issue、双语文本、Git ledger 或 PR comment 当作 F289 核心完成条件。
+- 不把 GitHub Issue、双语文本、Git ledger 或 PR comment 当作 EXT-001 核心完成条件。
 - 不把 branch、PR、chat、thread 或任务唤醒引用当作 work identity。
 - 不从另一个项目复制 work/attempt/epoch，也不提交客户端 actor/user ID。
 - 不修改 runtime 配置、credential、审批策略或 auto-merge 开关。

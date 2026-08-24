@@ -110,6 +110,11 @@ function ExternalProjectFeatureRow({
           <span className="rounded bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-bold text-cafe-secondary">
             {featureId ?? '—'}
           </span>
+          {featureId?.startsWith('EXT-') && (
+            <span className="rounded bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-semibold text-cafe-secondary">
+              扩展
+            </span>
+          )}
           <span className="min-w-0 text-sm font-medium text-cafe">{item.title}</span>
           <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-medium text-cafe-secondary">
             {launchStatusLabel(status)}

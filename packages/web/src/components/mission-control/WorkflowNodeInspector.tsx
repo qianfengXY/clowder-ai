@@ -14,7 +14,7 @@ import {
   workflowNodeForInspection,
 } from './workflow-graph-support';
 
-/** F289 泳道图（时间轴版）详情层 — hover 浮层与点击固定的节点详情 */
+/** EXT-001 泳道图（时间轴版）详情层 — hover 浮层与点击固定的节点详情 */
 
 export function WorkflowHoverPreview({
   id,

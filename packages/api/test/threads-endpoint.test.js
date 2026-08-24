@@ -573,6 +573,22 @@ describe('Thread API', () => {
     assert.equal(body.threadsByFeature.F063?.length, 3);
   });
 
+  it('GET /api/threads with featureIds groups EXT extension titles', async () => {
+    threadStore.create('alice', 'EXT-001 Desktop development review');
+    threadStore.create('alice', 'ext 1 design discussion');
+    threadStore.create('alice', 'F001 canonical feature');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads?featureIds=EXT-001',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.threadsByFeature['EXT-001']?.length, 2);
+  });
+
   it('GET /api/threads with featureIds rejects more than 50 IDs', async () => {
     const ids = Array.from({ length: 51 }, (_, i) => `f${String(i).padStart(3, '0')}`).join(',');
     const res = await app.inject({

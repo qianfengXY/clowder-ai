@@ -51,7 +51,7 @@ function featureStatus(featureItems: BacklogItem[]): BacklogStatus {
 function featureName(featureItems: BacklogItem[]): string | null {
   const first = featureItems[0];
   if (!first) return null;
-  const match = first.title.match(/^\[F\d+\]\s*(.+)/);
+  const match = first.title.match(/^\[(?:F\d+|EXT-\d+)\]\s*(.+)/i);
   return match?.[1]?.trim() ?? null;
 }
 
@@ -110,9 +110,14 @@ export function FeatureRow({
           aria-hidden="true"
           className={`pointer-events-none relative z-10 h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOT[status]}`}
         />
-        <span className="pointer-events-none relative z-10 w-11 shrink-0 text-sm font-bold text-cafe-secondary">
+        <span className="pointer-events-none relative z-10 w-16 shrink-0 text-sm font-bold text-cafe-secondary">
           {tag}
         </span>
+        {tag.startsWith('EXT-') && (
+          <span className="pointer-events-none relative z-10 shrink-0 rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-semibold text-cafe-secondary">
+            扩展
+          </span>
+        )}
         <CompactLabel
           label="Feature 名称"
           value={displayName}

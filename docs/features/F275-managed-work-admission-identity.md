@@ -1,6 +1,6 @@
 ---
 feature_ids: [F275]
-related_features: [F160, F167, F192, F233, F246, F267, F289]
+related_features: [F160, F167, F192, F233, F246, F267, EXT-001]
 topics: [managed-work, work-admission, identity, sop, task-outcome, provenance]
 doc_kind: spec
 created: 2026-07-25
@@ -16,7 +16,7 @@ description_updated_at: 2026-07-26T23:35:00Z
 
 # F275: Managed Work Admission Identity — 受理工作身份契约
 
-> **Status**: in-progress / Phase B landed on main; F289-named Phase C port implemented on the F289 branch and awaiting independent review | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol，kickoff / architecture contract) | **Priority**: P1
+> **Status**: in-progress / Phase B landed on main; EXT-001-named Phase C port implemented on the EXT-001 branch and awaiting independent review | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol，kickoff / architecture contract) | **Priority**: P1
 >
 > **Source**: [clowder-ai#1213](https://github.com/zts212653/clowder-ai/issues/1213)
 >
@@ -25,7 +25,7 @@ description_updated_at: 2026-07-26T23:35:00Z
 ## Architecture Ownership
 
 Architecture cell: managed-work
-Architecture status: accepted by ADR-044；Phase B identity propagation 已落地；Phase C 仅为已授权的 F289 named consumer 增加 ordered attempts、typed evidence 与 terminal CAS，不开放通用 policy registry。
+Architecture status: accepted by ADR-044；Phase B identity propagation 已落地；Phase C 仅为已授权的 EXT-001 named consumer 增加 ordered attempts、typed evidence 与 terminal CAS，不开放通用 policy registry。
 Map delta: new cell added
 Why: 现有 `harness-eval` 只消费业务真相，`approval-index` 只拥有审批投影，`ball-custody` 只拥有谁该行动；没有现存 cell 拥有“哪件长程工作已被受理，以及后续 invocation/PR/Episode 绑定到哪个 work/attempt”的 canonical identity。Phase A 只命名 whole-work terminal 的未来 owner，不提前建设 terminal engine。
 
@@ -167,7 +167,7 @@ Slice 3 的 TaskItem anchor 与 private binding 共享一条生命周期不变�
 ## Dependencies
 
 - **Evolved from**: F192 Phase G（task-outcome 暴露的 thread heuristic 失真）、clowder-ai#1213（社区问题陈述与契约清单）
-- **Blocked by**: none；Phase A Design Gate accepted，Phase B landed；co-creator 在确认 F289 真实旅程与边界后授权其 named Phase C consumer implementation。其他 consumer 仍需独立 Design Gate。
+- **Blocked by**: none；Phase A Design Gate accepted，Phase B landed；co-creator 在确认 EXT-001 真实旅程与边界后授权其 named Phase C consumer implementation。其他 consumer 仍需独立 Design Gate。
 - **Related**: F246（未来 stable action-envelope admission 候选，v1 不接入）、F167/F233（custody/standing 与 terminal evidence，但不拥有 work identity）、F160（可选 TaskItem 投影）、F267（measurement validity 与任务分母恢复门）
 
 ## Risk

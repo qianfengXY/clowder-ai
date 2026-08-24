@@ -196,6 +196,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
     const sop: WorkflowSop = existing
       ? {
           ...existing,
+          featureId,
           sopDefinitionId: input.sopDefinitionId ?? existing.sopDefinitionId,
           stage: input.stage ?? existing.stage,
           batonHolder: input.batonHolder ?? existing.batonHolder,

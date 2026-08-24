@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 
-describe('F289 project-scoped Desktop launch', () => {
+describe('EXT-001 project-scoped Desktop launch', () => {
   let service;
   let sops;
   let admissions;

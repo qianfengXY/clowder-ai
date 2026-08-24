@@ -44,6 +44,11 @@ describe('extractFeatureId', () => {
     expect(extractFeatureId(['feature:f049'])).toBe('F049');
   });
 
+  it('recognizes extension feature IDs', () => {
+    expect(extractFeatureId(['source:extension-catalog', 'feature:ext-001'])).toBe('EXT-001');
+    expect(extractFeatureId(['EXT-001'])).toBe('EXT-001');
+  });
+
   it('returns Untagged when no feature tag found', () => {
     expect(extractFeatureId(['source:docs-backlog', 'status:spec'])).toBe('Untagged');
   });

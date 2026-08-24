@@ -11,15 +11,24 @@ import type {
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
+import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { NeedAuditFrameStore } from '../domains/projects/need-audit-frame-store.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
-import { buildBacklogInputFromFeature, getFeatureTagId, parseActiveFeaturesFromBacklog } from './backlog-doc-import.js';
+import {
+  type BacklogFeatureRow,
+  buildBacklogInputFromFeature,
+  getFeatureTagId,
+  parseActiveFeaturesFromBacklog,
+} from './backlog-doc-import.js';
+import { DEFAULT_EXTENSION_CATALOG_RELATIVE_PATH, readExtensionFeatureRows } from './extension-feature-catalog.js';
+import { migrateLegacyExtensionItems } from './extension-feature-migration.js';
 
 export interface ExternalProjectRoutesOptions {
   externalProjectStore: ExternalProjectStore;
   needAuditFrameStore: NeedAuditFrameStore;
   backlogStore: IBacklogStore;
+  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert'>;
 }
 
 export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOptions> = async (app, opts) => {
@@ -137,8 +146,32 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       return reply.status(400).send({ error: `Cannot read ${backlogFullPath}` });
     }
 
-    const rows = parseActiveFeaturesFromBacklog(markdown);
-    const existingItems = await backlogStore.listByUser(userId);
+    let rows: BacklogFeatureRow[];
+    try {
+      const extensionRows = await readExtensionFeatureRows(
+        join(project.sourcePath, DEFAULT_EXTENSION_CATALOG_RELATIVE_PATH),
+      );
+      rows = [...parseActiveFeaturesFromBacklog(markdown), ...extensionRows];
+    } catch (error) {
+      return reply.status(400).send({
+        error: `Cannot read project feature catalog: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+    let existingItems = await backlogStore.listByUser(userId);
+    try {
+      const migration = await migrateLegacyExtensionItems({
+        items: existingItems,
+        extensionRows: rows.filter((row) => row.kind === 'extension'),
+        backlogStore,
+        ...(opts.workflowSopStore ? { workflowSopStore: opts.workflowSopStore } : {}),
+        userId,
+      });
+      existingItems = [...migration.items];
+    } catch (error) {
+      return reply.status(500).send({
+        error: `Cannot migrate legacy extension feature IDs: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
 
     let created = 0;
     let skipped = 0;

@@ -1067,6 +1067,69 @@ describe('Backlog Routes', () => {
     }
   });
 
+  test('imports extension overlay and separates legacy Desktop F289 from upstream F289', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-extension-import-'));
+    const backlogDocPath = join(tempDir, 'ROADMAP.md');
+    const extensionCatalogPath = join(tempDir, 'extensions', 'catalog.json');
+    await mkdir(join(tempDir, 'extensions'), { recursive: true });
+    await writeFile(
+      backlogDocPath,
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|----|------|--------|-------|------|',
+        '| F289 | Canonical Data Root | in-progress | Maine Coon | [F289](features/F289-canonical-data-root.md) |',
+      ].join('\n'),
+    );
+    await writeFile(
+      extensionCatalogPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        extensions: [
+          {
+            id: 'EXT-001',
+            name: 'ChatGPT Desktop Development Loop',
+            status: 'implementation',
+            owner: 'CodeX',
+            specPath: 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md',
+            legacyIds: ['F289'],
+          },
+        ],
+      }),
+    );
+    const legacy = await backlogStore.create({
+      userId: 'default-user',
+      title: '[F289] ChatGPT Desktop Development Loop',
+      summary: 'legacy local extension',
+      priority: 'p1',
+      tags: ['source:docs-backlog', 'feature:f289', 'status:implementation'],
+      createdBy: 'user',
+    });
+
+    try {
+      const app = await createApp({ backlogDocPath, extensionCatalogPath });
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/backlog/import-active-features',
+        headers: USER_HEADER,
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().totalActive, 2);
+      assert.equal(response.json().migratedLegacy, 1);
+      assert.deepEqual(response.json().migratedLegacyItemIds, [legacy.id]);
+
+      const items = await backlogStore.listByUser('default-user');
+      const extension = items.find((item) => item.tags.includes('feature:ext-001'));
+      const upstream = items.find(
+        (item) => item.tags.includes('feature:f289') && item.title === '[F289] Canonical Data Root',
+      );
+      assert.equal(extension?.id, legacy.id, 'legacy item identity must be preserved');
+      assert.ok(extension?.tags.includes('feature-kind:extension'));
+      assert.ok(upstream, 'upstream F289 must import as a separate item');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test('dispatch failure does not persist thread backlogItemId before dispatched state', async () => {
     const throwingMessageStore = {
       append: async () => {
@@ -1724,11 +1787,11 @@ describe('Import sync hard-fails on parse error (zero writes)', () => {
     const { backlogRoutes } = await import('../dist/routes/backlog.js');
     const tempDir = await mkdtemp(join(tmpdir(), 'backlog-badhdr-'));
     const backlogPath = join(tempDir, 'BACKLOG.md');
-    // Header uses "Name" instead of "名称" — required column missing
+    // Header omits every supported Name/名称/Feature alias — required column missing
     await writeFile(
       backlogPath,
       [
-        '| ID | Name | Status | Owner | Link |',
+        '| ID | Title | Status | Owner | Link |',
         '|---|---|---|---|---|',
         '| F001 | Active Feature | in-progress | 布偶猫 | [F001](features/F001.md) |',
       ].join('\n'),

@@ -7,7 +7,7 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const skill = readFileSync(`${repoRoot}cat-cafe-skills/catcafe-desktop-executor/SKILL.md`, 'utf8');
 const manifest = readFileSync(`${repoRoot}cat-cafe-skills/manifest.yaml`, 'utf8');
 
-describe('F289 Desktop executor skill contract', () => {
+describe('EXT-001 Desktop executor skill contract', () => {
   test('discovers canonical project/work state and never invents identity', () => {
     assert.match(skill, /cat_cafe_development_project_read/);
     assert.match(skill, /managedWorkDiscovery\.works/);

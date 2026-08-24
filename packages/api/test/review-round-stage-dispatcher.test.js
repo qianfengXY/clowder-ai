@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-describe('F289 ReviewRoundStageDispatcher', () => {
+describe('EXT-001 ReviewRoundStageDispatcher', () => {
   test('dispatches each stage into the existing Review Hub with stable server-derived routing', async () => {
     const { ReviewRoundStageDispatcher } = await import(
       '../dist/domains/desktop-development-loop/review-round-stage-dispatcher.js'
@@ -62,7 +62,7 @@ describe('F289 ReviewRoundStageDispatcher', () => {
     assert.doesNotMatch(requests[0].payload.content, /每条 finding 必须填写/);
     assert.doesNotMatch(requests[0].payload.content, /\| 编号 \| 检视者/);
     assert.match(requests[0].payload.content, /Attempt #3/);
-    assert.doesNotMatch(requests[0].payload.content, /F289/);
+    assert.doesNotMatch(requests[0].payload.content, /EXT-001/);
     assert.match(requests[0].payload.content, /a{40}/);
     assert.match(requests[1].payload.content, /^@gpt\n@kimi\n/);
     assert.match(requests[1].payload.content, /任务：加载 chatgpt-review-rounds skill，按“交叉检视”阶段执行一次/);

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 
-describe('F289 ProjectReviewHubService', () => {
+describe('EXT-001 ProjectReviewHubService', () => {
   let projectStore;
   let threadStore;
   let service;

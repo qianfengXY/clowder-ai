@@ -6,7 +6,13 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
+const ENV_KEYS = [
+  'NEXT_PUBLIC_API_URL',
+  'API_SERVER_PORT',
+  'FRONTEND_PORT',
+  'CAT_CAFE_WEB_BUILD_REVISION',
+  'CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED',
+];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -94,6 +100,19 @@ describe('next.config rewrites', () => {
     });
   });
 
+  it('embeds the exact Web bundle revision into client code', () => {
+    const revision = 'a'.repeat(40);
+    withEnv({ CAT_CAFE_WEB_BUILD_REVISION: revision }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION, revision);
+    });
+  });
+
+  it('can require document/server revision verification in the browser regression harness', () => {
+    withEnv({ CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: '1' }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED, '1');
+    });
+  });
+
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
     assert.equal(
@@ -121,5 +140,17 @@ describe('next.config rewrites', () => {
     assert.equal(pwaOptions?.dynamicStartUrl, false);
     const pagesRule = pwaOptions?.workboxOptions?.runtimeCaching?.find((entry) => entry.options?.cacheName === 'pages');
     assert.equal(pagesRule?.handler, 'NetworkOnly');
+  });
+
+  it('retains the packaged desktop version parameter in service-worker cache keys', () => {
+    const pwaOptions = loadConfigWithPwaCapture();
+    const ignoredParameters = pwaOptions?.workboxOptions?.ignoreURLParametersMatching;
+
+    assert.ok(Array.isArray(ignoredParameters), 'the PWA URL-parameter cache policy must be explicit');
+    assert.equal(
+      ignoredParameters.some((pattern) => pattern.test('__clowder_desktop_version')),
+      false,
+      'a previous package must not collapse a versioned Electron entry URL onto its cached root document',
+    );
   });
 });

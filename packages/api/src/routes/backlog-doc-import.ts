@@ -17,6 +17,8 @@ export interface BacklogFeatureRow {
   status: string;
   owner: string;
   link?: string;
+  kind?: 'canonical' | 'extension';
+  legacyIds?: readonly string[];
 }
 
 const BACKLOG_COLUMN_ALIASES = {
@@ -142,8 +144,9 @@ export function buildBacklogInputFromFeature(
   dependencies?: BacklogDependencies,
 ): CreateBacklogItemInput {
   const title = truncate(`[${row.id}] ${row.name}`, 200);
+  const isExtension = row.kind === 'extension';
   const summarySegments = [
-    '来源 docs/ROADMAP.md',
+    isExtension ? '来源 docs/extensions/catalog.json' : '来源 docs/ROADMAP.md',
     `状态：${row.status}`,
     `Owner：${row.owner}`,
     row.link ? `Link：${row.link}` : null,
@@ -157,7 +160,12 @@ export function buildBacklogInputFromFeature(
     title,
     summary,
     priority: statusToPriority(row.status),
-    tags: ['source:docs-backlog', `feature:${row.id.toLowerCase()}`, `status:${statusTag}`],
+    tags: [
+      isExtension ? 'source:extension-catalog' : 'source:docs-backlog',
+      `feature:${row.id.toLowerCase()}`,
+      ...(isExtension ? ['feature-kind:extension'] : []),
+      `status:${statusTag}`,
+    ],
     createdBy: 'user',
     ...(dependencies && Object.keys(dependencies).length > 0 ? { dependencies } : {}),
     ...(mappedStatus !== 'open' ? { initialStatus: mappedStatus } : {}),

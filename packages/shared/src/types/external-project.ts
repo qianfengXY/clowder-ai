@@ -15,7 +15,7 @@ export interface ExternalProject {
   readonly description: string;
   readonly sourcePath: string;
   readonly backlogPath: string;
-  /** F289: optional project-scoped ChatGPT Desktop development-loop binding. */
+  /** EXT-001: optional project-scoped ChatGPT Desktop development-loop binding. */
   readonly desktopDevelopment?: DesktopDevelopmentProjectBinding;
   readonly createdAt: number;
   readonly updatedAt: number;

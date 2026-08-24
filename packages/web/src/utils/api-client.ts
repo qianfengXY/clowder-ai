@@ -7,11 +7,17 @@
  */
 
 import { useToastStore } from '../stores/toastStore';
+import { markApiGetGeneration } from './api-get-generation';
+import { boundedFetch, waitForPromiseWithSignal } from './bounded-fetch';
 
 function getBrowserLocation(): Location | null {
   if (typeof globalThis !== 'object' || globalThis === null) return null;
   const candidate = (globalThis as { location?: Location }).location;
   return candidate ?? null;
+}
+
+function isLoopbackLocation(location: Location | null): boolean {
+  return location != null && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
 }
 
 /** @internal Exported for testing — prefer using `API_URL` constant. */
@@ -25,7 +31,7 @@ export function resolveApiUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) {
     const isLocalhostDefault = /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(envUrl);
-    const isLocalAccess = location != null && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const isLocalAccess = isLoopbackLocation(location);
     const isRemoteAccess = location != null && !isLocalAccess;
     // Skip envUrl when it mismatches actual access origin:
     //   - localhost env + remote browser → reverse-proxy users would hit dev's loopback
@@ -51,25 +57,32 @@ let lastSessionFailureToastAt = 0;
 export const SESSION_BOOTSTRAP_TIMEOUT_MS = 5_000;
 export const SESSION_BOOTSTRAP_ATTEMPTS = 3;
 export const READ_REQUEST_TIMEOUT_MS = 8_000;
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
-function fetchWithTimeout(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
-  if (!timeoutMs) return fetch(url, init);
-
-  const controller = new AbortController();
-  const parentSignal = init.signal;
-  const abortFromParent = () => controller.abort();
-  if (parentSignal?.aborted) {
-    abortFromParent();
-  } else {
-    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
-  }
-
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...init, signal: controller.signal }).finally(() => {
-    clearTimeout(timer);
-    parentSignal?.removeEventListener('abort', abortFromParent);
-  });
+export interface ApiFetchOptions {
+  /**
+   * A mutation happened while this exact GET may already be active. Attach the
+   * caller to one bounded trailing generation instead of the possibly stale one.
+   */
+  afterCurrentGet?: boolean;
 }
+
+interface GetGeneration {
+  id: number;
+  promise: Promise<Response>;
+  resolve(response: Response): void;
+  reject(error: unknown): void;
+  path: string;
+  init: RequestInit | undefined;
+}
+
+interface GetCoordinationState {
+  active: GetGeneration;
+  trailing: GetGeneration | null;
+}
+
+const coordinatedGets = new Map<string, GetCoordinationState>();
+let nextGetGeneration = 0;
 
 function notifySessionFailure() {
   const now = Date.now();
@@ -87,7 +100,7 @@ async function establishSession(): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < SESSION_BOOTSTRAP_ATTEMPTS; attempt += 1) {
     try {
-      const res = await fetchWithTimeout(
+      const res = await boundedFetch(
         `${API_URL}/api/session`,
         { credentials: 'include' },
         SESSION_BOOTSTRAP_TIMEOUT_MS,
@@ -103,14 +116,23 @@ async function establishSession(): Promise<void> {
   throw lastError;
 }
 
-export function ensureApiSession(): Promise<void> {
+function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  sessionGate = establishSession().catch((err) => {
-    sessionGate = null;
+  const gate = establishSession().catch((err) => {
+    if (sessionGate === gate) sessionGate = null;
     notifySessionFailure();
     throw err;
   });
-  return sessionGate;
+  sessionGate = gate;
+  return gate;
+}
+
+export function ensureApiSession(): Promise<void> {
+  return ensureSession();
+}
+
+function invalidateSession(observedGate: Promise<void>) {
+  if (sessionGate === observedGate) sessionGate = null;
 }
 
 /**
@@ -132,6 +154,126 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
   };
 }
 
+function requestMethod(init?: RequestInit): string {
+  return (init?.method ?? 'GET').toUpperCase();
+}
+
+function exactGetKey(path: string, init?: RequestInit): string {
+  const headers: [string, string][] = [];
+  new Headers(init?.headers).forEach((value, name) => {
+    headers.push([name, value]);
+  });
+  headers.sort(([leftName, leftValue], [rightName, rightValue]) =>
+    leftName === rightName ? leftValue.localeCompare(rightValue) : leftName.localeCompare(rightName),
+  );
+  return JSON.stringify({
+    url: `${API_URL}${path}`,
+    headers,
+    cache: init?.cache ?? null,
+    mode: init?.mode ?? null,
+    redirect: init?.redirect ?? null,
+    referrer: init?.referrer ?? null,
+    referrerPolicy: init?.referrerPolicy ?? null,
+    integrity: init?.integrity ?? null,
+    keepalive: init?.keepalive ?? null,
+  });
+}
+
+function withoutCallerSignal(init?: RequestInit): RequestInit | undefined {
+  if (!init) return undefined;
+  const physicalInit = { ...init };
+  delete physicalInit.signal;
+  return physicalInit;
+}
+
+async function performApiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const initialSessionGate = ensureSession();
+  await waitForPromiseWithSignal(initialSessionGate, init?.signal);
+  const normalized = ensureBodyForMutation(init);
+  const method = requestMethod(normalized);
+  const isReadRequest = method === 'GET' || method === 'HEAD';
+  const request = () =>
+    boundedFetch(
+      `${API_URL}${path}`,
+      {
+        ...normalized,
+        credentials: 'include',
+      },
+      isReadRequest ? READ_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS,
+    );
+  let res: Response;
+  try {
+    res = await request();
+  } catch (error) {
+    // A tunnel can leave a read half-open. One fresh retry is safe; mutations
+    // are never replayed, and an explicit caller abort always wins.
+    if (!isReadRequest || normalized?.signal?.aborted) throw error;
+    res = await request();
+  }
+  if (res.status !== 401) return res;
+
+  // Session expired (API restart, cookie cleared). Re-establish and retry once.
+  invalidateSession(initialSessionGate);
+  const refreshedSessionGate = ensureSession();
+  await waitForPromiseWithSignal(refreshedSessionGate, init?.signal);
+  const retryRes = await request();
+  if (retryRes.status === 401) notifySessionFailure();
+  return retryRes;
+}
+
+function createGetGeneration(path: string, init?: RequestInit): GetGeneration {
+  let resolve!: (response: Response) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<Response>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { id: ++nextGetGeneration, promise, resolve, reject, path, init: withoutCallerSignal(init) };
+}
+
+function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  void performApiFetch(generation.path, generation.init)
+    .then(generation.resolve, generation.reject)
+    .finally(() => {
+      if (state.active !== generation) return;
+      const trailing = state.trailing;
+      if (!trailing) {
+        coordinatedGets.delete(key);
+        return;
+      }
+      state.active = trailing;
+      state.trailing = null;
+      startGetGeneration(key, state, trailing);
+    });
+}
+
+async function coordinatedGet(
+  path: string,
+  init: RequestInit | undefined,
+  afterCurrentGet: boolean,
+): Promise<Response> {
+  const key = exactGetKey(path, init);
+  let state = coordinatedGets.get(key);
+  let generation: GetGeneration;
+
+  if (!state) {
+    generation = createGetGeneration(path, init);
+    state = { active: generation, trailing: null };
+    coordinatedGets.set(key, state);
+    startGetGeneration(key, state, generation);
+  } else if (afterCurrentGet) {
+    state.trailing ??= createGetGeneration(path, init);
+    generation = state.trailing;
+  } else {
+    generation = state.active;
+  }
+
+  const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
+  const clone = response.clone();
+  markApiGetGeneration(clone, generation.id);
+  return clone;
+}
+
 /**
  * Fetch wrapper with session-cookie identity.
  *
@@ -141,40 +283,14 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
  *
  * @param path - API path starting with '/' (e.g. '/api/messages')
  * @param init - Standard RequestInit options
+ * @param options - GET generation coordination options
  */
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  await ensureApiSession();
-  const normalized = ensureBodyForMutation(init);
-  const method = normalized?.method?.toUpperCase() ?? 'GET';
-  const isReadRequest = method === 'GET' || method === 'HEAD';
-  const request = () =>
-    fetchWithTimeout(
-      `${API_URL}${path}`,
-      {
-        ...normalized,
-        credentials: 'include',
-      },
-      isReadRequest ? READ_REQUEST_TIMEOUT_MS : undefined,
-    );
-
-  let res: Response;
-  try {
-    res = await request();
-  } catch (err) {
-    // A cpolar data connection can remain half-open indefinitely. Retrying a
-    // read is safe and opens a fresh proxy connection; never replay mutations.
-    if (!isReadRequest || normalized?.signal?.aborted) throw err;
-    res = await request();
+export async function apiFetch(path: string, init?: RequestInit, options?: ApiFetchOptions): Promise<Response> {
+  if (init?.signal?.aborted) {
+    throw init.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
   }
-  if (res.status === 401) {
-    // Session expired (API restart, cookie cleared). Re-establish and retry once.
-    sessionGate = null;
-    await ensureApiSession();
-    const retryRes = await request();
-    if (retryRes.status === 401) {
-      notifySessionFailure();
-    }
-    return retryRes;
+  if (requestMethod(init) === 'GET') {
+    return coordinatedGet(path, init, options?.afterCurrentGet === true);
   }
-  return res;
+  return performApiFetch(path, init);
 }

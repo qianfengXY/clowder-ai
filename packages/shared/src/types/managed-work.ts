@@ -35,6 +35,8 @@ export interface ManagedWorkBinding {
   readonly attemptId: string;
 }
 
+// Persisted compatibility key from EXT-001's former F289 allocation. Renaming
+// it would orphan existing managed-work state, so it is intentionally stable.
 export const MANAGED_WORK_CONSUMER_IDS = ['f289_desktop_development_loop'] as const;
 export type ManagedWorkConsumerId = (typeof MANAGED_WORK_CONSUMER_IDS)[number];
 

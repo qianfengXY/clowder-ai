@@ -831,4 +831,68 @@ describe('External Project Routes', () => {
     assert.equal(projectItems.length, 1);
     assert.equal(projectItems[0].title, '[F002] Solo Feature');
   });
+
+  test('import-backlog exposes EXT catalog entries and preserves legacy Desktop loop identity', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'extension-import-test-'));
+    await mkdir(join(tmpDir, 'docs', 'extensions'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F289 | Canonical Data Root | in-progress | Maine Coon | [F289](features/F289-canonical-data-root.md) |',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(tmpDir, 'docs', 'extensions', 'catalog.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        extensions: [
+          {
+            id: 'EXT-001',
+            name: 'ChatGPT Desktop Development Loop',
+            status: 'implementation',
+            owner: 'CodeX',
+            specPath: 'docs/extensions/EXT-001-chatgpt-desktop-development-loop.md',
+            legacyIds: ['F289'],
+          },
+        ],
+      }),
+    );
+
+    const projRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projRes.json().project.id;
+    const legacy = await backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F289] ChatGPT Desktop Development Loop',
+      summary: 'legacy fork feature',
+      priority: 'p1',
+      tags: ['source:docs-backlog', 'feature:f289', 'status:implementation'],
+      createdBy: 'user',
+    });
+
+    const importRes = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+    assert.equal(importRes.statusCode, 200);
+    assert.equal(importRes.json().total, 2);
+
+    const projectItems = backlogStore.listByUser('user1').filter((item) => item.projectId === projectId);
+    const extension = projectItems.find((item) => item.tags.includes('feature:ext-001'));
+    const upstream = projectItems.find((item) => item.title === '[F289] Canonical Data Root');
+    assert.equal(extension?.id, legacy.id);
+    assert.ok(extension?.tags.includes('feature-kind:extension'));
+    assert.ok(upstream);
+  });
 });

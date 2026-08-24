@@ -3,11 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { parseActiveFeaturesFromBacklog } from './backlog-doc-import.js';
+import { extensionEntriesToBacklogRows, readExtensionFeatureCatalog } from './extension-feature-catalog.js';
 
 export interface FeatIndexEntry {
   featId: string;
   name: string;
   status: string;
+  kind?: 'canonical' | 'extension';
   owner?: string;
   keyDecisions?: string[];
 }
@@ -18,6 +20,7 @@ interface FeatureDocEntry {
   status?: string;
   owner?: string;
   keyDecisions?: string[];
+  kind?: 'canonical' | 'extension';
 }
 
 function findMonorepoRoot(start = process.cwd()): string {
@@ -146,9 +149,12 @@ async function readFeatureDocEntries(featuresDir: string): Promise<FeatureDocEnt
 
 function toSortedEntries(entries: FeatIndexEntry[]): FeatIndexEntry[] {
   return entries.sort((a, b) => {
-    const left = Number.parseInt(a.featId.slice(1), 10);
-    const right = Number.parseInt(b.featId.slice(1), 10);
-    return left - right;
+    const leftKind = a.kind === 'extension' ? 1 : 0;
+    const rightKind = b.kind === 'extension' ? 1 : 0;
+    if (leftKind !== rightKind) return leftKind - rightKind;
+    const left = Number.parseInt(a.featId.replace(/^\D+/, ''), 10);
+    const right = Number.parseInt(b.featId.replace(/^\D+/, ''), 10);
+    return left - right || a.featId.localeCompare(b.featId);
   });
 }
 
@@ -156,6 +162,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   const root = findMonorepoRoot();
   const featuresDir = join(root, 'docs', 'features');
   const backlogPath = join(root, 'docs', 'ROADMAP.md');
+  const extensionCatalogPath = join(root, 'docs', 'extensions', 'catalog.json');
 
   const docEntries = await readFeatureDocEntries(featuresDir);
   const map = new Map<string, FeatureDocEntry>();
@@ -198,12 +205,28 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
     }
   }
 
+  try {
+    const extensionRows = extensionEntriesToBacklogRows(await readExtensionFeatureCatalog(extensionCatalogPath));
+    for (const row of extensionRows) {
+      map.set(row.id, {
+        featId: row.id,
+        name: row.name,
+        status: row.status,
+        owner: row.owner,
+        kind: 'extension',
+      });
+    }
+  } catch {
+    // Keep the canonical feature index available if the fork-local overlay is unreadable.
+  }
+
   const merged: FeatIndexEntry[] = [];
   for (const [featId, entry] of map.entries()) {
     merged.push({
       featId,
       name: entry.name ?? featId,
       status: entry.status ?? 'spec',
+      ...(entry.kind ? { kind: entry.kind } : {}),
       ...(entry.owner ? { owner: entry.owner } : {}),
       ...(entry.keyDecisions ? { keyDecisions: entry.keyDecisions } : {}),
     });

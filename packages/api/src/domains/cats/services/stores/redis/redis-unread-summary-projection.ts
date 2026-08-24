@@ -1,9 +1,14 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { parseCursor } from '../cursor.js';
-import type { ThreadUnreadMessageProjection, ThreadUnreadProjectionCursor } from '../ports/MessageStore.js';
+import type {
+  StoredMessage,
+  ThreadUnreadMessageProjection,
+  ThreadUnreadProjectionCursor,
+} from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
-import { isSystemUserMessage } from '../visibility.js';
+import { isDurableOwnerReadEvidence, isSystemUserMessage, passesManagedHoldViewerBoundary } from '../visibility.js';
+import { safeParseConnectorSource, safeParseExtra, safeParseQueueCustody } from './redis-message-parsers.js';
 
 type PipelineResults = Array<[Error | null, unknown]> | null;
 
@@ -14,6 +19,78 @@ function readPipelineValue<T>(results: PipelineResults, index: number, label: st
   const [error, value] = entry;
   if (error) throw error;
   return value as T;
+}
+
+function resolveViewerBoundProjectionCursor(
+  cursor: ThreadUnreadProjectionCursor,
+  resultIndex: number | undefined,
+  results: PipelineResults,
+  userId: string,
+): ThreadUnreadProjectionCursor {
+  if (resultIndex === undefined || !cursor.fallbackAfterId) return cursor;
+  const fields = readPipelineValue<Array<string | null>>(results, resultIndex, 'Unread anchor eligibility');
+  if (fields.every((field) => field === null)) {
+    // A pruned canonical anchor retains its encoded monotonic position.
+    return cursor;
+  }
+  const [messageUserId, catIdRaw, source, deliveryStatus, origin, threadId, extra, queueCustody] = fields;
+  const message = {
+    userId: messageUserId ?? '',
+    catId: (catIdRaw || null) as CatId | null,
+    threadId: threadId ?? '',
+    source: safeParseConnectorSource(source ?? undefined),
+    extra: safeParseExtra(extra ?? undefined),
+    queueCustody: safeParseQueueCustody(queueCustody ?? undefined),
+    ...(deliveryStatus ? { deliveryStatus } : {}),
+    ...(origin ? { origin } : {}),
+  } as StoredMessage;
+  const eligible =
+    message.threadId === cursor.threadId &&
+    isDurableOwnerReadEvidence(message) &&
+    passesManagedHoldViewerBoundary(message, userId);
+  return eligible ? cursor : { threadId: cursor.threadId, afterId: cursor.fallbackAfterId };
+}
+
+async function selectViewerBoundProjectionCursors(
+  redis: RedisClient,
+  cursors: readonly ThreadUnreadProjectionCursor[],
+  userId: string,
+): Promise<ThreadUnreadProjectionCursor[]> {
+  const pipeline = redis.pipeline();
+  const selected = [...cursors];
+  const commandIndexByCursor = new Map<number, number>();
+  let commandIndex = 0;
+  for (const [index, cursor] of cursors.entries()) {
+    if (!cursor.fallbackAfterId || cursor.fallbackAfterId === cursor.afterId) continue;
+    let parsed: ReturnType<typeof parseCursor> = null;
+    try {
+      parsed = parseCursor(cursor.afterId);
+    } catch {
+      // A malformed durable anchor is not a scan frontier.
+    }
+    if (parsed?.version !== 2) {
+      selected[index] = { threadId: cursor.threadId, afterId: cursor.fallbackAfterId };
+      continue;
+    }
+    commandIndexByCursor.set(index, commandIndex++);
+    pipeline.hmget(
+      MessageKeys.detail(parsed.id),
+      'userId',
+      'catId',
+      'source',
+      'deliveryStatus',
+      'origin',
+      'threadId',
+      'extra',
+      'queueCustody',
+    );
+  }
+  if (commandIndex === 0) return selected;
+
+  const results = (await pipeline.exec()) as PipelineResults;
+  return selected.map((cursor, index) =>
+    resolveViewerBoundProjectionCursor(cursor, commandIndexByCursor.get(index), results, userId),
+  );
 }
 
 async function projectMessageIds(
@@ -45,17 +122,21 @@ async function projectMessageIds(
     return raw === null ? null : Number(raw);
   });
 
-  type RangePlan =
-    | { kind: 'expired'; commandIndex: number }
-    | { kind: 'scored'; sameScoreIndex: number; higherScoreIndex: number };
+  type RangePlan = { kind: 'stale' } | { kind: 'scored'; sameScoreIndex: number; higherScoreIndex: number };
   const rangePipeline = redis.pipeline();
   const rangePlans: RangePlan[] = [];
+  const idsByThread = new Map<string, string[]>();
   let commandIndex = 0;
   for (const [index, { cursor }] of cursorPlans.entries()) {
     const position = positions[index];
     if (position === null) {
-      rangePipeline.zrange(MessageKeys.threadVisibility(cursor.threadId), 0, -1);
-      rangePlans.push({ kind: 'expired', commandIndex: commandIndex++ });
+      // #1304: Stale cursor — position can't be resolved in the visibility
+      // index (message hash pruned AND ZSET membership evicted). Scanning
+      // the entire visibility set (zrange 0 -1) produces phantom 99+ unread
+      // badges for every old thread. The cursor was valid at some point; the
+      // safe default is 0 unread, not "entire history is unread."
+      idsByThread.set(cursor.threadId, []);
+      rangePlans.push({ kind: 'stale' });
       continue;
     }
     rangePipeline.zrangebyscore(MessageKeys.threadVisibility(cursor.threadId), position, position);
@@ -64,21 +145,19 @@ async function projectMessageIds(
     rangePlans.push({ kind: 'scored', sameScoreIndex, higherScoreIndex: commandIndex++ });
   }
 
-  const rangeResults = (await rangePipeline.exec()) as PipelineResults;
-  const idsByThread = new Map<string, string[]>();
-  for (const [index, { cursor, parsed }] of cursorPlans.entries()) {
-    const plan = rangePlans[index];
-    if (!plan) throw new Error(`Unread range plan missing cursor ${index}`);
-    if (plan.kind === 'expired') {
-      const allIds = readPipelineValue<string[]>(rangeResults, plan.commandIndex, 'Unread range');
-      // Match getByThreadAfter's fully-pruned fallback: scan from visibility
-      // start. Raw-ID filtering would recreate the C -> Q -> C cursor cycle.
-      idsByThread.set(cursor.threadId, allIds);
-      continue;
+  if (commandIndex > 0) {
+    const rangeResults = (await rangePipeline.exec()) as PipelineResults;
+    for (const [index, { cursor, parsed }] of cursorPlans.entries()) {
+      const plan = rangePlans[index];
+      if (!plan) throw new Error(`Unread range plan missing cursor ${index}`);
+      if (plan.kind === 'stale') {
+        // Already set to empty in the range-building loop
+        continue;
+      }
+      const sameScoreIds = readPipelineValue<string[]>(rangeResults, plan.sameScoreIndex, 'Unread range');
+      const higherScoreIds = readPipelineValue<string[]>(rangeResults, plan.higherScoreIndex, 'Unread range');
+      idsByThread.set(cursor.threadId, [...sameScoreIds.filter((id) => id > parsed.id), ...higherScoreIds]);
     }
-    const sameScoreIds = readPipelineValue<string[]>(rangeResults, plan.sameScoreIndex, 'Unread range');
-    const higherScoreIds = readPipelineValue<string[]>(rangeResults, plan.higherScoreIndex, 'Unread range');
-    idsByThread.set(cursor.threadId, [...sameScoreIds.filter((id) => id > parsed.id), ...higherScoreIds]);
   }
   return idsByThread;
 }
@@ -103,6 +182,9 @@ async function projectMessageFields(
         'mentionsUser',
         'deliveryStatus',
         'origin',
+        'threadId',
+        'extra',
+        'queueCustody',
       );
     }
     const results = (await pipeline.exec()) as PipelineResults;
@@ -116,8 +198,30 @@ async function projectMessageFields(
 }
 
 function isProjectedUnread(fields: Array<string | null>, userId: string): { unread: boolean; mentioned: boolean } {
-  const [messageUserId, catIdRaw, source, deletedAt, mentionsUser, deliveryStatus, origin] = fields;
+  const [
+    messageUserId,
+    catIdRaw,
+    source,
+    deletedAt,
+    mentionsUser,
+    deliveryStatus,
+    origin,
+    threadId,
+    extra,
+    queueCustody,
+  ] = fields;
   const catId = (catIdRaw || null) as CatId | null;
+  const managedHoldMessage = {
+    userId: messageUserId ?? '',
+    catId,
+    threadId: threadId ?? '',
+    source: safeParseConnectorSource(source ?? undefined),
+    extra: safeParseExtra(extra ?? undefined),
+    queueCustody: safeParseQueueCustody(queueCustody ?? undefined),
+  };
+  if (!passesManagedHoldViewerBoundary(managedHoldMessage, userId)) {
+    return { unread: false, mentioned: false };
+  }
   const visibleToUser = messageUserId === userId || isSystemUserMessage({ userId: messageUserId ?? '', catId });
   const timelinePublished =
     !deliveryStatus ||
@@ -140,10 +244,11 @@ export async function projectRedisUnreadSummaries(
   userId: string,
 ): Promise<ThreadUnreadMessageProjection[]> {
   if (cursors.length === 0) return [];
-  const idsByThread = await projectMessageIds(redis, cursors);
+  const viewerBoundCursors = await selectViewerBoundProjectionCursors(redis, cursors, userId);
+  const idsByThread = await projectMessageIds(redis, viewerBoundCursors);
   const fieldsById = await projectMessageFields(redis, idsByThread);
 
-  return cursors.map(({ threadId }) => {
+  return viewerBoundCursors.map(({ threadId }) => {
     let unreadCount = 0;
     let hasUserMention = false;
     for (const messageId of idsByThread.get(threadId) ?? []) {

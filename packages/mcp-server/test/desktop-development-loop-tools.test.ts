@@ -11,7 +11,7 @@ import {
   handleDevelopmentWorkRead,
 } from '../src/tools/desktop-development-loop-tools.js';
 
-describe('F289 ChatGPT Desktop development-loop tools', () => {
+describe('EXT-001 ChatGPT Desktop development-loop tools', () => {
   const originalFetch = globalThis.fetch;
   const originalToken = process.env.CAT_CAFE_DESKTOP_DEVELOPMENT_TOKEN;
   const originalApiUrl = process.env.CAT_CAFE_API_URL;

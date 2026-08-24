@@ -5,6 +5,7 @@ import { describe, test } from 'node:test';
 import { assertRedisIsolationOrThrow } from './helpers/redis-test-helpers.js';
 
 const DESKTOP_SESSION_REDIS_URL =
+  process.env.EXT_001_TEST_REDIS_URL ??
   process.env.F289_TEST_REDIS_URL ??
   (process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1' ? process.env.REDIS_URL : undefined);
 
@@ -34,7 +35,7 @@ function bindInput(overrides = {}) {
   };
 }
 
-describe('F289 DesktopSessionStore', () => {
+describe('EXT-001 DesktopSessionStore', () => {
   test('binds once and replays the same idempotent request', async () => {
     const { DesktopSessionStore } = await import('../dist/domains/desktop-development-loop/desktop-session-store.js');
     const store = new DesktopSessionStore();
@@ -216,7 +217,7 @@ describe('F289 DesktopSessionStore', () => {
       const workId = `work-redis-${suffix}`;
       const key = `desktop-development:session:${encodeURIComponent(projectId)}:${encodeURIComponent(workId)}`;
       const projectIndexKey = `desktop-development:project-sessions:${encodeURIComponent(projectId)}`;
-      if (!process.env.F289_TEST_REDIS_URL) {
+      if (!process.env.EXT_001_TEST_REDIS_URL && !process.env.F289_TEST_REDIS_URL) {
         assertRedisIsolationOrThrow(DESKTOP_SESSION_REDIS_URL, 'desktop-session-store');
       }
       const redis = new Redis(DESKTOP_SESSION_REDIS_URL, { maxRetriesPerRequest: 1 });

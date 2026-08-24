@@ -2,25 +2,25 @@
 cell_id: review-coordination
 title: Review Coordination
 summary: Durable exact-SHA independent review, private-draft barrier, cross-review, consensus findings, and latest-round provenance for the ChatGPT-authored lane.
-description: F253-owned review semantics and persisted carrier consumed by F289 without making a visible thread or Git ledger the truth root.
+description: F253-owned review semantics and persisted carrier consumed by EXT-001 without making a visible thread or Git ledger the truth root.
 description_source: model
 description_author: cat-idwxwjba
 description_generated_by: cat-idwxwjba@gpt-5
 description_generated_at: "2026-08-08T18:00:00+08:00"
 doc_kind: architecture
 created: 2026-08-08
-canonical_features: [F253, F289]
+canonical_features: [F253, EXT-001]
 code_anchors:
   - packages/shared/src/types/review-round.ts
   - packages/api/src/domains/review-coordination/ReviewRoundStore.ts
   - packages/api/src/domains/review-coordination/RedisReviewRoundStore.ts
 doc_anchors:
   - docs/features/F253-qc-loop.md
-  - docs/features/F289-chatgpt-desktop-development-loop.md
-  - docs/design/F289-chatgpt-desktop-development-loop.md
+  - docs/extensions/EXT-001-chatgpt-desktop-development-loop.md
+  - docs/design/EXT-001-chatgpt-desktop-development-loop.md
 static_scan_hints: [ReviewRound, ReviewPrivateDraft, ReviewConsensusFinding, consensus_ready, review-round:work-current]
 cited_by:
-  - {feature: F289, date: 2026-08-08, delta: "replace conversational/markdown-only round state with a durable exact-SHA carrier"}
+  - {feature: EXT-001, date: 2026-08-08, delta: "replace conversational/markdown-only round state with a durable exact-SHA carrier"}
 ---
 
 # Review Coordination
@@ -29,7 +29,7 @@ Architecture cell: review-coordination
 
 ## Canonical Owner
 
-F253 owns the independent-first review protocol: immutable exact-SHA roster, reviewer-private drafts, the atomic independent barrier, cross-review completion, the designated recorder, consensus verdict, and stable finding closure. F289 consumes this truth to connect Cat Café review with ChatGPT Desktop; it does not copy the protocol into a project adapter or visible Review Hub thread.
+F253 owns the independent-first review protocol: immutable exact-SHA roster, reviewer-private drafts, the atomic independent barrier, cross-review completion, the designated recorder, consensus verdict, and stable finding closure. EXT-001 consumes this truth to connect Cat Café review with ChatGPT Desktop; it does not copy the protocol into a project adapter or visible Review Hub thread.
 
 ## Durable Invariants
 
@@ -40,7 +40,7 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 5. Only the designated recorder can publish consensus, and only after every reviewer finishes cross-review.
 6. Approval requires green checks and zero open findings across the work. A new exact-SHA round makes older approval non-current without deleting history.
 7. Round, draft, receipt, index and finding records default to TTL=0. A visible thread/chat deletion never deletes them.
-8. Every consensus finding carries the exact `git:refs/heads/<branch>@<full-sha>` frozen-design reference and an explicit `plan_conformance` or `architecture_decision` scope. Review cannot silently introduce out-of-plan work; serious architecture conflicts are escalated to the F289 user-decision gate and a changed design must first be committed to that branch.
+8. Every consensus finding carries the exact `git:refs/heads/<branch>@<full-sha>` frozen-design reference and an explicit `plan_conformance` or `architecture_decision` scope. Review cannot silently introduce out-of-plan work; serious architecture conflicts are escalated to the EXT-001 user-decision gate and a changed design must first be committed to that branch.
 
 ## Extend By
 
@@ -57,4 +57,4 @@ F253 owns the independent-first review protocol: immutable exact-SHA roster, rev
 
 ## Static Scan Hints
 
-Watch for `ReviewRound`, `ReviewPrivateDraft`, `ReviewConsensusFinding`, `designRefs`, `architecture_decision`, `review-round:`, exact-SHA normalization, reviewer/author identity checks, barrier reads, and any alternative round/finding ledger under F289.
+Watch for `ReviewRound`, `ReviewPrivateDraft`, `ReviewConsensusFinding`, `designRefs`, `architecture_decision`, `review-round:`, exact-SHA normalization, reviewer/author identity checks, barrier reads, and any alternative round/finding ledger under EXT-001.

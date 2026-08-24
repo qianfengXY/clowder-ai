@@ -49,7 +49,7 @@ describe(
     });
 
     async function admit(anchor = 'f289-work') {
-      await workflowStore.upsert(anchor, 'F289', {}, 'cat-idwxwjba', 'owner-1');
+      await workflowStore.upsert(anchor, 'EXT-001', {}, 'cat-idwxwjba', 'owner-1');
       return workflowStore.getManagedWorkAdmission('owner-1', anchor);
     }
 
@@ -267,7 +267,7 @@ describe(
         terminalExactSha: EXACT_SHA,
         designBranch: 'product-design',
         designExactSha: 'd'.repeat(40),
-        designDocuments: ['docs/design/F289.zh-CN.md'],
+        designDocuments: ['docs/design/EXT-001.zh-CN.md'],
         idempotencyKey: 'repair-delivery-cycle',
       };
       const reopened = await port.startNextDeliveryCycle(reopenInput);

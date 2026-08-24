@@ -5,7 +5,7 @@ import {
   buildDesktopDevelopmentCreateInput,
 } from '../desktop-development-form';
 
-describe('F289 desktop development project form', () => {
+describe('EXT-001 desktop development project form', () => {
   it('omits the optional binding when the loop is disabled', () => {
     expect(
       buildDesktopDevelopmentCreateInput({

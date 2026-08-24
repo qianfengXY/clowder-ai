@@ -37,7 +37,7 @@ describe('ExternalProjectStore', () => {
     assert.equal(project.backlogPath, 'BACKLOG.md');
   });
 
-  test('create() persists an optional F289 Desktop development binding', async () => {
+  test('create() persists an optional EXT-001 Desktop development binding', async () => {
     const project = await store.create('user1', {
       name: 'bound',
       description: '',

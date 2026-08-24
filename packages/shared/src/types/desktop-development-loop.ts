@@ -50,7 +50,7 @@ export type DesktopDevelopmentManualAction =
 
 /**
  * Server-derived projection of one visible step in the current attempt.
- * This is a view over F275/F253/F289 truth, never a second workflow ledger.
+ * This is a view over F275/F253/EXT-001 truth, never a second workflow ledger.
  */
 export interface DesktopDevelopmentWorkflowNode {
   readonly id: DesktopDevelopmentWorkflowNodeId;

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "extensions": [
+    {
+      "id": "EXT-001",
+      "name": "ChatGPT Desktop Development Loop",
+      "status": "implementation",
+      "owner": "CodeX (@cat-idwxwjba, GPT-5)",
+      "specPath": "docs/extensions/EXT-001-chatgpt-desktop-development-loop.md",
+      "designPath": "docs/design/EXT-001-chatgpt-desktop-development-loop.md",
+      "planPath": "feature-specs/2026-08-05-chatgpt-desktop-development-loop.md",
+      "legacyIds": ["F289"]
+    }
+  ]
+}

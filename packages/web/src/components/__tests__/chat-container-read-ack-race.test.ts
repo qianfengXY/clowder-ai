@@ -3,8 +3,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 
+type MockApiResponse = {
+  ok: boolean;
+  json: () => Promise<unknown>;
+};
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({ ok: true }));
+const mockApiFetch = vi.fn<(_url: string, _opts?: Record<string, unknown>) => Promise<MockApiResponse>>(async () => ({
+  ok: true,
+  json: async () => ({ caughtUp: false, advanced: false }),
+}));
 
 // Mutable store state — mutate between renders to simulate thread switching
 let storeState = {
@@ -19,6 +27,12 @@ let storeState = {
     },
   ],
 };
+
+// #1304: Stable spies that persist across baseStore() calls so tests can
+// assert on the same instance the component actually invoked.
+const confirmUnreadAckSpy = vi.fn();
+const settleUnreadAckSpy = vi.fn();
+const armUnreadSuppressionSpy = vi.fn();
 
 const baseStore = () => ({
   ...storeState,
@@ -44,8 +58,9 @@ const baseStore = () => ({
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
+  confirmUnreadAck: confirmUnreadAckSpy,
+  settleUnreadAck: settleUnreadAckSpy,
+  armUnreadSuppression: armUnreadSuppressionSpy,
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
@@ -135,7 +150,6 @@ vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
@@ -157,10 +171,15 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   });
 
   beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    mockApiFetch.mockClear();
+    mockApiFetch.mockReset();
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ caughtUp: false, advanced: false }) });
+    confirmUnreadAckSpy.mockClear();
+    settleUnreadAckSpy.mockClear();
+    armUnreadSuppressionSpy.mockClear();
     storeState = {
       currentThreadId: 'thread-A',
       messages: [
@@ -308,5 +327,100 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  it('re-acks when the same mutable bubble reaches final delivery', async () => {
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    mockApiFetch.mockClear();
+
+    storeState = {
+      ...storeState,
+      messages: storeState.messages.map((message) => ({ ...message, deliveredAt: Date.now() })),
+    };
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('/read/latest'),
+    );
+    expect(ackCalls).toHaveLength(1);
+  });
+
+  it('does not ACK while hidden and retries only after the selected document becomes visible', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'))).toHaveLength(0);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'));
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0]?.[0]).toContain('thread-A');
+  });
+
+  it('settles without confirming when read/latest returns caughtUp=false', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: false, advanced: false }),
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
+  });
+
+  it('settles as confirmed when read/latest returns caughtUp=true', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: true, advanced: true }),
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', true);
+  });
+
+  it('settles as unconfirmed on a non-2xx response', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: 'failed' }),
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
   });
 });

@@ -7,6 +7,7 @@ import {
   parseFeatureDocRisks,
   parseFeatureDocStatus,
 } from './backlog-doc-import.js';
+import { EXTENSION_FEATURE_ID_PATTERN, readExtensionFeatureDocContent } from './extension-feature-catalog.js';
 import { gitListFeatureDocs, readFeatureDocContent } from './git-doc-reader.js';
 
 export const featureDocDetailRoutes: FastifyPluginAsync = async (app) => {
@@ -17,7 +18,7 @@ export const featureDocDetailRoutes: FastifyPluginAsync = async (app) => {
         querystring: {
           type: 'object',
           required: ['featureId'],
-          properties: { featureId: { type: 'string', pattern: '^F\\d{3}$' } },
+          properties: { featureId: { type: 'string', pattern: '^(?:F\\d{3}|EXT-\\d{3})$' } },
         },
       },
     },
@@ -25,14 +26,20 @@ export const featureDocDetailRoutes: FastifyPluginAsync = async (app) => {
       const { featureId } = request.query;
       const normalizedId = featureId.toUpperCase();
 
-      const docs = await gitListFeatureDocs();
-      const docFile = docs.find((f) => f.toUpperCase().startsWith(normalizedId));
-      if (!docFile) {
-        reply.status(404);
-        return { error: `Feature doc not found for ${featureId}` };
+      let docFile = normalizedId;
+      let content: string | null;
+      if (EXTENSION_FEATURE_ID_PATTERN.test(normalizedId)) {
+        content = await readExtensionFeatureDocContent(normalizedId);
+      } else {
+        const docs = await gitListFeatureDocs();
+        const canonicalDocFile = docs.find((f) => f.toUpperCase().startsWith(normalizedId));
+        if (!canonicalDocFile) {
+          reply.status(404);
+          return { error: `Feature doc not found for ${featureId}` };
+        }
+        docFile = canonicalDocFile;
+        content = await readFeatureDocContent(canonicalDocFile);
       }
-
-      const content = await readFeatureDocContent(docFile);
       if (!content) {
         reply.status(404);
         return { error: `Could not read feature doc ${docFile}` };

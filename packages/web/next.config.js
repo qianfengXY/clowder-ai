@@ -1,6 +1,15 @@
 const withPWA = require('@ducanh2912/next-pwa').default;
+const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
+
+// Resolved through the shared helper so the revision embedded in the browser
+// bundle and the one scripts/write-build-stamp.cjs records on disk can never
+// drift apart — F294's guard fails closed on a mismatch just as it does on a
+// missing stamp.
+const webBuildRevision = resolveWebBuildRevision();
+const deploymentRevisionRequired =
+  process.env.CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED === '1' || process.env.NODE_ENV === 'production';
 
 function resolveApiBaseUrl() {
   // Prefer explicit local port over NEXT_PUBLIC_API_URL: SSR rewrites should
@@ -49,6 +58,8 @@ const nextConfig = {
   // frontend origin and send Socket.IO traffic through the HTTP rewrite.
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? '',
+    NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: webBuildRevision ?? '',
+    NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: deploymentRevisionRequired ? '1' : '0',
   },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
@@ -97,20 +108,24 @@ const nextConfig = {
 
 module.exports = withPWA({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
-  reloadOnOnline: false,
-  // The app shell contains hashed chunk references. Precaching `/` can keep a
+    disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
+    reloadOnOnline: false,
+    // The app shell contains hashed chunk references. Precaching `/` can keep a
   // mobile client on an old build indefinitely after a production restart.
-  cacheStartUrl: false,
+    cacheStartUrl: false,
   // `dynamicStartUrl: true` still registers `/` as NetworkFirst and falls back
   // to the old cached shell when a tunnel is slow. That resurrects bundles
   // containing retired API domains even though navigations below are
   // NetworkOnly.
-  dynamicStartUrl: false,
+    dynamicStartUrl: false,
   // Keep default page/document runtime caching and only override what we need.
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
     disableDevLogs: true,
+    // Keep the Electron package version in the navigation cache key. Desktop
+    // starts at /?__clowder_desktop_version=<version> so an older worker may
+    // serve static assets, but can never substitute its precached root shell.
+    ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
     runtimeCaching: [
       {
         // Never fall back to an old HTML shell. Hashed static assets remain

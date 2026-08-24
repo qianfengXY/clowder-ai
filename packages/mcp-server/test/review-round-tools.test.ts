@@ -7,7 +7,7 @@ import {
   reviewRoundTools,
 } from '../src/tools/review-round-tools.js';
 
-describe('F289 project Review Hub tools', () => {
+describe('EXT-001 project Review Hub tools', () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = {
     apiUrl: process.env.CAT_CAFE_API_URL,

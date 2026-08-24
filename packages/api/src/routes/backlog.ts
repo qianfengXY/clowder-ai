@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import type { BacklogDependencies, BacklogItem, CatId, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
 import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -19,14 +20,18 @@ import {
   readFeatureDocDependencies,
   readFeatureDocStatuses,
 } from './backlog-doc-import.js';
+import { readExtensionFeatureRows } from './extension-feature-catalog.js';
+import { migrateLegacyExtensionItems } from './extension-feature-migration.js';
 import { sanitizeThreadForResponse } from './threads.js';
 
 export interface BacklogRoutesOptions {
   backlogStore: IBacklogStore;
   threadStore: IThreadStore;
   messageStore: IMessageStore;
-  workflowSopStore?: Pick<IWorkflowSopStore, 'getManagedWorkAdmission'>;
+  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'getManagedWorkAdmission' | 'upsert'>;
   backlogDocPath?: string;
+  /** Fork-local extension registry. Missing catalogs are treated as an empty overlay. */
+  extensionCatalogPath?: string;
   /** F058 Phase G: override path to docs/features/ directory for done-feature import */
   featuresDir?: string;
   resolveSelfClaimScope?: (catId: CatId) => MissionHubSelfClaimScope;
@@ -347,17 +352,43 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       return { error: 'Identity required' };
     }
 
-    let features;
+    let features: BacklogFeatureRow[];
+    let extensionFeatures: BacklogFeatureRow[];
     try {
-      features = await readActiveFeaturesFromBacklog(backlogDocPath);
+      const extensionCatalogPath =
+        opts.extensionCatalogPath ??
+        (backlogDocPath ? join(dirname(backlogDocPath), 'extensions', 'catalog.json') : undefined);
+      const [canonicalFeatures, extensions] = await Promise.all([
+        readActiveFeaturesFromBacklog(backlogDocPath),
+        readExtensionFeatureRows(extensionCatalogPath),
+      ]);
+      extensionFeatures = extensions;
+      features = [...canonicalFeatures, ...extensions];
     } catch (error) {
       reply.status(500);
       return {
-        error: `Failed to read docs/ROADMAP.md: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Failed to read feature catalog: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
 
-    const existingItems = await backlogStore.listByUser(userId);
+    let existingItems = await backlogStore.listByUser(userId);
+    let migratedLegacyItemIds: readonly string[] = [];
+    try {
+      const migration = await migrateLegacyExtensionItems({
+        items: existingItems,
+        extensionRows: extensionFeatures,
+        backlogStore,
+        ...(opts.workflowSopStore ? { workflowSopStore: opts.workflowSopStore } : {}),
+        userId,
+      });
+      existingItems = [...migration.items];
+      migratedLegacyItemIds = migration.migratedItemIds;
+    } catch (error) {
+      reply.status(500);
+      return {
+        error: `Failed to migrate legacy extension feature IDs: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     const existingByFeatureId = new Map<string, BacklogItem>();
     for (const item of existingItems) {
       const featureTagId = getFeatureTagId(item.tags);
@@ -486,6 +517,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       refreshedItemIds,
       markedDoneIds,
       historicalDoneIds,
+      migratedLegacy: migratedLegacyItemIds.length,
+      migratedLegacyItemIds,
     };
   });
 

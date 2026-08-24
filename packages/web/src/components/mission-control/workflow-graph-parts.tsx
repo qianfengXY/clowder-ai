@@ -11,7 +11,7 @@ import {
   type WorkflowInspectionSelection,
 } from './workflow-graph-support';
 
-/** F289 泳道图（时间轴版）视觉原子 — 站点、入口、Review 阶段、分支胶囊、返工轨道 */
+/** EXT-001 泳道图（时间轴版）视觉原子 — 站点、入口、Review 阶段、分支胶囊、返工轨道 */
 
 export interface StationInteraction {
   readonly selected: boolean;

@@ -112,6 +112,7 @@ describe('EvalWorkspacePanel', () => {
       workspaceOpenFilePath: null,
       workspaceWorktreeId: null,
       workspaceOpenTabs: [],
+      currentThreadId: 'thread-eval-origin',
     });
   });
 
@@ -189,6 +190,81 @@ describe('EvalWorkspacePanel', () => {
     expect(container.textContent).toContain('指标说明 (1)');
     expect(container.textContent).toContain('有结论但没传球');
     expect(container.textContent).toContain('越低越好');
+  });
+
+  it('routes external lifecycle references through the guarded popup path', async () => {
+    const href = 'https://example.com/f273/workspace-evidence';
+    mocks.apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        buildSummary([
+          {
+            ...baseItem,
+            lifecycle: {
+              ...baseItem.lifecycle,
+              actionRefs: [{ kind: 'other', availability: 'available', value: href }],
+            },
+          },
+        ]),
+    });
+
+    await act(async () => {
+      root.render(<EvalWorkspacePanel />);
+    });
+    await act(async () => {});
+
+    const link = container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toBe('noopener noreferrer');
+  });
+
+  it('opens inv evidence as a typed Eval-origin trajectory chip', async () => {
+    const item: EvalHubItem = {
+      ...baseItem,
+      lifecycle: {
+        ...baseItem.lifecycle,
+        actionRefs: [{ kind: 'other', availability: 'available', value: 'inv:inv-eval-17' }],
+      },
+    };
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => buildSummary([item]) });
+    window.history.replaceState({}, '', '/thread/thread-eval-origin');
+
+    await act(async () => root.render(<EvalWorkspacePanel />));
+    await act(async () => {});
+    const chip = container.querySelector<HTMLElement>('[data-testid="trajectory-evidence-chip"]');
+    expect(chip?.dataset.invocationId).toBe('inv-eval-17');
+    await act(async () => chip?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    const url = new URL(window.location.href);
+    expect(url.searchParams.get('inv')).toBe('inv-eval-17');
+    expect(url.searchParams.get('trajectoryThread')).toBeNull();
+    expect(url.searchParams.get('origin')).toContain('eval:');
+    expect(useChatStore.getState().workspaceMode).toBe('trajectory');
+  });
+
+  it('does not reinterpret native non-invocation evidence refs as trajectory anchors', async () => {
+    const item: EvalHubItem = {
+      ...baseItem,
+      lifecycle: {
+        ...baseItem.lifecycle,
+        actionRefs: [
+          {
+            kind: 'other',
+            availability: 'available',
+            value: 'session:session-a/invocation:inv-legacy',
+          },
+          { kind: 'other', availability: 'available', value: 'trace:trace-native' },
+        ],
+      },
+    };
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => buildSummary([item]) });
+
+    await act(async () => root.render(<EvalWorkspacePanel />));
+    await act(async () => {});
+
+    expect(container.querySelector('[data-testid="trajectory-evidence-chip"]')).toBeNull();
+    expect(container.textContent).toContain('session:session-a/invocation:inv-legacy');
+    expect(container.textContent).toContain('trace:trace-native');
   });
 
   it('renders operator language instead of machine fields for an insufficient window', async () => {

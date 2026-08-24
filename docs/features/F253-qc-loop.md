@@ -1,6 +1,6 @@
 ---
 feature_ids: [F253]
-related_features: [F217, F192, F167, F073, F289]
+related_features: [F217, F192, F167, F073, EXT-001]
 topics: [quality, qc, merge-gate, review, ci, validation, telemetry, harness]
 doc_kind: spec
 created: 2026-06-25
@@ -10,7 +10,7 @@ tips_exempt: internal QC tooling — no user-visible capability change
 
 # F253: Clowder AI QC Loop — 自动化质量门禁全链路
 
-> **Status**: done through Phase D; Phase E durable ReviewRound carrier implemented on the F289 branch and awaiting independent review | **Owner**: Ragdoll (Opus-4.6, original QC loop) + CodeX (@cat-idwxwjba, F289 carrier) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
+> **Status**: done through Phase D; Phase E durable ReviewRound carrier implemented on the EXT-001 branch and awaiting independent review | **Owner**: Ragdoll (Opus-4.6, original QC loop) + CodeX (@cat-idwxwjba, EXT-001 carrier) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
 
 ## Why
 
@@ -37,7 +37,7 @@ operator experience（2026-06-25 Kun Chen 调研讨论）：
 
 Architecture cell: merge-gate (extend) + harness-eval (register new domain) + review-coordination (Phase E carrier)
 Map delta: Phase E adds `review-coordination`; Phase A-D remain extensions of merge-gate + F192 eval domain
-Why: 原 QC Loop 的 hygiene/evidence/gate 扩展 merge-gate、telemetry 注册 F192；F289 需要 typed persistent ReviewRound 后，独立草稿/barrier/共识不再只是对话或 Git markdown 状态，因此新增窄 review-coordination cell。
+Why: 原 QC Loop 的 hygiene/evidence/gate 扩展 merge-gate、telemetry 注册 F192；EXT-001 需要 typed persistent ReviewRound 后，独立草稿/barrier/共识不再只是对话或 Git markdown 状态，因此新增窄 review-coordination cell。
 
 ## Architecture Inventory + Reuse Audit（2026-06-26 grounding）
 
@@ -140,7 +140,7 @@ qc.idle
 
 **关键约束**：如果 reviewer 给了 semantic fix 建议（不只是 hygiene），author 改完后 **review provenance 必须重新闭合**（Layer 3 re-confirm on final HEAD）。Layer 3 的 APPROVE 是 merge-gate evidence 的 `reviewer` + `review_head` 来源。
 
-### Phase D: ChatGPT author 多猫共识 Review rounds（2026-08-04 operator directive，F289 callback carrier）
+### Phase D: ChatGPT author 多猫共识 Review rounds（2026-08-04 operator directive，EXT-001 callback carrier）
 
 当实现作者是 **ChatGPT 桌面 Codex**，且 operator 明确启用本 lane 时，采用多猫独立判断后再共识收敛的窄例外；普通 Cat Café 代码 review 仍走上方按风险路由的 QC Loop。
 
@@ -155,16 +155,16 @@ qc.idle
 
 执行真相源：`chatgpt-review-rounds` skill；Review 系统消息只携带本轮身份、阶段和双 SHA，每轮可见结构真相源为 `cat-cafe-skills/refs/chatgpt-review-round-template.md`。
 
-### Phase E: Durable ReviewRound carrier（2026-08-08 F289 consumer）
+### Phase E: Durable ReviewRound carrier（2026-08-08 EXT-001 consumer）
 
-F289 将 Phase D 从 SOP/markdown-only 升级为 typed persistent carrier，但不改变 Phase D 的人类/猫猫权力边界：
+EXT-001 将 Phase D 从 SOP/markdown-only 升级为 typed persistent carrier，但不改变 Phase D 的人类/猫猫权力边界：
 
 - project/work/full-SHA 唯一 round，author、attempt、reviewer roster 与 recorder immutable；新 SHA 创建新 round。
 - reviewer 草稿独立持久化；barrier 前 reviewer 只能读取自己的草稿，Desktop safe read 只能看到进度。
 - 所有独立 reviewer 完成后原子打开 barrier；所有 cross-review 完成后才允许 designated recorder 发布共识。
 - finding ID 稳定，resolution 只能由后续完成 cross-review 的新 SHA round 记录；approved 必须 checks green 且整项工作零 open finding。
 - `work-current` 指针使旧 SHA verdict 保留历史但立即失去 current merge provenance；所有 state/draft/finding/receipt/index TTL=0。
-- F289 只通过 `IReviewRoundStore` 消费；Review Hub thread 是投影视图，不是第二份 round ledger。
+- EXT-001 只通过 `IReviewRoundStore` 消费；Review Hub thread 是投影视图，不是第二份 round ledger。
 
 ### QC 触发策略
 
@@ -415,7 +415,7 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 | KD-12 | operator 指定唯一 recorder 把共识 ledger 写入 Git；其他 reviewer 全程 Git 只读 | 单一真相源 + 清晰 provenance，避免各猫意见分支互相覆盖 | 2026-08-04（operator directive） |
 | KD-13 | 每次 ChatGPT 修复产生新 code HEAD 后完整开启下一轮；所有 accepted findings 清零才可合入 | review 只对精确 HEAD 有效，不能用上一轮 verdict 覆盖新代码 | 2026-08-04（operator directive） |
 | KD-14 | ChatGPT 合入 main 后仍等待 operator 亲自验收 | 技术门禁通过不等于 operator 的最终体验验收 | 2026-08-04（operator directive） |
-| KD-15 | Phase E 用 Redis typed carrier 替代 conversational/markdown-only round truth；Review Hub 与 Git ledger 仅作投影/可选下游 | 窗口删除、并发 finish、Desktop 恢复与跨 SHA finding closure 都需要可验证、TTL=0、原子且不依赖可见聊天的真相 | 2026-08-08（F289 consumer） |
+| KD-15 | Phase E 用 Redis typed carrier 替代 conversational/markdown-only round truth；Review Hub 与 Git ledger 仅作投影/可选下游 | 窗口删除、并发 finish、Desktop 恢复与跨 SHA finding closure 都需要可验证、TTL=0、原子且不依赖可见聊天的真相 | 2026-08-08（EXT-001 consumer） |
 
 ## Future Phase Candidates
 

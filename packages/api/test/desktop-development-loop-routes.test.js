@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
-describe('F289 desktop development loop routes', () => {
+describe('EXT-001 desktop development loop routes', () => {
   let app;
   let project;
   let threadStore;
@@ -115,7 +115,7 @@ describe('F289 desktop development loop routes', () => {
   });
 });
 
-describe('F289 ChatGPT Desktop service-principal routes', () => {
+describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
   const packet = {
     protocolVersion: 1,
     projectId: 'project-1',

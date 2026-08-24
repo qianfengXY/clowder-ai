@@ -185,7 +185,7 @@ describe('applyReadonlyFilter — env modes', () => {
     assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
   });
 
-  it('desktopMode=development-loop exposes only the eight F289 lifecycle tools', () => {
+  it('desktopMode=development-loop exposes only the eight EXT-001 lifecycle tools', () => {
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, { desktopMode: 'development-loop' });
     assert.deepEqual(out.map((tool) => tool.name).sort(), [...DESKTOP_DEVELOPMENT_LOOP_ALLOWED_TOOLS].sort());
     assert.equal(

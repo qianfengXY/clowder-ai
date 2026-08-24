@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
+import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import {
   createThreadSidebarHarness,
   defaultSidebarApiMock,
@@ -16,7 +17,9 @@ import {
 
 const NOW = 1710000000000;
 
-function makeThread(overrides: Partial<Thread> & { id: string }): Thread {
+type TestThread = Thread & Partial<Pick<SidebarSnapshotRow, 'presence' | 'unreadCount' | 'hasUserMention'>>;
+
+function makeThread(overrides: Partial<TestThread> & { id: string }): TestThread {
   return {
     projectPath: 'default',
     title: null,
@@ -187,6 +190,44 @@ describe('ThreadSidebar v9 tab redesign', () => {
     expect(visibleThreadIds(harness.container)).toEqual(['favorite']);
   });
 
+  it('renders canonical working rows above inactive unread rows without reshuffling concurrent work', async () => {
+    Object.assign(mockStore, {
+      currentThreadId: 'inactive-unread',
+      threads: [
+        makeThread({ id: 'default', title: '大厅' }),
+        makeThread({
+          id: 'working-first',
+          title: 'Working First',
+          pinned: true,
+          lastActiveAt: NOW - 60_000,
+          presence: { status: 'working', activeSince: NOW - 10 * 60_000 },
+        }),
+        makeThread({
+          id: 'working-second',
+          title: 'Working Second',
+          pinned: true,
+          lastActiveAt: NOW,
+          presence: { status: 'working', activeSince: NOW - 5 * 60_000 },
+        }),
+        makeThread({
+          id: 'inactive-unread',
+          title: 'Inactive Unread',
+          pinned: true,
+          lastActiveAt: NOW + 1_000,
+          unreadCount: 1,
+          hasUserMention: false,
+          presence: { status: 'idle' },
+        }),
+      ],
+      threadStates: {},
+    });
+
+    await harness.render();
+    await clickTab(harness.container, 'recent', harness.flush);
+
+    expect(visibleThreadIds(harness.container)).toEqual(['working-first', 'working-second', 'inactive-unread']);
+  });
+
   it('restores the user-selected tab after the sidebar remounts', async () => {
     Object.assign(mockStore, {
       currentThreadId: 'project',
@@ -277,7 +318,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
     expect(visibleThreadIds(harness.container)).toEqual(['default', 'system']);
   });
 
-  it('opens the project tab when the active regular thread is outside the recent limit', async () => {
+  it('opens the recent tab when the active regular thread is beyond the old 8-item limit (clowder-ai#1305)', async () => {
     Object.assign(mockStore, {
       currentThreadId: 'regular-9',
       threads: [
@@ -295,7 +336,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
 
     await harness.render();
 
-    expect(harness.container.querySelector('[data-testid="sidebar-tab-project"]')?.getAttribute('aria-selected')).toBe(
+    expect(harness.container.querySelector('[data-testid="sidebar-tab-recent"]')?.getAttribute('aria-selected')).toBe(
       'true',
     );
     expect(visibleThreadIds(harness.container)).toContain('regular-9');
@@ -323,7 +364,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
     Object.assign(mockStore, { currentThreadId: 'regular-9' });
     await harness.render({ routeThreadId: 'regular-9' });
 
-    expect(harness.container.querySelector('[data-testid="sidebar-tab-project"]')?.getAttribute('aria-selected')).toBe(
+    expect(harness.container.querySelector('[data-testid="sidebar-tab-recent"]')?.getAttribute('aria-selected')).toBe(
       'true',
     );
     expect(visibleThreadIds(harness.container)).toContain('regular-9');

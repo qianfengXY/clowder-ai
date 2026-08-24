@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-describe('F289 desktop development loop contract', () => {
+describe('EXT-001 desktop development loop contract', () => {
   it('normalizes supported GitHub repository references', async () => {
     const { normalizeGitHubRepository } = await import('../dist/types/desktop-development-loop.js');
 
@@ -100,7 +100,7 @@ describe('F289 desktop development loop contract', () => {
     );
   });
 
-  it('increments successful pilots once per accepted work and only enables auto-merge explicitly', async () => {
+  it('increments successful pilots once per accepted work and enables auto-merge after the second pilot', async () => {
     const { recordAcceptedManualPilot, applyDesktopDevelopmentPolicyUpdate, createDesktopDevelopmentProjectBinding } =
       await import('../dist/types/desktop-development-loop.js');
     const initial = createDesktopDevelopmentProjectBinding({
@@ -115,7 +115,7 @@ describe('F289 desktop development loop contract', () => {
     assert.equal(first.successfulManualPilotCount, 1);
     assert.equal(duplicate.successfulManualPilotCount, 1);
     assert.equal(second.successfulManualPilotCount, 2);
-    assert.equal(second.mergeMode, 'manual_confirm_in_chatgpt');
+    assert.equal(second.mergeMode, 'automatic');
 
     const enabled = applyDesktopDevelopmentPolicyUpdate(second, {
       expectedVersion: second.version,

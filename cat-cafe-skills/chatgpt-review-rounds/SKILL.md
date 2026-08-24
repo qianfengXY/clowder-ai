@@ -48,7 +48,7 @@ git:refs/heads/<方案分支>@<完整 designExactSha>:<适用设计文档路径>
 
 开始看 diff 前，先把选中设计文档里的“用户旅程、前端产品体验、交互、验收标准”映射成验收矩阵。只要方案包含
 用户可见行为或 UI 验收，就必须完整读取并执行
-[`refs/chatgpt-review-user-journey.md`](../refs/chatgpt-review-user-journey.md)；不能根据本轮 diff 是否碰前端来跳过。
+[`../.cat-cafe-shared-refs/chatgpt-review-user-journey.md`](../.cat-cafe-shared-refs/chatgpt-review-user-journey.md)；不能根据本轮 diff 是否碰前端来跳过。
 
 ## 方案边界
 
@@ -93,7 +93,7 @@ Review 只判断实现是否正确落地方案提交及其验收条件：
 ## 可见输出
 
 每个阶段完成 callback 后，最终回复严格使用
-[`refs/chatgpt-review-round-template.md`](../refs/chatgpt-review-round-template.md)。GPT 与 Kimi 使用同一模板。
+[`../.cat-cafe-shared-refs/chatgpt-review-round-template.md`](../.cat-cafe-shared-refs/chatgpt-review-round-template.md)。GPT 与 Kimi 使用同一模板。
 表格之外不重复输出 findings 的纯文字清单。
 
 明细表首列是仅用于展示的短序号：按当前表格顺序填写 `1`、`2`、`3`……，不得展示
