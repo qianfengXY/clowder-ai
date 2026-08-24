@@ -178,12 +178,14 @@ template instead of being copied into every system message.
 
 Desktop IPC acknowledgement is not delivery proof. Cat Café assigns a deterministic `clientUserMessageId`, then reads
 the bound task with turns included. The durable wake outbox is cleared only when the ID or exact objective is visible
-inside an actual turn; goal metadata alone cannot satisfy confirmation. If the bound task is dormant and has no IPC
-owner, Cat Café opens that same task and performs bounded owner-discovery retries. It never creates a replacement task,
-and every pre-acknowledgement retry reuses the same message ID. Once the owner acknowledges the start-turn request, the
-outbox changes to verification-only recovery: it may keep checking for the actual turn but cannot send the message again.
-A successful delivery to an existing owner does not deep-link or steal the user's current Codex focus. Recovery for a
-task is serialized with live delivery so overlapping timer passes cannot emit duplicate turns.
+inside an actual turn; goal metadata alone cannot satisfy confirmation. Recovery reads actual turns before sending, so
+an upgrade-era outbox record whose objective is already visible is cleared instead of replayed. If the bound task is
+dormant and has no IPC owner, Cat Café persists an owner-discovery claim before opening that same task and performs
+bounded retries; one durable wake may deep-link at most once. It never creates a replacement task, and every
+pre-acknowledgement retry reuses the same message ID. Once the owner acknowledges the start-turn request, the outbox
+changes to verification-only recovery: it may keep checking for the actual turn but cannot send the message again. A
+successful delivery to an existing owner does not deep-link or steal the user's current Codex focus. Recovery for a task
+is serialized with live delivery so overlapping timer passes cannot emit duplicate turns or repeated focus changes.
 
 ## Acceptance-before-merge state machine
 

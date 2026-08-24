@@ -110,6 +110,12 @@ type PendingDesktopTaskGoalSignal = DesktopTaskGoalSignal & {
    */
   readonly deliveryAcknowledgedAt?: number;
   readonly clientUserMessageId?: string;
+  /**
+   * Cat Café already deep-linked this dormant task while trying to discover
+   * its Desktop IPC owner. Persist this before opening so recovery cannot
+   * repeatedly steal focus when the owner never registers.
+   */
+  readonly ownerDiscoveryAttemptedAt?: number;
 };
 
 export function buildDesktopTaskName(featureId: string, title: string): string {
@@ -267,13 +273,20 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     try {
       const input = parsePendingGoalSignal(JSON.parse(raw));
       if (!input) throw new Error('Invalid pending ChatGPT Desktop goal signal');
-      if (input.kind === 'activate' && input.deliveryAcknowledgedAt !== undefined) {
+      if (input.kind === 'activate') {
         const clientUserMessageId =
           input.clientUserMessageId ?? deterministicDesktopTurnMessageId(input.threadId, input.objective);
-        if (await this.verifyDesktopTurn(input.threadId, input.sourcePath, input.objective, clientUserMessageId)) {
+        const turnExists = await this.verifyDesktopTurn(
+          input.threadId,
+          input.sourcePath,
+          input.objective,
+          clientUserMessageId,
+        );
+        if (turnExists) {
           await this.clearPendingWake(threadId);
+          return;
         }
-        return;
+        if (input.deliveryAcknowledgedAt !== undefined) return;
       }
       await this.deliverGoalSignal(input);
       await this.clearPendingWake(threadId);
@@ -356,7 +369,14 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
 
   private async persistAndDeliver(input: DesktopTaskGoalSignal): Promise<void> {
     if (this.redis) {
-      await this.redis.set(this.pendingWakeKey(input.threadId), JSON.stringify(input));
+      const pending =
+        input.kind === 'activate'
+          ? {
+              ...input,
+              clientUserMessageId: deterministicDesktopTurnMessageId(input.threadId, input.objective),
+            }
+          : input;
+      await this.redis.set(this.pendingWakeKey(input.threadId), JSON.stringify(pending));
       await this.redis.sadd(PENDING_WAKE_SET, input.threadId);
     }
     try {
@@ -433,8 +453,13 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
     }
 
     // A dormant task has no IPC owner until ChatGPT loads it. Open the same
-    // bound task (never a replacement), then give its window a bounded period
-    // to register before retrying the deterministic message id.
+    // bound task (never a replacement) at most once for this durable signal,
+    // then give its window a bounded period to register before retrying the
+    // deterministic message id. Persist the claim before deep-linking so a
+    // failed discovery cannot steal focus again on every recovery pass.
+    if (!(await this.claimOwnerDiscovery(threadId, objective))) {
+      throw new Error(`No ChatGPT Desktop window owns bound thread ${threadId}; owner discovery already attempted`);
+    }
     await this.openThread(threadId);
     let lastError: unknown = new Error(`No ChatGPT Desktop window owns bound thread ${threadId}`);
     for (let retry = 0; retry < DESKTOP_OWNER_DISCOVERY_RETRIES; retry += 1) {
@@ -448,6 +473,23 @@ export class CodexDesktopTaskLauncher implements DesktopTaskLauncher {
       }
     }
     throw lastError;
+  }
+
+  private async claimOwnerDiscovery(threadId: string, objective: string): Promise<boolean> {
+    if (!this.redis) return true;
+    const key = this.pendingWakeKey(threadId);
+    const raw = await this.redis.get(key);
+    const pending = raw ? parsePendingGoalSignal(JSON.parse(raw)) : null;
+    if (pending?.kind !== 'activate' || pending.objective !== objective) return false;
+    if (pending.ownerDiscoveryAttemptedAt !== undefined) return false;
+    await this.redis.set(
+      key,
+      JSON.stringify({
+        ...pending,
+        ownerDiscoveryAttemptedAt: Date.now(),
+      } satisfies PendingDesktopTaskGoalSignal),
+    );
+    return true;
   }
 
   /** Stop the durable goal from creating another turn while Cat Cafe reviews. */
@@ -908,6 +950,9 @@ function parsePendingGoalSignal(value: unknown): PendingDesktopTaskGoalSignal | 
         ? { deliveryAcknowledgedAt: input.deliveryAcknowledgedAt }
         : {}),
       ...(typeof input.clientUserMessageId === 'string' ? { clientUserMessageId: input.clientUserMessageId } : {}),
+      ...(typeof input.ownerDiscoveryAttemptedAt === 'number' && Number.isFinite(input.ownerDiscoveryAttemptedAt)
+        ? { ownerDiscoveryAttemptedAt: input.ownerDiscoveryAttemptedAt }
+        : {}),
     };
   }
   return null;

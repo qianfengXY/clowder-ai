@@ -114,9 +114,11 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
   app-server，也不得创建替代窗口。原生 deep link 只负责聚焦窗口，不承担消息提交。
 - goal 唤醒在 IPC owner 接受前失败时，由 Cat Café 的持久化 outbox 使用同一个幂等 message id 重试。IPC owner
   已接受但通知 turn 暂时尚不可读时，outbox 只重复验证可见性，不得再次发送同一消息；只有用户显式重投当前节点
-  才能发起新的发送尝试。Desktop 不需要为此保持 turn 或轮询。
+  才能发起新的发送尝试。恢复升级前的 outbox 记录时，必须先读取原绑定 task；若相同 objective 已存在于真实 turn，
+  直接清除记录，不得再次发送。Desktop 不需要为此保持 turn 或轮询。
 - 原绑定任务休眠且暂时没有 IPC owner 时，Cat Café 可以用 deep link 原位打开同一个任务并做有界 owner-discovery
-  重试；已有 owner 成功接受消息时不得再用 deep link 抢占当前 Codex 焦点，也不得因此创建替代任务或新会话。
+  重试，但必须在打开前持久化本次 discovery claim，同一条 outbox 记录最多打开一次；已有 owner 成功接受消息时不得
+  再用 deep link 抢占当前 Codex 焦点，也不得因此创建替代任务或新会话。
 - 原 chat 收到继续指令或被用户重新打开后，先调用 `cat_cafe_development_work_read` 读取最新 Resume Packet；禁止沿用
   implementation report 返回时的旧状态。
 - `start_fix_attempt`：先按第 2 节重连并取得递增的 attempt，再处理所有仍 open 且可安全执行的 consensus

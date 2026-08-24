@@ -348,6 +348,7 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
       if (fail) throw new Error('Desktop unavailable');
       delivered.push({ threadId, objective });
     },
+    verifyDesktopTurn: async () => delivered.length > 0,
     openThread: async (threadId) => opened.push(threadId),
   });
   const activation = {
@@ -358,10 +359,10 @@ test('failed Review goal delivery remains in the durable outbox and recovery reu
 
   await launcher.activate(activation);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['bound-thread-f006']);
-  assert.equal(
-    values.get('desktop-development:native-wake:bound-thread-f006'),
-    JSON.stringify({ kind: 'activate', ...activation }),
-  );
+  const persistedActivation = JSON.parse(values.get('desktop-development:native-wake:bound-thread-f006'));
+  assert.equal(typeof persistedActivation.clientUserMessageId, 'string');
+  delete persistedActivation.clientUserMessageId;
+  assert.deepEqual(persistedActivation, { kind: 'activate', ...activation });
 
   fail = false;
   await launcher.recoverPendingActivations();
@@ -416,6 +417,7 @@ test('overlapping recovery passes deliver a pending Desktop turn only once', asy
       markDeliveryStarted();
       await deliveryReleased;
     },
+    verifyDesktopTurn: async () => deliveryCount > 0,
     openThread: async () => {},
   });
 
@@ -427,6 +429,104 @@ test('overlapping recovery passes deliver a pending Desktop turn only once', asy
 
   assert.equal(deliveryCount, 1);
   assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+});
+
+test('recovery clears a legacy activation already visible in the bound task without re-sending it', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const activation = {
+    kind: 'activate',
+    threadId: 'legacy-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  };
+  const values = new Map([['desktop-development:native-wake:legacy-thread-f006', JSON.stringify(activation)]]);
+  const sets = new Map([['desktop-development:pending-native-wakes', new Set(['legacy-thread-f006'])]]);
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  const delivered = [];
+  const opened = [];
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async (...args) => delivered.push(args),
+    verifyDesktopTurn: async () => true,
+    openThread: async (threadId) => opened.push(threadId),
+  });
+
+  await launcher.recoverPendingActivations();
+
+  assert.deepEqual(delivered, []);
+  assert.deepEqual(opened, []);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), []);
+  assert.equal(values.has('desktop-development:native-wake:legacy-thread-f006'), false);
+});
+
+test('a failed dormant-owner discovery deep-links the bound task only once across recovery passes', async () => {
+  const { CodexDesktopTaskLauncher } = await import(
+    '../dist/domains/desktop-development-loop/codex-desktop-task-launcher.js'
+  );
+  const values = new Map();
+  const sets = new Map();
+  const redis = {
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => {
+      values.set(key, value);
+      return 'OK';
+    },
+    del: async (key) => (values.delete(key) ? 1 : 0),
+    sadd: async (key, value) => {
+      const members = sets.get(key) ?? new Set();
+      members.add(value);
+      sets.set(key, members);
+      return 1;
+    },
+    srem: async (key, value) => (sets.get(key)?.delete(value) ? 1 : 0),
+    smembers: async (key) => [...(sets.get(key) ?? [])],
+  };
+  const opened = [];
+  let sends = 0;
+  const launcher = new CodexDesktopTaskLauncher(redis, {
+    recoveryIntervalMs: 0,
+    goalSessionFactory: async () => new FakeNativeSession(),
+    sendDesktopTurn: async () => {
+      sends += 1;
+      if (sends === 2) throw new Error('Desktop transport failed after owner discovery');
+      throw new Error('thread-owner-discovery failed: "no-client-found"');
+    },
+    verifyDesktopTurn: async () => false,
+    openThread: async (threadId) => opened.push(threadId),
+  });
+  const activation = {
+    threadId: 'dormant-thread-f006',
+    sourcePath: '/work/traqen',
+    objective: '[Review 系统消息] Traqen · F006',
+  };
+
+  await launcher.activate(activation);
+  assert.deepEqual(opened, ['dormant-thread-f006']);
+  assert.match(values.get('desktop-development:native-wake:dormant-thread-f006'), /"ownerDiscoveryAttemptedAt":/);
+
+  await launcher.recoverPendingActivations();
+  await launcher.recoverPendingActivations();
+
+  assert.deepEqual(opened, ['dormant-thread-f006']);
+  assert.deepEqual(await redis.smembers('desktop-development:pending-native-wakes'), ['dormant-thread-f006']);
 });
 
 test('an acknowledged Desktop turn is verified without re-sending or stealing focus', async () => {
