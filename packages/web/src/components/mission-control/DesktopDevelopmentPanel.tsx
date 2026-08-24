@@ -71,8 +71,8 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
   const [launchStates, setLaunchStates] = useState<readonly ProjectDevelopmentLaunchState[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
   const [notice, setNotice] = useState<PanelNotice | null>(null);
-  const notifySuccess = (text: string) => setNotice({ kind: 'success', text });
-  const notifyError = (text: string) => setNotice({ kind: 'error', text });
+  const notifySuccess = useCallback((text: string) => setNotice({ kind: 'success', text }), []);
+  const notifyError = useCallback((text: string) => setNotice({ kind: 'error', text }), []);
   const [editingReviewCats, setEditingReviewCats] = useState(false);
   const [reviewerIds, setReviewerIds] = useState<string[]>([]);
   const [reviewRecorderId, setReviewRecorderId] = useState('');
@@ -129,7 +129,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     } finally {
       setWorksLoading(false);
     }
-  }, [project.desktopDevelopment, project.id]);
+  }, [notifyError, project.desktopDevelopment, project.id]);
 
   useEffect(() => {
     setNotice(null);
@@ -157,7 +157,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         notifyError(error instanceof Error ? error.message : '无法打开 Review 会话');
       }
     },
-    [project.id, project.sourcePath, router, setCurrentProject, setCurrentThread, setThreads],
+    [notifyError, project.id, project.sourcePath, router, setCurrentProject, setCurrentThread, setThreads],
   );
 
   const enableAutomaticMerge = async () => {
@@ -506,127 +506,127 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       </div>
 
       {showSettings && (
-      <div className="space-y-4 rounded-lg bg-[var(--console-shell-bg)] p-3">
-      <p className="text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
+        <div className="space-y-4 rounded-lg bg-[var(--console-shell-bg)] p-3">
+          <p className="text-xs text-cafe-secondary">每个功能使用独立的方案与 Review 会话，互不混淆。</p>
 
-      <dl className="console-data-grid">
-        <Info label="Cat Café 项目 ID" value={project.id} />
-        <Info label="GitHub 仓库" value={binding.repository.fullName} />
-        <Info label="默认分支" value={binding.defaultBranch} />
-        <Info label="合入方式" value={binding.mergeMode === 'automatic' ? '自动合入' : 'ChatGPT 会话中人工确认'} />
-        <Info label="人工试点" value={`${pilotCount}/2 次成功`} />
-        <Info
-          label="Push / PR"
-          value={`${binding.allowPush ? '允许' : '禁止'} / ${binding.allowPullRequest ? '允许' : '禁止'}`}
-        />
-        <Info label="协议" value={`v${binding.protocolVersion} · policy ${binding.version}`} />
-      </dl>
+          <dl className="console-data-grid">
+            <Info label="Cat Café 项目 ID" value={project.id} />
+            <Info label="GitHub 仓库" value={binding.repository.fullName} />
+            <Info label="默认分支" value={binding.defaultBranch} />
+            <Info label="合入方式" value={binding.mergeMode === 'automatic' ? '自动合入' : 'ChatGPT 会话中人工确认'} />
+            <Info label="人工试点" value={`${pilotCount}/2 次成功`} />
+            <Info
+              label="Push / PR"
+              value={`${binding.allowPush ? '允许' : '禁止'} / ${binding.allowPullRequest ? '允许' : '禁止'}`}
+            />
+            <Info label="协议" value={`v${binding.protocolVersion} · policy ${binding.version}`} />
+          </dl>
 
-      <div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-semibold text-cafe">默认 Review 猫猫</div>
-          <button
-            type="button"
-            onClick={toggleReviewCatEditor}
-            disabled={busy}
-            className="console-button-secondary disabled:opacity-40"
-          >
-            {editingReviewCats ? '取消配置' : '配置'}
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {binding.defaultReviewers.map((reviewer) => (
-            <span key={reviewer} className="rounded-full bg-[var(--console-hover-bg)] px-3 py-1 text-xs text-cafe">
-              {catNames.get(reviewer) ?? reviewer}
-            </span>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-cafe-secondary">
-          达成共识后，由{' '}
-          <span className="font-medium text-cafe">
-            {catNames.get(binding.defaultReviewRecorder ?? binding.defaultReviewers[0] ?? '') ??
-              binding.defaultReviewRecorder ??
-              binding.defaultReviewers[0]}
-          </span>{' '}
-          提交最终检视意见。
-        </p>
-        {editingReviewCats && (
-          <div className="mt-3 space-y-3 rounded-lg bg-[var(--console-card-bg)] p-3">
-            <fieldset>
-              <legend className="text-xs font-medium text-cafe-secondary">参与 Review（至少两只）</legend>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {configurableReviewCats.map((cat) => {
-                  const selected = reviewerIds.includes(cat.id);
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => toggleReviewer(cat.id)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        selected
-                          ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
-                          : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
-                      }`}
-                    >
-                      {cat.displayName}
-                      {cat.roster?.available === false ? '（当前不可用）' : ''}
-                    </button>
-                  );
-                })}
-                {missingReviewerIds.map((reviewerId) => (
-                  <button
-                    key={reviewerId}
-                    type="button"
-                    aria-pressed="true"
-                    onClick={() => toggleReviewer(reviewerId)}
-                    className="rounded-full bg-[var(--mc-accent)] px-3 py-1 text-xs font-medium text-[var(--cafe-surface)]"
-                  >
-                    {reviewerId}（当前不可用）
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            <label className="block">
-              <span className="text-xs font-medium text-cafe-secondary">默认提交检视意见猫猫</span>
-              <select
-                value={reviewRecorderId}
-                onChange={(event) => setReviewRecorderId(event.target.value)}
-                className="mt-1 w-full rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-cafe">默认 Review 猫猫</div>
+              <button
+                type="button"
+                onClick={toggleReviewCatEditor}
+                disabled={busy}
+                className="console-button-secondary disabled:opacity-40"
               >
-                {reviewerIds.map((reviewerId) => (
-                  <option key={reviewerId} value={reviewerId}>
-                    {catNames.get(reviewerId) ?? reviewerId}
-                  </option>
-                ))}
-              </select>
-              <span className="mt-1 block text-micro text-cafe-secondary">
-                这只猫猫也必须参与 Review，才能依据完整讨论提交共识。
-              </span>
-            </label>
+                {editingReviewCats ? '取消配置' : '配置'}
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {binding.defaultReviewers.map((reviewer) => (
+                <span key={reviewer} className="rounded-full bg-[var(--console-hover-bg)] px-3 py-1 text-xs text-cafe">
+                  {catNames.get(reviewer) ?? reviewer}
+                </span>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-cafe-secondary">
+              达成共识后，由{' '}
+              <span className="font-medium text-cafe">
+                {catNames.get(binding.defaultReviewRecorder ?? binding.defaultReviewers[0] ?? '') ??
+                  binding.defaultReviewRecorder ??
+                  binding.defaultReviewers[0]}
+              </span>{' '}
+              提交最终检视意见。
+            </p>
+            {editingReviewCats && (
+              <div className="mt-3 space-y-3 rounded-lg bg-[var(--console-card-bg)] p-3">
+                <fieldset>
+                  <legend className="text-xs font-medium text-cafe-secondary">参与 Review（至少两只）</legend>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {configurableReviewCats.map((cat) => {
+                      const selected = reviewerIds.includes(cat.id);
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => toggleReviewer(cat.id)}
+                          className={`rounded-full px-3 py-1 text-xs font-medium ${
+                            selected
+                              ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                              : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
+                          }`}
+                        >
+                          {cat.displayName}
+                          {cat.roster?.available === false ? '（当前不可用）' : ''}
+                        </button>
+                      );
+                    })}
+                    {missingReviewerIds.map((reviewerId) => (
+                      <button
+                        key={reviewerId}
+                        type="button"
+                        aria-pressed="true"
+                        onClick={() => toggleReviewer(reviewerId)}
+                        className="rounded-full bg-[var(--mc-accent)] px-3 py-1 text-xs font-medium text-[var(--cafe-surface)]"
+                      >
+                        {reviewerId}（当前不可用）
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="block">
+                  <span className="text-xs font-medium text-cafe-secondary">默认提交检视意见猫猫</span>
+                  <select
+                    value={reviewRecorderId}
+                    onChange={(event) => setReviewRecorderId(event.target.value)}
+                    className="mt-1 w-full rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                  >
+                    {reviewerIds.map((reviewerId) => (
+                      <option key={reviewerId} value={reviewerId}>
+                        {catNames.get(reviewerId) ?? reviewerId}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-micro text-cafe-secondary">
+                    这只猫猫也必须参与 Review，才能依据完整讨论提交共识。
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void saveReviewCats()}
+                  disabled={busy || reviewerIds.length < 2 || !reviewerIds.includes(reviewRecorderId)}
+                  className="console-button-primary disabled:opacity-40"
+                >
+                  {busy ? '保存中...' : '保存 Review 配置'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {pilotCount >= 2 && binding.mergeMode === 'manual_confirm_in_chatgpt' && (
             <button
               type="button"
-              onClick={() => void saveReviewCats()}
-              disabled={busy || reviewerIds.length < 2 || !reviewerIds.includes(reviewRecorderId)}
-              className="console-button-primary disabled:opacity-40"
+              onClick={() => void enableAutomaticMerge()}
+              disabled={busy}
+              className="console-button-secondary disabled:opacity-40"
             >
-              {busy ? '保存中...' : '保存 Review 配置'}
+              为此项目启用自动合入
             </button>
-          </div>
-        )}
-      </div>
-
-      {pilotCount >= 2 && binding.mergeMode === 'manual_confirm_in_chatgpt' && (
-        <button
-          type="button"
-          onClick={() => void enableAutomaticMerge()}
-          disabled={busy}
-          className="console-button-secondary disabled:opacity-40"
-        >
-          为此项目启用自动合入
-        </button>
-      )}
-      </div>
+          )}
+        </div>
       )}
 
       {!worksLoading && (
@@ -726,201 +726,206 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                 )}
               </button>
               {expanded && (
-              <div className="mt-1 space-y-1">
-              <div
-                className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
-                data-testid={`desktop-window-binding-${launchState.backlogItemId}`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-micro text-cafe-secondary">绑定的 ChatGPT Desktop 窗口</span>
-                  <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
-                    {launchState.desktopBinding
-                      ? `${describeSessionStatus(launchState.desktopBinding.status)} · 绑定代次 ${launchState.desktopBinding.bindingEpoch}`
-                      : launchState.desktopTask?.status === 'created'
-                        ? '窗口已创建 · 等待绑定'
-                        : '未绑定'}
-                  </span>
-                </div>
-                <div className="mt-1 break-all font-mono text-xs text-cafe" title={windowRef}>
-                  {windowRef ?? '启动该功能后，将创建或绑定它自己的 Desktop 窗口'}
-                </div>
-              </div>
-              {work && (
-                <div className="mt-2 space-y-1 text-micro text-cafe-secondary">
-                  <div>
-                    交付 #{work.deliveryCycleNumber} · 实现 #{work.attemptNumber}：{work.branch} ·{' '}
-                    {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
-                  </div>
-                  <div>
-                    方案：
-                    {work.designBranch && work.designExactSha
-                      ? `${work.designBranch}@${work.designExactSha.slice(0, 12)}`
-                      : '未配置（请到功能列表绑定项目共用方案分支）'}
-                    {work.reviewDesignExactSha && work.reviewDesignExactSha !== work.designExactSha
-                      ? ` · 本轮 Review 基于 ${work.reviewDesignExactSha.slice(0, 12)}`
-                      : ''}
-                  </div>
-                  <div>设计文档：{work.designDocuments.length > 0 ? work.designDocuments.join('、') : '未指定'}</div>
-                </div>
-              )}
-              {work && (
-                <DesktopDevelopmentWorkflowGraph
-                  work={work}
-                  retrying={retryingWorkId === work.workId}
-                  onRetry={() => void retryCurrentStage(work)}
-                  onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
-                  defaultCollapsed={false}
-                />
-              )}
-              {work && work.openFindings.length > 0 && (
-                <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
-              )}
-              {work?.architectureDecisionPending && (
-                <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
-                  <p className="text-xs font-medium text-cafe">Review 与方案分支出现重大分歧，需要你的决策</p>
-                  {work.openFindings
-                    .filter(
-                      (finding) => finding.scope === 'architecture_decision' && !finding.architectureDecisionRecorded,
-                    )
-                    .map((finding) => (
-                      <div key={finding.findingId} className="space-y-2 border-t border-[var(--console-hover-bg)] pt-2">
-                        <p className="text-xs text-cafe-secondary">
-                          {finding.severity} · {finding.summary}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void recordArchitectureDecision(work, finding.findingId, 'keep_original_plan')
-                            }
-                            disabled={reviewDecisionKey !== null}
-                            className="console-button-secondary disabled:opacity-40"
-                          >
-                            保持当前方案分支
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void recordArchitectureDecision(work, finding.findingId, 'approve_plan_change')
-                            }
-                            disabled={reviewDecisionKey !== null}
-                            className="console-button-primary disabled:opacity-40"
-                          >
-                            方案分支已更新，继续
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-              {work?.reviewContinuationPending && (
-                <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3">
-                  <p className="text-xs text-cafe-secondary">
-                    已达到本组 {work.reviewAttemptLimit} 次 Review 上限。只有你批准后，才会继续下一组 Review。
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void approveReviewContinuation(work)}
-                    disabled={reviewDecisionKey !== null}
-                    className="console-button-primary mt-2 disabled:opacity-40"
+                <div className="mt-1 space-y-1">
+                  <div
+                    className="mt-2 rounded-lg bg-[var(--console-card-bg)] px-3 py-2"
+                    data-testid={`desktop-window-binding-${launchState.backlogItemId}`}
                   >
-                    批准继续 Review
-                  </button>
-                </div>
-              )}
-              {work?.reviewPhase === 'consensus_ready' && (
-                <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
-                  <p className="text-xs font-medium text-cafe">Review 共识需要时可由你裁决</p>
-                  {work.consensusAuthorization ? (
-                    <>
-                      <p className="text-xs text-cafe-secondary">
-                        你已介入并授权，当前正在等待原共识记录猫提交最终检视意见；不会新增 reviewer。
-                      </p>
-                      <div className="whitespace-pre-wrap rounded-lg bg-[var(--console-shell-bg)] px-3 py-2 text-xs text-cafe">
-                        {work.consensusAuthorization.instruction}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-micro text-cafe-secondary">绑定的 ChatGPT Desktop 窗口</span>
+                      <span className="rounded-full bg-[var(--console-hover-bg)] px-2 py-1 text-micro text-cafe-secondary">
+                        {launchState.desktopBinding
+                          ? `${describeSessionStatus(launchState.desktopBinding.status)} · 绑定代次 ${launchState.desktopBinding.bindingEpoch}`
+                          : launchState.desktopTask?.status === 'created'
+                            ? '窗口已创建 · 等待绑定'
+                            : '未绑定'}
+                      </span>
+                    </div>
+                    <div className="mt-1 break-all font-mono text-xs text-cafe" title={windowRef}>
+                      {windowRef ?? '启动该功能后，将创建或绑定它自己的 Desktop 窗口'}
+                    </div>
+                  </div>
+                  {work && (
+                    <div className="mt-2 space-y-1 text-micro text-cafe-secondary">
+                      <div>
+                        交付 #{work.deliveryCycleNumber} · 实现 #{work.attemptNumber}：{work.branch} ·{' '}
+                        {work.currentSha.slice(0, 12)} · {describeWorkState(work)}
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-xs leading-relaxed text-cafe-secondary">
-                        仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round
-                        与精确提交；不会绕过后续合入确认和最终验收。
+                      <div>
+                        方案：
+                        {work.designBranch && work.designExactSha
+                          ? `${work.designBranch}@${work.designExactSha.slice(0, 12)}`
+                          : '未配置（请到功能列表绑定项目共用方案分支）'}
+                        {work.reviewDesignExactSha && work.reviewDesignExactSha !== work.designExactSha
+                          ? ` · 本轮 Review 基于 ${work.reviewDesignExactSha.slice(0, 12)}`
+                          : ''}
+                      </div>
+                      <div>
+                        设计文档：{work.designDocuments.length > 0 ? work.designDocuments.join('、') : '未指定'}
+                      </div>
+                    </div>
+                  )}
+                  {work && (
+                    <DesktopDevelopmentWorkflowGraph
+                      work={work}
+                      retrying={retryingWorkId === work.workId}
+                      onRetry={() => void retryCurrentStage(work)}
+                      onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
+                      defaultCollapsed={false}
+                    />
+                  )}
+                  {work && work.openFindings.length > 0 && (
+                    <p className="mt-2 text-xs text-cafe-secondary">待修复 findings：{work.openFindings.length}</p>
+                  )}
+                  {work?.architectureDecisionPending && (
+                    <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
+                      <p className="text-xs font-medium text-cafe">Review 与方案分支出现重大分歧，需要你的决策</p>
+                      {work.openFindings
+                        .filter(
+                          (finding) =>
+                            finding.scope === 'architecture_decision' && !finding.architectureDecisionRecorded,
+                        )
+                        .map((finding) => (
+                          <div
+                            key={finding.findingId}
+                            className="space-y-2 border-t border-[var(--console-hover-bg)] pt-2"
+                          >
+                            <p className="text-xs text-cafe-secondary">
+                              {finding.severity} · {finding.summary}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void recordArchitectureDecision(work, finding.findingId, 'keep_original_plan')
+                                }
+                                disabled={reviewDecisionKey !== null}
+                                className="console-button-secondary disabled:opacity-40"
+                              >
+                                保持当前方案分支
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void recordArchitectureDecision(work, finding.findingId, 'approve_plan_change')
+                                }
+                                disabled={reviewDecisionKey !== null}
+                                className="console-button-primary disabled:opacity-40"
+                              >
+                                方案分支已更新，继续
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                  {work?.reviewContinuationPending && (
+                    <div className="mt-3 rounded-lg bg-[var(--console-card-bg)] p-3">
+                      <p className="text-xs text-cafe-secondary">
+                        已达到本组 {work.reviewAttemptLimit} 次 Review 上限。只有你批准后，才会继续下一组 Review。
                       </p>
-                      <label className="block">
-                        <span className="text-micro font-medium text-cafe-secondary">你的最终裁决意见</span>
-                        <textarea
-                          value={consensusInstructions[work.workId] ?? ''}
-                          onChange={(event) =>
-                            setConsensusInstructions((current) => ({
-                              ...current,
-                              [work.workId]: event.target.value,
-                            }))
-                          }
-                          maxLength={2000}
-                          rows={4}
-                          placeholder="例如：采纳 GPT 的第 2–5 项；驳回 Kimi 的第 1 项，理由是……"
-                          className="mt-1 w-full resize-y rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-shell-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
-                        />
-                      </label>
                       <button
                         type="button"
-                        onClick={() => void authorizeReviewConsensus(work)}
-                        disabled={reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()}
+                        onClick={() => void approveReviewContinuation(work)}
+                        disabled={reviewDecisionKey !== null}
+                        className="console-button-primary mt-2 disabled:opacity-40"
+                      >
+                        批准继续 Review
+                      </button>
+                    </div>
+                  )}
+                  {work?.reviewPhase === 'consensus_ready' && (
+                    <div className="mt-3 space-y-2 rounded-lg bg-[var(--console-card-bg)] p-3">
+                      <p className="text-xs font-medium text-cafe">Review 共识需要时可由你裁决</p>
+                      {work.consensusAuthorization ? (
+                        <>
+                          <p className="text-xs text-cafe-secondary">
+                            你已介入并授权，当前正在等待原共识记录猫提交最终检视意见；不会新增 reviewer。
+                          </p>
+                          <div className="whitespace-pre-wrap rounded-lg bg-[var(--console-shell-bg)] px-3 py-2 text-xs text-cafe">
+                            {work.consensusAuthorization.instruction}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs leading-relaxed text-cafe-secondary">
+                            仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round
+                            与精确提交；不会绕过后续合入确认和最终验收。
+                          </p>
+                          <label className="block">
+                            <span className="text-micro font-medium text-cafe-secondary">你的最终裁决意见</span>
+                            <textarea
+                              value={consensusInstructions[work.workId] ?? ''}
+                              onChange={(event) =>
+                                setConsensusInstructions((current) => ({
+                                  ...current,
+                                  [work.workId]: event.target.value,
+                                }))
+                              }
+                              maxLength={2000}
+                              rows={4}
+                              placeholder="例如：采纳 GPT 的第 2–5 项；驳回 Kimi 的第 1 项，理由是……"
+                              className="mt-1 w-full resize-y rounded-lg border-transparent bg-[var(--console-field-bg,var(--console-shell-bg))] px-3 py-2 text-xs text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void authorizeReviewConsensus(work)}
+                            disabled={reviewDecisionKey !== null || !(consensusInstructions[work.workId] ?? '').trim()}
+                            className="console-button-primary disabled:opacity-40"
+                          >
+                            授权记录猫按此提交
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {work?.acceptancePending && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void recordAcceptance(work, true)}
+                        disabled={acceptingWorkId === work.workId}
                         className="console-button-primary disabled:opacity-40"
                       >
-                        授权记录猫按此提交
+                        验收通过
                       </button>
-                    </>
+                      <button
+                        type="button"
+                        onClick={() => void recordAcceptance(work, false)}
+                        disabled={acceptingWorkId === work.workId}
+                        className="console-button-secondary disabled:opacity-40"
+                      >
+                        验收未通过
+                      </button>
+                    </div>
+                  )}
+                  {(launchState.status === 'rejected' || launchState.status === 'completed') && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void startNextDeliveryCycle(launchState)}
+                        disabled={startingDeliveryItemId === launchState.backlogItemId}
+                        className="console-button-primary disabled:opacity-40"
+                        data-testid={`desktop-next-delivery-${launchState.backlogItemId}`}
+                      >
+                        {startingDeliveryItemId === launchState.backlogItemId
+                          ? '开启中...'
+                          : launchState.status === 'rejected'
+                            ? '从返工入口开启'
+                            : '从方案变更入口开启'}
+                      </button>
+                      <span className="text-micro text-cafe-secondary">
+                        复用本功能的方案、Review 与 Desktop 窗口；上一轮证据不会被覆盖。
+                      </span>
+                    </div>
                   )}
                 </div>
-              )}
-              {work?.acceptancePending && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void recordAcceptance(work, true)}
-                    disabled={acceptingWorkId === work.workId}
-                    className="console-button-primary disabled:opacity-40"
-                  >
-                    验收通过
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void recordAcceptance(work, false)}
-                    disabled={acceptingWorkId === work.workId}
-                    className="console-button-secondary disabled:opacity-40"
-                  >
-                    验收未通过
-                  </button>
-                </div>
-              )}
-              {(launchState.status === 'rejected' || launchState.status === 'completed') && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void startNextDeliveryCycle(launchState)}
-                    disabled={startingDeliveryItemId === launchState.backlogItemId}
-                    className="console-button-primary disabled:opacity-40"
-                    data-testid={`desktop-next-delivery-${launchState.backlogItemId}`}
-                  >
-                    {startingDeliveryItemId === launchState.backlogItemId
-                      ? '开启中...'
-                      : launchState.status === 'rejected'
-                        ? '从返工入口开启'
-                        : '从方案变更入口开启'}
-                  </button>
-                  <span className="text-micro text-cafe-secondary">
-                    复用本功能的方案、Review 与 Desktop 窗口；上一轮证据不会被覆盖。
-                  </span>
-                </div>
-              )}
-              </div>
               )}
             </article>
           );
         })}
       </div>
-
     </section>
   );
 }

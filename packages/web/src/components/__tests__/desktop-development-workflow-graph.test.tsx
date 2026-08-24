@@ -115,7 +115,16 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('shows both entries, the implementation/Review loop, and the active server node', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
+    act(() =>
+      root.render(
+        <DesktopDevelopmentWorkflowGraph
+          work={packet()}
+          retrying={false}
+          onRetry={() => {}}
+          defaultCollapsed={false}
+        />,
+      ),
+    );
 
     expect(container.textContent).toContain('本轮入口：方案新增 / 变更');
     expect(container.textContent).toContain('方案新增 / 方案变更');
@@ -140,7 +149,16 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('uses measured return rails and keeps inactive route text readable', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
+    act(() =>
+      root.render(
+        <DesktopDevelopmentWorkflowGraph
+          work={packet()}
+          retrying={false}
+          onRetry={() => {}}
+          defaultCollapsed={false}
+        />,
+      ),
+    );
 
     const rails = container.querySelector('[data-testid="workflow-return-rails"]');
     expect(rails?.getAttribute('preserveAspectRatio')).toBeNull();
@@ -157,7 +175,16 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
   });
 
   it('previews a node on focus and opens a persistent detail dialog on click', () => {
-    act(() => root.render(<DesktopDevelopmentWorkflowGraph work={packet()} retrying={false} onRetry={() => {}} defaultCollapsed={false} />));
+    act(() =>
+      root.render(
+        <DesktopDevelopmentWorkflowGraph
+          work={packet()}
+          retrying={false}
+          onRetry={() => {}}
+          defaultCollapsed={false}
+        />,
+      ),
+    );
 
     const implementation = container.querySelector<HTMLButtonElement>(
       '[data-testid="workflow-graph-node-implementation"]',

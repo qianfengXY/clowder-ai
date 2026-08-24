@@ -81,7 +81,7 @@ export function WorkflowStepper({ work }: { work: DesktopDevelopmentResumePacket
   const steps = deriveSteps(work);
   const current = steps.find((step) => step.status === 'blocked') ?? steps.find((step) => step.status === 'active');
   return (
-    <div
+    <section
       className="flex items-center gap-1 overflow-x-auto"
       data-testid="workflow-stepper"
       aria-label={current ? `开发闭环进度，当前停在${current.label}` : '开发闭环进度'}
@@ -108,6 +108,6 @@ export function WorkflowStepper({ work }: { work: DesktopDevelopmentResumePacket
           </span>
         </div>
       ))}
-    </div>
+    </section>
   );
 }

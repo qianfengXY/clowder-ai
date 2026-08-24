@@ -130,11 +130,7 @@ export function PendingDecisionQueue({
                   </button>
                 )}
                 {(item.kind === 'architecture' || item.kind === 'consensus') && (
-                  <button
-                    type="button"
-                    onClick={() => onJump(item.backlogItemId)}
-                    className="console-button-secondary"
-                  >
+                  <button type="button" onClick={() => onJump(item.backlogItemId)} className="console-button-secondary">
                     去处理
                   </button>
                 )}
