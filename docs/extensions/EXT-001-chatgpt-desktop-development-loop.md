@@ -26,11 +26,11 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 6. 每个导入功能只有一个方案分支绑定、一个方案讨论会话和一个 Review 会话。每次新实现在该功能 Review 会话中创建新的 ReviewRound，不创建新的可见会话窗口。
 7. CodeX 与 Kimi 对同一完整实现 SHA、同一完整方案 SHA 先独立 Review，再交叉印证；只有 barrier 打开后的共识 finding 会交给 Desktop。
 8. ChatGPT 原实现会话读取 finding、修复、提交新 SHA；每次任务通知都重申方案分支精确提交，新实现 SHA 必须重新完成完整 ReviewRound，直到零 open finding。
-9. 项目前两次成功试点必须由用户在当前 ChatGPT 会话中确认合入。只有“已合入且最终验收通过”才增加成功试点计数。
-10. 两次成功试点后，项目自动切换为自动合入；exact-SHA、零 finding、检查与分支策略门禁不变，最终产品验收仍始终由用户完成。
-11. 验收不通过时，同一项目和功能 Review 会话开启新的 delivery cycle，保留上一轮证据，不重建整个上下文。
-12. Mission Hub 为每个功能展示当前 Attempt 的完整链路：方案提交、Desktop 实现、独立检视、交叉检视、共识、修复交接/合入、最终验收；只有服务端确认状态迁移后节点才显示完成。
-13. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过方案 SHA、实现 exact-SHA Review、方案分歧、15 轮续审或最终验收，也不得创建平行 work/attempt/round。
+9. Review 对当前 exact SHA 清零且 checks 通过后，Mission Hub 先展示“同意合入 / 拒绝合入”，此时 main 尚未变化。
+10. 用户同意后，Cat Café 持久化本轮验收证据并唤醒原 ChatGPT Desktop 窗口；Desktop 重新读取 legal action、原生合入 main 并回报 merge receipt 后，work 才进入 `accepted`，成功试点计数才幂等增加。
+11. 用户拒绝后，本轮不得合入；同一 work、功能 Review 会话和 Desktop 窗口进入递增的新 attempt，新 SHA 必须重新完成完整 ReviewRound。
+12. Mission Hub 为每个功能展示当前 Attempt 的完整链路：方案提交、Desktop 实现、独立检视、交叉检视、共识、修复交接、合入验收、合入 main；只有服务端确认状态迁移后节点才显示完成。
+13. 当前节点停滞时，用户可以从链路上重新投递该节点的合法动作。重投不得跳过方案 SHA、实现 exact-SHA Review、方案分歧、15 轮续审或合入验收，也不得创建平行 work/attempt/round。
 14. 当现有 reviewer 无法形成共识时，不引入第三 reviewer。用户可在 Mission Hub 给出最终裁决，并授权原共识记录猫在同一 round、同一 exact SHA 上提交最终检视意见。
 
 ## 角色边界
@@ -39,7 +39,7 @@ tips_exempt: activation-bound Desktop capability; the user must explicitly enabl
 |---|---|---|
 | Cat Café 猫猫 | 需求/方案、Feature Doc/ADR、只读代码检视、运行既有检查、独立 finding、交叉共识 | 代替 Desktop 实现产品代码；作者自审；独立阶段互看草稿 |
 | ChatGPT Desktop developer | worktree、实现/测试、commit/push/PR、修复 finding、满足 gate 后合入 | 作为自身代码 reviewer；改写猫猫私有草稿；绕过 exact-SHA gate |
-| 用户 | 绑定项目、配置自动化、裁决无法收敛的 Review 分歧、前两次合入确认、最终验收、必要时重新绑定会话 | 被迫手工搬运每轮 Review 的文本或重复创建窗口 |
+| 用户 | 绑定项目、配置自动化、裁决无法收敛的 Review 分歧、对每轮 exact SHA 同意或拒绝合入、必要时重新绑定会话 | 被迫手工搬运每轮 Review 的文本或重复创建窗口 |
 
 Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop-dev`），它永远不具备 reviewer 资格。
 
@@ -61,13 +61,14 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 - Cat Café thread 软删除只影响可见性；恢复后继续显示同一个 Hub。
 - worktree 丢失时仅从最后一个已 commit（及按策略已 push）的 SHA 恢复；未提交内容不声称可恢复。
 
-### 自动合入试点
+### 合入验收与兼容试点计数
 
 - `successfulManualPilotCount` 为项目级持久状态，范围 `0..2`。
-- 计数只在该 delivery cycle 已合入且用户最终验收为 `accepted` 后增加，幂等且最多一次。
+- 计数只在该 delivery cycle 先由用户验收通过、随后收到匹配 merge receipt 并进入 `accepted` 后增加，幂等且最多一次。
 - 当计数 `< 2` 时，`mergeMode` 必须是 `manual_confirm_in_chatgpt`。
-- 达到 `2` 的同一原子更新会把 `mergeMode` 自动切换为 `automatic`，不再要求第三次人工开关。
-- 自动合入仍要求：最新 exact SHA Review 通过、历史 finding 全闭环、分支/检查/仓库策略允许。
+- 达到 `2` 的同一原子更新仍把兼容字段 `mergeMode` 切换为 `automatic`，但不取消后续每轮的合入验收。
+- `mergeMode` 与前两次 pilot 继续作为历史兼容/观测字段，但不再绕过用户门禁；每个新 delivery cycle 都先等待用户对当前 exact SHA 同意或拒绝合入。
+- 合入始终要求：最新 exact SHA Review 通过、历史 finding 全闭环、用户验收通过、分支/检查/仓库策略允许。
 - deploy 和生产数据变更始终不属于本功能。
 
 ### 有界、方案约束的 Review 循环
@@ -77,7 +78,7 @@ Desktop developer 使用独立 external actor（初始保留名 `chatgpt-desktop
 - 严重架构问题只能作为 P1 `architecture_decision` finding 提交。Cat Café 暂停 Review 并上报用户；用户与猫猫可以继续在会话中讨论，但只有修改并提交方案分支后，才能选择“方案分支已更新，继续”。保持原方案则要求分支仍指向本轮方案 SHA。决定作为 managed-work evidence 持久化后才可继续实现与 Review。
 - 初始允许 attempt 1–15。第 15 次 Review 后仍有 open finding 时，Cat Café 进入 `awaiting_review_continuation`，由用户批准后再开放下一组 15 次；禁止后台无限唤醒 Desktop。
 - 历史 round 缺少新字段时只按 `plan_conformance` 兼容读取；若功能已有有效方案分支，则以其当前精确提交补充 `designRef`，否则停在方案分支配置门禁。不得把讨论会话或旧 P1 追溯解释为方案权威，也不从 Review 证据猜测设计。
-- 两名 reviewer 在交叉检视后仍无法收敛时，round 保持 `consensus_ready`。用户裁决以 append-only `review_consensus_authorized` 证据绑定 `reviewRoundId + exactSha`；原 recorder 只能据此整理并发布共识，不得新增 reviewer。该授权只解决分歧，不绕过 merge confirmation 或 final acceptance。
+- 两名 reviewer 在交叉检视后仍无法收敛时，round 保持 `consensus_ready`。用户裁决以 append-only `review_consensus_authorized` 证据绑定 `reviewRoundId + exactSha`；原 recorder 只能据此整理并发布共识，不得新增 reviewer。该授权只解决分歧，不绕过合入验收。
 
 ## Stateful Object Census
 
@@ -108,9 +109,10 @@ awaiting_design_branch
   -> awaiting_architecture_decision -> design branch commit -> fix_required
   -> awaiting_review_continuation (attempt 15/30/45...) -> fix_required
   -> approved_for_merge
-  -> awaiting_manual_merge_confirmation | auto_merge_ready
   -> acceptance_pending
-  -> accepted | rejected -> design_ready (new delivery cycle)
+  -> rejected decision -> fix_required (new attempt / new SHA / new round)
+  -> accepted decision -> auto_merge_ready
+  -> merge receipt -> accepted
 ```
 
 Mission Hub 把这个生命周期投影为当前 Attempt 的有序节点，而不是创建第二份状态机。节点使用
@@ -134,7 +136,7 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
 3. 每个 Review 阶段面向用户的回复统一采用同一份基础表格协议：阶段摘要表 + 检视意见明细表；方案含用户交互时增加用户旅程验证表。GPT、Kimi 与后续 reviewer 不得自行改列或退回纯文字；无 finding 也必须保留一行“通过”。明细表只显示从 `1` 开始的短序号，完整 finding ID 仅用于 callback。独立检视表只包含当前 reviewer 自己的内容，barrier 规则不因展示格式而放宽。
 4. Review 至少两名非作者，独立阶段草稿不可互见；barrier 原子打开。
 5. 任意代码、测试或配置 delta 都使旧 round stale；修复后必须用新 full SHA 开新 round。
-6. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过且历史共识 finding 全关闭。
+6. `openFindingCount > 0` 必须回到修复；merge 只允许最新 SHA 通过、历史共识 finding 全关闭且用户已对该 SHA 验收通过。
 6. session/transition/evidence 写入同时验证 actor、项目 scope、expected version、binding epoch 与 idempotency key。
 7. Resume Packet 是 server-derived projection，不能包含凭据、私有 reviewer draft 或可从远端滥用的本地绝对路径。
 8. MCP 不暴露 shell、任意文件写、Git push/merge 或 deploy；Desktop 通过自身本地工具完成 repo mutation。
@@ -155,8 +157,8 @@ whole-work attempt/terminal 语义仍由 F275 拥有。若 named-consumer port �
   新 attempt；返回递增的 `attemptNumber`，不新增第八个 lifecycle 工具或 EXT-001 私有 attempt ledger。
 - `cat_cafe_development_work_heartbeat`：刷新 committed workspace metadata；不承担续租。
 - `cat_cafe_development_implementation_report`：报告 committed exact SHA 并在当前 backlog 功能的 Review 会话触发新 round。
-- `cat_cafe_development_merge_confirmation_record`：记录前两次试点中当前 chat 的用户确认；不执行 Git。
-- `cat_cafe_development_merge_report`：记录 Desktop 原生 Git 已产生的 merge receipt；不执行 Git。
+- `cat_cafe_development_merge_confirmation_record`：仅兼容升级前已返回 `request_merge_confirmation` 的在途 protocol-v1 packet；不能替代 Cat Café 合入验收。
+- `cat_cafe_development_merge_report`：在 Cat Café 已记录合入验收后，记录 Desktop 原生 Git 产生的 merge receipt，并完成 work；不执行 Git。
 
 Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-scoped 工具完成 private draft、barrier、cross-review 与 consensus。F211 的 `antigravity-desktop` Cat session registry 不承载 `chatgpt-desktop-dev` external actor，避免伪造 `CatId`、agent-key principal 或 Antigravity provenance。
 
@@ -203,10 +205,10 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 
 ### Merge / acceptance
 
-- [x] AC-M1: 前两次成功试点必须在当前 ChatGPT binding 中取得用户确认；没有确认 token/evidence 时 merge 不可执行。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`）
-- [x] AC-M2: pilot count 只在 merge + final acceptance 后幂等增加；rejected/aborted cycle 不计数。（`desktop-development-loop-service.test.js`、`managed-work-consumer-port.test.js`）
-- [x] AC-M3: 第二次成功验收会自动切换 auto-merge；自动合入仍受 exact-SHA/review/check/branch policy gate。（`external-project-store.test.js`、`desktop-development-loop-service.test.js`、`review-round-store.test.js`）
-- [x] AC-M4: merge 后进入 `acceptance_pending`；只有用户验收可进入 `accepted`，拒绝开启新的 delivery cycle。（`desktop-development-loop-service.test.js`、`managed-work-consumer-port.test.js`、`desktop-development-form.test.ts`）
+- [x] AC-M1: 当前 exact SHA Review 清零后先进入 `acceptance_pending`；没有 Cat Café 用户验收通过证据时 merge report 被拒绝。（`desktop-development-loop-service.test.js`、`desktop-development-loop-routes.test.js`）
+- [x] AC-M2: 用户同意会幂等唤醒原 ChatGPT Desktop 窗口；只有匹配 merge receipt 才进入 `accepted` 并增加一次 pilot count。（`desktop-development-loop-service.test.js`、`managed-work-consumer-port.test.js`）
+- [x] AC-M3: 用户拒绝时不产生 merge，work 保持 active，并在同一 delivery cycle 创建递增的新 attempt；新 SHA 必须重新 Review。（`desktop-development-loop-service.test.js`、`desktop-development-form.test.ts`）
+- [x] AC-M4: 历史 pilot/auto-merge 字段继续兼容，但任何新 delivery cycle 都不能绕过当前 SHA 的同意/拒绝门禁；旧版已合入但待验收记录仍可完成终态迁移。（`external-project-store.test.js`、`desktop-development-loop-service.test.js`）
 
 ### Security / compatibility
 
@@ -222,7 +224,7 @@ Review 猫仍运行在 full profile，通过 7 个 `cat_cafe_review_*` callback-
 3. **Managed work port**：接通 F275 ordered attempt/evidence/terminal 接口；不可用时 fail closed。
 4. **Review coordinator**：F253 durable round、private barrier、consensus/finding closure。
 5. **Strict MCP + Desktop skill**：治理 profile、executor skill、Scheduled Task 幂等 polling/recovery。
-6. **Pilot rollout**：两个按项目计数的人工合入/验收试点，第二次成功后自动切换 auto-merge。
+6. **Pilot rollout**：保留两个按项目计数的兼容试点；所有新轮次统一使用“Review → 合入验收 → Desktop 合入”。
 
 ## Non-goals
 

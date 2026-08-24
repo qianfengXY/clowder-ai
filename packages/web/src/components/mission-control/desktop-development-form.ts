@@ -40,7 +40,7 @@ type AcceptanceResumePacket = Pick<
 >;
 
 export function buildDesktopAcceptanceRequest(work: AcceptanceResumePacket, accepted: boolean) {
-  if (!work.acceptancePending) throw new Error('Work is not awaiting final acceptance');
+  if (!work.acceptancePending) throw new Error('Work is not awaiting merge acceptance');
   return {
     protocolVersion: work.protocolVersion,
     attemptId: work.attemptId,
@@ -53,13 +53,7 @@ export function buildDesktopAcceptanceRequest(work: AcceptanceResumePacket, acce
 
 type ConsensusAuthorizationResumePacket = Pick<
   DesktopDevelopmentResumePacket,
-  | 'protocolVersion'
-  | 'workId'
-  | 'attemptId'
-  | 'managedWorkVersion'
-  | 'currentSha'
-  | 'reviewRoundId'
-  | 'reviewPhase'
+  'protocolVersion' | 'workId' | 'attemptId' | 'managedWorkVersion' | 'currentSha' | 'reviewRoundId' | 'reviewPhase'
 >;
 
 export function buildDesktopConsensusAuthorizationRequest(

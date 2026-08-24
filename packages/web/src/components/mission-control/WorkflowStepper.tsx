@@ -38,8 +38,8 @@ function deriveSteps(work: DesktopDevelopmentResumePacket): StepDescriptor[] {
     { key: 'implementation', label: '实现', status: nodeStatus(nodes, 'implementation') },
     { key: 'review', label: 'Review', status: aggregateReviewStatus(nodes) },
     { key: 'handoff', label: '清零门', status: nodeStatus(nodes, 'handoff') },
-    { key: 'merge', label: '合入', status: nodeStatus(nodes, 'merge') },
     { key: 'acceptance', label: '验收', status: acceptanceStatus },
+    { key: 'merge', label: '合入', status: nodeStatus(nodes, 'merge') },
   ];
 }
 
@@ -74,7 +74,7 @@ function stepLabelClass(status: StepStatus): string {
 /**
  * 方案 A · 批次 4 — 开发闭环横向 Stepper。
  *
- * 功能卡片折叠态的一行式流程概览：入口 → 实现 → Review → 清零门 → 合入 → 验收。
+ * 功能卡片折叠态的一行式流程概览：入口 → 实现 → Review → 清零门 → 验收 → 合入。
  * 完整泳道图在卡片展开后由 DesktopDevelopmentWorkflowGraph 呈现。
  */
 export function WorkflowStepper({ work }: { work: DesktopDevelopmentResumePacket }) {

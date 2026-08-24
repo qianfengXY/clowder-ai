@@ -765,7 +765,7 @@ function buildInitialObjective(input: DesktopTaskLaunchInput, runtimeSessionId: 
     '先从当前 Git workspace 验证仓库，再通过 Cat Café development-loop MCP 读取并连接唯一匹配的活跃工作。',
     '读取最新 Resume Packet，只执行本轮 nextLegalActions。提交 implementation report 后立即结束当前 turn；Cat Café Review 在后台独立完成，不要等待或轮询。',
     '收到 implementation report 的 Review 系统停止消息后，调用 update_goal 将当前 Goal 标为 complete；不得让 Goal 自动续跑。',
-    '后续从原绑定窗口继续时重新读取最新 Resume Packet，再处理修复或合入确认；不要创建替代窗口。',
+    '后续从原绑定窗口继续时重新读取最新 Resume Packet，再处理修复或用户验收后的合入；不要创建替代窗口。',
   ].join('\n');
 }
 

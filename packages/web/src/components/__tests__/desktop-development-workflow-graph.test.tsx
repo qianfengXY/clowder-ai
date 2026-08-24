@@ -84,8 +84,8 @@ function packet(overrides: Partial<DesktopDevelopmentResumePacket> = {}): Deskto
       workflowNode('cross_review', 'pending'),
       workflowNode('consensus', 'pending'),
       workflowNode('handoff', 'pending'),
-      workflowNode('merge', 'pending'),
       workflowNode('acceptance', 'pending'),
+      workflowNode('merge', 'pending'),
     ],
     ...overrides,
   };
@@ -351,7 +351,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(container.textContent).toContain('1 项意见待修复');
   });
 
-  it('activates the accepted end node after final acceptance', () => {
+  it('activates the accepted end node after the accepted merge completes', () => {
     act(() =>
       root.render(
         <DesktopDevelopmentWorkflowGraph
@@ -363,7 +363,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
       ),
     );
 
-    expect(container.textContent).toContain('当前停在：验收通过 · 本轮结束');
+    expect(container.textContent).toContain('当前停在：已合入 main · 本轮结束');
     expect(
       container.querySelector('[data-testid="workflow-graph-node-accepted-end"]')?.getAttribute('data-status'),
     ).toBe('active');

@@ -32,7 +32,7 @@ import {
 /**
  * EXT-001 完整开发闭环 — 时间轴视图。
  *
- * 垂直主轨 + 编号站点（01 实现 → 02 Review 循环 → 03 清零门 → 04 合入 → 05 验收），
+ * 垂直主轨 + 编号站点（01 实现 → 02 Review 循环 → 03 清零门 → 04 验收 → 05 合入），
  * 入口 A/B 在轨道顶部汇入；返工回环用右侧纯 CSS 虚线轨道表达（无 DOM 实测）。
  * hover 预览 + 点击固定详情沿用 WorkflowNodeInspector。
  */
@@ -63,7 +63,7 @@ export function DesktopDevelopmentWorkflowGraph({
   const terminalAccepted = work.phase === 'accepted';
   const terminalRejected = work.phase === 'rejected';
   const currentLabel = terminalAccepted
-    ? '验收通过 · 本轮结束'
+    ? '已合入 main · 本轮结束'
     : terminalRejected
       ? '验收未通过 · 等待开启返工轮次'
       : current
@@ -179,18 +179,21 @@ function WorkflowTimeline({
   const handoff = node('handoff');
   const terminalAccepted = work.phase === 'accepted';
   const terminalRejected = work.phase === 'rejected';
+  const acceptanceRejected = node('acceptance')?.status === 'blocked';
   const reviewStatus = aggregateStatus([independentReview, crossReview, consensus]);
   const designEntryStatus =
     work.deliveryCycleEntryMode === 'design_change' ? (node('design')?.status ?? 'pending') : 'inactive';
-  const reworkEntryStatus = terminalRejected
-    ? 'active'
-    : work.deliveryCycleEntryMode === 'acceptance_rework'
-      ? 'completed'
-      : 'inactive';
-  const reviewReturnActive = work.phase === 'fix_required' || handoff?.status === 'blocked';
+  const reworkEntryStatus =
+    terminalRejected || acceptanceRejected
+      ? 'active'
+      : work.deliveryCycleEntryMode === 'acceptance_rework'
+        ? 'completed'
+        : 'inactive';
+  const reviewReturnActive = (work.phase === 'fix_required' && !acceptanceRejected) || handoff?.status === 'blocked';
   const mergeRouteActive =
     work.phase === 'approved_for_merge' || work.merged || work.acceptancePending || work.phase === 'accepted';
-  const acceptanceReturnActive = terminalRejected || work.deliveryCycleEntryMode === 'acceptance_rework';
+  const acceptanceReturnActive =
+    terminalRejected || acceptanceRejected || work.deliveryCycleEntryMode === 'acceptance_rework';
   const safeWorkId = work.workId.replace(/[^a-zA-Z0-9_-]/g, '');
   const inspectorId = `workflow-node-inspector-${safeWorkId}`;
   const tooltipId = `workflow-node-tooltip-${safeWorkId}`;
@@ -269,8 +272,8 @@ function WorkflowTimeline({
                 id="acceptance-rework-entry"
                 title="入口 B · 验收未通过 / 返工"
                 detail={
-                  terminalRejected
-                    ? `保留交付 #${work.deliveryCycleNumber} 证据，从返工入口开启下一轮`
+                  terminalRejected || acceptanceRejected
+                    ? `保留交付 #${work.deliveryCycleNumber} 证据，返回实现并开启新 Review`
                     : `保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据，直接回到实现与 Review`
                 }
                 status={reworkEntryStatus}
@@ -397,30 +400,15 @@ function WorkflowTimeline({
                       label="↺ 仍有意见 → 回到 01 修复"
                       returnSource="review"
                     />
-                    <BranchChip tone="success" active={mergeRouteActive} label="意见清零 → 进入 04 合入" />
+                    <BranchChip tone="success" active={mergeRouteActive} label="意见清零 → 进入 04 验收" />
                   </div>
                 </Station>
               </div>
 
               <Station
-                id="merge"
-                step="04"
-                title="合入 main"
-                actorTone="desktop"
-                actorLabel="ChatGPT Desktop"
-                status={node('merge')?.status ?? 'pending'}
-                owner="ChatGPT Desktop"
-                interaction={interactionFor('merge')}
-              >
-                <div className="mt-1 text-micro text-cafe-secondary">
-                  {work.merged ? '已合入 main' : `通过合入门禁 · ${mergeModeLabel(work.mergeMode)}`}
-                </div>
-              </Station>
-
-              <Station
                 id="acceptance"
-                step="05"
-                title="最终验收"
+                step="04"
+                title="合入验收"
                 actorTone="user"
                 actorLabel="你"
                 status={terminalRejected ? 'blocked' : (node('acceptance')?.status ?? 'pending')}
@@ -430,8 +418,23 @@ function WorkflowTimeline({
               >
                 <div className="mt-1 text-micro text-cafe-secondary" data-return-source="acceptance">
                   {terminalRejected
-                    ? '证据已保留 · 沿右侧轨道返回入口 B 开启返工轮次'
-                    : '只有你能决定：通过则本轮闭环结束；未通过则走入口 B 开启返工轮次，本轮证据保留'}
+                    ? '本轮未合入 · 沿右侧轨道返回入口 B 开启返工轮次'
+                    : '只有你能决定：同意则触发原 ChatGPT Desktop 合入；拒绝则不合入并进入新的修复与 Review'}
+                </div>
+              </Station>
+
+              <Station
+                id="merge"
+                step="05"
+                title="合入 main"
+                actorTone="desktop"
+                actorLabel="ChatGPT Desktop"
+                status={node('merge')?.status ?? 'pending'}
+                owner="ChatGPT Desktop"
+                interaction={interactionFor('merge')}
+              >
+                <div className="mt-1 text-micro text-cafe-secondary">
+                  {work.merged ? '已合入 main' : `验收通过后执行 · ${mergeModeLabel(work.mergeMode)}`}
                 </div>
               </Station>
 
@@ -439,7 +442,7 @@ function WorkflowTimeline({
                 <Station
                   id="accepted-end"
                   step="✓"
-                  title="验收通过 · 结束"
+                  title="合入完成 · 结束"
                   actorTone="user"
                   actorLabel="你"
                   status={terminalAccepted ? 'active' : 'pending'}
@@ -447,7 +450,7 @@ function WorkflowTimeline({
                   interaction={interactionFor('accepted-end')}
                 >
                   <div className="mt-1 text-micro text-cafe-secondary">
-                    本交付轮次终止；后续方案新增或变更从入口 A 再开启
+                    本轮精确提交已进入 main；后续方案新增或变更从入口 A 再开启
                   </div>
                 </Station>
               )}

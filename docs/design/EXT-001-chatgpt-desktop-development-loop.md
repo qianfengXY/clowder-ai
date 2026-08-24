@@ -1,6 +1,6 @@
 # EXT-001 Design — Project-scoped ChatGPT Desktop Development Loop
 
-Date: 2026-08-07<br>
+Date: 2026-08-24<br>
 Status: implementation design (requires fresh non-author review after code delta)<br>
 Feature truth: `docs/extensions/EXT-001-chatgpt-desktop-development-loop.md`
 
@@ -154,7 +154,7 @@ Consensus non-convergence does not create another reviewer or another round. The
 `review_consensus_authorized` ruling scoped to the current `reviewRoundId + exactSha`. The designated recorder is then
 re-dispatched with that ruling and the current managed-work version, and must publish the final structured consensus.
 An identical authorization is idempotent; a conflicting replacement is rejected. This evidence decides only the
-reviewer disagreement and cannot satisfy merge confirmation or final acceptance.
+reviewer disagreement and cannot satisfy the Cat Café pre-merge acceptance gate.
 
 The same read builds an ordered `workflowNodes` projection for Mission Hub. Each node carries a semantic node ID,
 server-derived `pending / active / blocked / completed` status, responsible actor, timestamps, optional reviewer
@@ -165,7 +165,7 @@ canonical state exists; a Resume Capsule or conversational claim alone is insuff
 The authenticated Cat Café surface may retry the current stage with the observed attempt and managed-work version.
 Desktop implementation/fix/merge retries wake the same permanent task; Review retries re-dispatch only unfinished
 participants (or the designated consensus recorder) with a new deterministic delivery key. Architecture choice,
-15-attempt continuation and final acceptance remain dedicated user decisions and are rejected by the generic retry
+15-attempt continuation and pre-merge acceptance remain dedicated user decisions and are rejected by the generic retry
 route. Terminal or stale attempts cannot be replayed.
 While a round is `consensus_ready`, Mission Hub additionally exposes the dedicated user-ruling action. Before a ruling,
 generic replay may only remind the existing recorder; after a ruling, replay carries the same durable instruction and
@@ -183,22 +183,25 @@ owner, Cat Café opens that same task and performs bounded owner-discovery retri
 and every retry reuses the same message ID. Recovery for a task is serialized with live delivery so overlapping timer
 passes cannot emit duplicate turns.
 
-## Merge rollout state machine
+## Acceptance-before-merge state machine
 
 ```text
-pilotCount 0/1
-  latest SHA approved + checks green
-    -> awaiting_manual_merge_confirmation
-    -> operator confirms in current active ChatGPT binding
-    -> merge -> acceptance_pending
-    -> accepted -> pilotCount + 1 (idempotent)
-
-pilotCount 2
-  -> mergeMode atomically becomes automatic
-  -> automatic merge allowed under the same SHA/review/check gates
+latest SHA approved + checks green + zero open findings
+  -> acceptance_pending
+  -> operator rejects in Cat Café
+     -> fix_required -> new attempt -> new SHA -> full ReviewRound
+  -> operator accepts in Cat Café
+     -> persist acceptance_recorded(true)
+     -> wake the original ChatGPT Desktop task
+     -> merge_with_native_git
+     -> merge receipt -> accepted -> pilotCount + 1 (idempotent, capped at 2)
 ```
 
-Confirmation is evidence scoped to `{projectId, workId, exactSha, bindingEpoch}`. A confirmation from a superseded chat, another SHA or another project is invalid.
+Acceptance evidence is scoped to `{projectId, workId, attemptId, exactSha}` and survives a Desktop binding replacement.
+The legacy `merge_confirmed` evidence remains readable only for protocol-v1 in-flight compatibility and cannot authorize
+a new-flow merge without Cat Café acceptance. A matching acceptance plus merge receipt is required before F275 may
+transition the work to `accepted`. Records already merged under the former ordering retain a compatibility path to
+capture their post-merge acceptance and terminate safely.
 
 ## Deletion and failure recovery
 
@@ -251,10 +254,10 @@ Every write validates:
 | Session binding | permanent binding survives restart | two binds -> highest epoch | deleted chat -> Resume Packet | stale chat write denied |
 | F275 work/attempt | durable canonical IDs | next-attempt idempotency | continue same work | EXT-001 fallback key absent |
 | ReviewRound | private drafts persist | barrier race atomic | latest safe projection | author/self/cross-project denied |
-| Pilot gate | accepted evidence persists | duplicate acceptance increments once; second success flips policy once | rejection starts new cycle | auto-merge before 2 denied |
+| Merge acceptance gate | acceptance + merge evidence persist | duplicate acceptance/wake/receipt are idempotent | rejection creates the next attempt in the same lineage | merge receipt before acceptance denied |
 | Review-loop gate | continuation/architecture evidence persists | duplicate decisions are idempotent; conflicts rejected | next 15-attempt block resumes same work/task | attempt 16/31/... and undecided architecture change denied |
 | Consensus ruling | round + SHA scoped evidence persists | identical replay idempotent; conflicting rewrite rejected | original recorder receives the same ruling | new reviewer, stale round/SHA, merge/acceptance bypass denied |
 
 ## Human activation boundary
 
-Implementation may add routes, MCP tools and a Desktop executor skill. It does not edit ChatGPT/Codex runtime configuration, create credentials or grant GitHub permissions. The project policy automatically changes to auto-merge only after two persisted, user-approved manual merge plus final-acceptance pilots; no earlier activation is allowed.
+Implementation may add routes, MCP tools and a Desktop executor skill. It does not edit ChatGPT/Codex runtime configuration, create credentials or grant GitHub permissions. Historical pilot/merge-mode fields remain backward compatible, but no new delivery cycle may bypass the authenticated Cat Café acceptance decision for its current exact SHA.

@@ -15,7 +15,7 @@ export interface PendingDecisionItem {
 function kindLabel(kind: PendingDecisionKind): string {
   switch (kind) {
     case 'acceptance':
-      return '等待最终验收';
+      return '等待合入验收';
     case 'architecture':
       return '方案分歧待裁决';
     case 'continuation':
@@ -28,7 +28,7 @@ function kindLabel(kind: PendingDecisionKind): string {
 function kindDetail(item: PendingDecisionItem): string {
   switch (item.kind) {
     case 'acceptance':
-      return `交付 #${item.work.deliveryCycleNumber} 已合入，等待你的验收结果`;
+      return `交付 #${item.work.deliveryCycleNumber} Review 已通过，等待你同意或拒绝合入`;
     case 'architecture': {
       const count = item.work.openFindings.filter(
         (finding) => finding.scope === 'architecture_decision' && !finding.architectureDecisionRecorded,
@@ -45,7 +45,7 @@ function kindDetail(item: PendingDecisionItem): string {
 /**
  * 方案 A · 批次 3 — "待你处理"队列。
  *
- * 聚合四类必须用户拍板的事项（最终验收 / 架构分歧 / Review 续批 / 共识裁决），
+ * 聚合四类必须用户拍板的事项（合入验收 / 架构分歧 / Review 续批 / 共识裁决），
  * 置顶展示；简单二元决策（验收、续批）直接在队列内完成，需要上下文的
  * （分歧、共识）跳转到对应功能卡片处理。
  */
@@ -107,7 +107,7 @@ export function PendingDecisionQueue({
                       disabled={acceptingWorkId === item.work.workId}
                       className="console-button-primary disabled:opacity-40"
                     >
-                      验收通过
+                      同意合入
                     </button>
                     <button
                       type="button"
@@ -115,7 +115,7 @@ export function PendingDecisionQueue({
                       disabled={acceptingWorkId === item.work.workId}
                       className="console-button-secondary disabled:opacity-40"
                     >
-                      验收未通过
+                      拒绝并返工
                     </button>
                   </>
                 )}

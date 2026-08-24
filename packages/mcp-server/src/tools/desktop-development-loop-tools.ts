@@ -419,10 +419,10 @@ export const desktopDevelopmentLoopTools = [
   defineTool({
     name: 'cat_cafe_development_merge_confirmation_record',
     description:
-      "Record the operator's explicit merge confirmation from the current ChatGPT Desktop chat. " +
-      'Use when: a manual pilot has a current exact-SHA approved review with green checks and zero findings, and the operator confirms merge in this chat. ' +
-      'NOT for: executing Git, granting repository authority, auto-merge, push, deploy, or confirmations from superseded chats. ' +
-      'Output: scoped merge-confirmation lifecycle evidence and an updated Resume Packet.',
+      'Record legacy protocol-v1 merge confirmation evidence from a ChatGPT Desktop chat. ' +
+      'Use when: resuming an older in-flight client that explicitly receives request_merge_confirmation. ' +
+      'NOT for: new Review-approved deliveries, executing Git, granting repository authority, push, deploy, or replacing the Cat Cafe pre-merge acceptance decision. ' +
+      'Output: compatibility evidence and an updated Resume Packet; it does not authorize merge by itself.',
     inputSchema: developmentMergeConfirmationInputSchema,
     handler: handleDevelopmentMergeConfirmationRecord,
     governance: {
@@ -437,9 +437,9 @@ export const desktopDevelopmentLoopTools = [
     name: 'cat_cafe_development_merge_report',
     description:
       'Report the merge commit SHA after ChatGPT Desktop has completed the merge with its native Git tools. ' +
-      'Use when: native Git has already merged the current approved exact SHA and the receipt must enter lifecycle truth. ' +
-      'NOT for: asking Cat Café to execute Git, merge, push, deploy, or bypass manual-pilot confirmation. ' +
-      'Output: a validated merge receipt, acceptance-pending state, and updated Resume Packet.',
+      'Use when: Cat Cafe recorded pre-merge acceptance, native Git merged the approved exact SHA, and the receipt must enter lifecycle truth. ' +
+      'NOT for: asking Cat Café to execute Git, merge, push, deploy, or bypass the user acceptance gate. ' +
+      'Output: a validated merge receipt and the terminal accepted Resume Packet.',
     inputSchema: developmentMergeReportInputSchema,
     handler: handleDevelopmentMergeReport,
     governance: {

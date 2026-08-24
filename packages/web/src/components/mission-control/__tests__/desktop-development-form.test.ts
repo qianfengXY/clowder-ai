@@ -88,7 +88,7 @@ describe('EXT-001 desktop development project form', () => {
     ).toThrow(/recorder.*selected reviewers/i);
   });
 
-  it('builds an idempotent final-acceptance request from the current Resume Packet', () => {
+  it('builds an idempotent pre-merge acceptance request from the current Resume Packet', () => {
     expect(
       buildDesktopAcceptanceRequest(
         {
@@ -126,7 +126,7 @@ describe('EXT-001 desktop development project form', () => {
         },
         true,
       ),
-    ).toThrow(/not awaiting final acceptance/i);
+    ).toThrow(/not awaiting merge acceptance/i);
   });
 
   it('builds a round-and-SHA-bound user consensus authorization', () => {
@@ -164,8 +164,8 @@ describe('EXT-001 desktop development project form', () => {
       reviewPhase: 'cross_review' as const,
     };
     expect(() => buildDesktopConsensusAuthorizationRequest(work, '以用户意见为准')).toThrow(/not awaiting/i);
-    expect(() =>
-      buildDesktopConsensusAuthorizationRequest({ ...work, reviewPhase: 'consensus_ready' }, '   '),
-    ).toThrow(/最终裁决意见/i);
+    expect(() => buildDesktopConsensusAuthorizationRequest({ ...work, reviewPhase: 'consensus_ready' }, '   ')).toThrow(
+      /最终裁决意见/i,
+    );
   });
 });

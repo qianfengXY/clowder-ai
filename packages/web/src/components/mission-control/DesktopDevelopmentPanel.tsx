@@ -179,7 +179,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
       const body = (await response.json()) as { project?: ExternalProject; error?: string };
       if (!response.ok || !body.project) throw new Error(body.error ?? '无法启用自动合入');
       setProjects(projects.map((item) => (item.id === body.project?.id ? body.project : item)));
-      notifySuccess('此项目已启用自动合入；最终验收仍需你确认');
+      notifySuccess('此项目已切换 automatic 兼容策略；每个新轮次仍须先由你同意或拒绝合入');
     } catch (error) {
       notifyError(error instanceof Error ? error.message : '无法启用自动合入');
     } finally {
@@ -248,15 +248,15 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         },
       );
       const body = (await response.json()) as DesktopDevelopmentResumePacket & { error?: string };
-      if (!response.ok || body.error) throw new Error(body.error ?? '无法记录最终验收');
+      if (!response.ok || body.error) throw new Error(body.error ?? '无法记录合入验收决定');
       setWorks((current) => current.map((item) => (item.workId === body.workId ? body : item)));
       notifySuccess(
         accepted
-          ? '最终验收已通过；本轮交付已闭环'
-          : '最终验收未通过；证据已保留。可直接点击“从返工入口开启”；如果方案也需调整，请先提交方案分支。',
+          ? '已同意合入；原 ChatGPT Desktop 窗口已被触发，将合入本轮精确提交。'
+          : '验收未通过；本轮不会合入，原 ChatGPT Desktop 窗口已被触发并将进入新的修复与 Review。',
       );
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : '无法记录最终验收');
+      notifyError(error instanceof Error ? error.message : '无法记录合入验收决定');
     } finally {
       setAcceptingWorkId(null);
     }
@@ -492,7 +492,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               <span aria-hidden="true">·</span>
               <span>{binding.defaultBranch}</span>
               <span aria-hidden="true">·</span>
-              <span>{binding.mergeMode === 'automatic' ? '自动合入' : '人工确认合入'}</span>
+              <span>{binding.mergeMode === 'automatic' ? 'automatic（仍需验收）' : '验收后合入'}</span>
               <span aria-hidden="true">·</span>
               <span>
                 Review：{binding.defaultReviewers.map((reviewer) => catNames.get(reviewer) ?? reviewer).join('、')}
@@ -519,7 +519,10 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
             <Info label="Cat Café 项目 ID" value={project.id} />
             <Info label="GitHub 仓库" value={binding.repository.fullName} />
             <Info label="默认分支" value={binding.defaultBranch} />
-            <Info label="合入方式" value={binding.mergeMode === 'automatic' ? '自动合入' : 'ChatGPT 会话中人工确认'} />
+            <Info
+              label="合入方式"
+              value={binding.mergeMode === 'automatic' ? '验收后自动唤醒 ChatGPT' : '验收后唤醒 ChatGPT'}
+            />
             <Info label="人工试点" value={`${pilotCount}/2 次成功`} />
             <Info
               label="Push / PR"
@@ -629,7 +632,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
               disabled={busy}
               className="console-button-secondary disabled:opacity-40"
             >
-              为此项目启用自动合入
+              切换 automatic 兼容策略（仍需验收）
             </button>
           )}
         </div>
@@ -661,7 +664,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
           </button>
         </div>
         <p className="text-micro leading-relaxed text-cafe-secondary">
-          每个功能独立对应一个 ChatGPT Desktop 窗口；“已完成”只以你在本页做出的最终验收为准。
+          每个功能独立对应一个 ChatGPT Desktop 窗口；Review 清零后先由你同意或拒绝合入，合入回执完成后才算“已完成”。
         </p>
         {!worksLoading && launchStates.length === 0 && (
           <p className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-3 text-xs text-cafe-secondary">
@@ -857,7 +860,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                         <>
                           <p className="text-xs leading-relaxed text-cafe-secondary">
                             仅在现有 reviewer 无法形成共识时使用。你的意见将成为本轮最终裁决，并绑定当前 Review Round
-                            与精确提交；不会绕过后续合入确认和最终验收。
+                            与精确提交；不会绕过后续合入验收。
                           </p>
                           <label className="block">
                             <span className="text-micro font-medium text-cafe-secondary">你的最终裁决意见</span>
@@ -895,7 +898,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                         disabled={acceptingWorkId === work.workId}
                         className="console-button-primary disabled:opacity-40"
                       >
-                        验收通过
+                        同意合入
                       </button>
                       <button
                         type="button"
@@ -903,7 +906,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                         disabled={acceptingWorkId === work.workId}
                         className="console-button-secondary disabled:opacity-40"
                       >
-                        验收未通过
+                        拒绝合入并返工
                       </button>
                     </div>
                   )}
@@ -974,11 +977,11 @@ function describeWorkState(work: DesktopDevelopmentResumePacket): string {
     case 'rejected':
       return '验收未通过';
     case 'acceptance_pending':
-      return '等待最终验收';
+      return '等待同意或拒绝合入';
     case 'approved_for_merge':
       return 'Review 已通过';
     case 'awaiting_manual_merge_confirmation':
-      return '等待合入确认';
+      return '等待旧版 ChatGPT 合入确认';
     case 'auto_merge_ready':
       return '可以合入';
     case 'fix_required':

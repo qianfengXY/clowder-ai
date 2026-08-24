@@ -256,11 +256,20 @@ describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
       },
       reportMerged: async (input) => {
         calls.push(['reportMerged', input]);
-        return { ...packet, merged: true, acceptancePending: true, nextLegalActions: ['wait_for_final_acceptance'] };
+        return {
+          ...packet,
+          phase: 'accepted',
+          workLifecycle: 'accepted',
+          merged: true,
+          acceptancePending: false,
+          nextLegalActions: [],
+        };
       },
       recordAcceptance: async (input) => {
         calls.push(['recordAcceptance', input]);
-        return { ...packet, workLifecycle: input.accepted ? 'accepted' : 'rejected', nextLegalActions: [] };
+        return input.accepted
+          ? { ...packet, phase: 'auto_merge_ready', nextLegalActions: ['merge_with_native_git'] }
+          : { ...packet, phase: 'fix_required', nextLegalActions: ['start_fix_attempt'] };
       },
       approveReviewContinuation: async (input) => {
         calls.push(['approveReviewContinuation', input]);
@@ -791,7 +800,7 @@ describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
     assert.equal(response.statusCode, 404);
   });
 
-  test('records current-chat confirmation and merge receipt without exposing a merge primitive', async () => {
+  test('keeps legacy confirmation and reports an accepted merge receipt without exposing a merge primitive', async () => {
     const { app, calls } = await createApp();
     const headers = { authorization: 'Bearer desktop-secret' };
     const common = {
@@ -821,7 +830,8 @@ describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
       payload: { ...common, idempotencyKey: 'merge-flow-2', mergeCommitSha: 'b'.repeat(40) },
     });
     assert.equal(response.statusCode, 200);
-    assert.equal(response.json().acceptancePending, true);
+    assert.equal(response.json().acceptancePending, false);
+    assert.equal(response.json().workLifecycle, 'accepted');
     assert.deepEqual(
       calls.map(([name]) => name),
       ['confirmMerge', 'reportMerged'],
@@ -832,7 +842,7 @@ describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
     );
   });
 
-  test('keeps final acceptance on the authenticated Cat Cafe user surface', async () => {
+  test('keeps pre-merge acceptance on the authenticated Cat Cafe user surface', async () => {
     const { app, calls } = await createApp();
     const payload = {
       protocolVersion: 1,
@@ -856,7 +866,7 @@ describe('EXT-001 ChatGPT Desktop service-principal routes', () => {
       payload,
     });
     assert.equal(response.statusCode, 200);
-    assert.equal(response.json().workLifecycle, 'accepted');
+    assert.equal(response.json().phase, 'auto_merge_ready');
     assert.deepEqual(calls, [
       [
         'recordAcceptance',

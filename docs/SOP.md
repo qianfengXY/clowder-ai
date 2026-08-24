@@ -125,7 +125,7 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 4. 全员通过 barrier 后公开意见，交叉核验证据、合并重复项；指定 recorder 只通过 Review callback 发布共识，不写 Git ledger。
 5. 每条 finding 必须引用 `git:refs/heads/<designBranch>@<designExactSha>`，并且只能引用本功能已选设计文档中的至少一份；中英文成对时只选择并读取中文权威文档，英文翻译件不进入 Review。方案外建议不得推进；重大方案分歧以 `architecture_decision` 暂停并交给用户。
 6. 用户保持当前方案，或与猫猫修改并提交同一方案分支后，Cat Café 才向原 ChatGPT 窗口投递一次继续通知。
-7. ChatGPT 按 callback 共识修复、测试并提交新 code SHA，再从独立检视开始下一轮；全部 finding 关闭且 checks 通过后才能进入合入门禁，最终仍等待用户亲自验收。
+7. ChatGPT 按 callback 共识修复、测试并提交新 code SHA，再从独立检视开始下一轮；全部 finding 关闭且 checks 通过后，必须先等待用户对当前精确 SHA 选择“同意合入”或“拒绝合入”。同意后 Cat Café 才唤醒原 ChatGPT 窗口执行合入；拒绝则本次验收未通过、禁止合入，并以新 attempt 回到下一轮独立检视。
 
 Review 系统消息只携带项目/功能、阶段、双 SHA、round 和进度；稳定约束、callback 顺序与双表格模板由
 `chatgpt-review-rounds` skill 维护，不在每轮消息中重复。

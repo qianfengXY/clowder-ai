@@ -81,9 +81,9 @@ export function inspectionDetailLine(work: DesktopDevelopmentResumePacket, id: W
     case 'merge':
       return work.merged ? '已经合入 main' : `合入方式：${mergeModeLabel(work.mergeMode)}`;
     case 'acceptance':
-      return work.acceptancePending ? '等待你的最终体验验收' : '尚未进入最终验收';
+      return work.acceptancePending ? '等待你同意或拒绝合入' : '尚未进入合入验收';
     case 'accepted-end':
-      return work.phase === 'accepted' ? '本交付轮次已经结束' : '验收通过后结束本交付轮次';
+      return work.phase === 'accepted' ? '本轮提交已经合入 main' : '合入完成后结束本交付轮次';
   }
 }
 
@@ -104,7 +104,7 @@ export function formatWorkflowTime(value: number | null | undefined): string {
 }
 
 export function mergeModeLabel(mode: DesktopDevelopmentResumePacket['mergeMode']): string {
-  return mode === 'manual_confirm_in_chatgpt' ? 'ChatGPT 窗口人工确认' : '自动合入';
+  return mode === 'manual_confirm_in_chatgpt' ? '用户验收通过后由 ChatGPT 合入' : '用户验收通过后自动触发 ChatGPT 合入';
 }
 
 export function findingScopeLabel(scope: DesktopDevelopmentResumePacket['openFindings'][number]['scope']): string {
@@ -146,11 +146,13 @@ export function legalActionLabel(action: string): string {
     case 'request_review_continuation_approval':
       return '请求继续 Review';
     case 'request_merge_confirmation':
-      return '请求合入确认';
+      return '请求旧版 ChatGPT 合入确认';
+    case 'record_merge_acceptance':
+      return '等待用户同意或拒绝合入';
     case 'merge_with_native_git':
       return '使用原生 Git 合入';
     case 'wait_for_final_acceptance':
-      return '等待最终体验验收';
+      return '等待旧版合入后验收';
     default:
       return action;
   }
@@ -177,7 +179,7 @@ export function workflowNodeLabel(id: DesktopDevelopmentWorkflowNode['id']): str
     case 'merge':
       return '合入 main';
     case 'acceptance':
-      return '最终验收';
+      return '合入验收';
   }
 }
 
@@ -209,7 +211,7 @@ export function workflowActionLabel(action: NonNullable<DesktopDevelopmentWorkfl
     case 'approve_review_continuation':
       return '请在下方批准继续 Review';
     case 'record_acceptance':
-      return '请在下方完成最终验收';
+      return '请在下方同意或拒绝合入';
   }
 }
 

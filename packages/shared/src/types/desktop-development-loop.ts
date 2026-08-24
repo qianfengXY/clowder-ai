@@ -84,6 +84,7 @@ export interface DesktopDevelopmentProjectBinding {
   readonly successfulManualPilotWorkIds: readonly string[];
   readonly allowPush: boolean;
   readonly allowPullRequest: boolean;
+  /** Compatibility field: acceptance is required before merge for every new delivery cycle. */
   readonly requireFinalAcceptance: true;
   readonly version: number;
 }
@@ -249,6 +250,7 @@ export interface DesktopDevelopmentResumePacket {
   /** True only for a confirmation recorded by the current binding epoch. */
   readonly mergeConfirmed: boolean;
   readonly merged: boolean;
+  /** True while Cat Cafe is waiting for the user to accept or reject merge of currentSha. */
   readonly acceptancePending: boolean;
   readonly reviewRoundId: string | null;
   readonly reviewPhase: 'independent' | 'cross_review' | 'consensus_ready' | 'complete' | null;

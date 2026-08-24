@@ -66,10 +66,10 @@ Resume Packet 必须同时给出非空 `designBranch`、`designExactSha` 与 `de
 的 Feature ID、实现边界与验收条件。方案分支之后移动时重新读取 Resume Packet；不得把方案讨论会话里的未提交
 想法当作新方案，也不得擅自把其他功能文档加入实现范围。
 
-当 `phase=fix_required` / `nextLegalActions=[start_fix_attempt]` 时，先用当前 Resume Packet 的 attempt、
-managed-work version 和 binding epoch 再调用一次 `cat_cafe_development_work_connect`。服务端会幂等创建下一个
-F275 attempt，并把同一个 Desktop chat 绑定到新 attempt；返回的 `attemptNumber` 必须递增且 phase 回到
-`implementing`。未取得新 attempt 前不得报告修复 SHA。
+当 `phase=fix_required` / `nextLegalActions=[start_fix_attempt]` 时（包括 Review 要求修改或用户拒绝本轮合入验收），
+先用当前 Resume Packet 的 attempt、managed-work version 和 binding epoch 再调用一次
+`cat_cafe_development_work_connect`。服务端会幂等创建下一个 F275 attempt，并把同一个 Desktop chat 绑定到新
+attempt；返回的 `attemptNumber` 必须递增且 phase 回到 `implementing`。未取得新 attempt 前不得报告修复 SHA。
 
 当 `phase=awaiting_design_branch`、`phase=awaiting_review_continuation` 或
 `phase=awaiting_architecture_decision` 时立即停止 Desktop 写入：
@@ -129,18 +129,21 @@ Review 由 Cat Café 在后台独立完成；原 Desktop chat 的永久 binding 
 
 Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/attempt/epoch。删除它们不会终止 work。
 
-## 5. 合入与最终验收
+## 5. 合入验收与合入
 
 严格按 Resume Packet 的 legal action 执行：
 
-- 项目前两次成功试点：在当前 ChatGPT chat 明确询问用户是否合入；得到确认后调用
-  `cat_cafe_development_merge_confirmation_record`，再用 Desktop 原生 Git 合入，最后调用
-  `cat_cafe_development_merge_report` 报告 merge commit。
-- 项目前两次成功试点完成后，Cat Café 自动把项目策略切换为自动合入；后续仍需 exact SHA、零 open finding、
-  checks 和 branch policy 全部通过。Desktop 不得自行修改这个策略或绕过前两次确认。
-- 合入后进入 `acceptance_pending`。最终体验验收只在 Cat Café 项目界面由用户记录；Desktop 不代签验收。
-
-验收不通过时继续同一个项目、功能 Review 会话和 canonical work lineage，按 Resume Packet 进入新 attempt/cycle。
+- Review 对当前 exact SHA 清零且 checks 通过后，先进入 `acceptance_pending`。同意/拒绝合入只在 Cat Café 项目界面
+  由用户记录；Desktop 不在 chat 中代问、代签，也不把旧的 chat confirmation 当成新流程授权。
+- 用户同意后，Cat Café 记录该 exact SHA 的验收通过证据并唤醒原绑定窗口。Desktop 必须重新读取 Resume Packet；
+  只有 `nextLegalActions=[merge_with_native_git]` 时才用原生 Git 合入 main，然后调用
+  `cat_cafe_development_merge_report` 报告 merge commit。merge receipt 成功后 work 才进入 `accepted`。
+- 用户拒绝后，本轮不得合入；Cat Café 记录验收未通过并唤醒原窗口。Resume Packet 进入 `fix_required`，Desktop
+  先取得递增的新 attempt，再修复、提交新 SHA 并开启完整的新 ReviewRound。
+- `cat_cafe_development_merge_confirmation_record` 仅兼容升级前已经明确返回
+  `request_merge_confirmation` 的在途 protocol-v1 packet；它不能替代 Cat Café 的合入验收，也不能单独授权新流程合入。
+- 项目历史 pilot/auto-merge 字段继续兼容持久化，但任何新 delivery cycle 都必须先取得当前 exact SHA 的用户验收；
+  自动策略不得绕过同意/拒绝门禁。
 
 ## 6. 删除与故障恢复
 
@@ -169,4 +172,4 @@ Scheduled Task 或 chat reference 只可作为唤醒提示，不能替代 work/a
 - 当前 binding epoch 和 managed-work version 来自最新 Resume Packet；
 - implementation report 的 SHA 等于本地完整 committed SHA；
 - ReviewRound 对该 SHA 零 open finding；
-- merge confirmation、merge report 与最终用户验收按项目策略分别完成。
+- 用户合入验收先于 merge，且 merge report 精确对应本轮已验收的 SHA。

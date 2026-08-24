@@ -200,6 +200,69 @@ describe(
       };
     }
 
+    async function completeApprovedReview({ project, bundle, packet, keyPrefix, startAt = 4_000 }) {
+      const roundId = packet.reviewRoundId;
+      const hubThreadId = `project-feature-review:${project.id}:backlog-1`;
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        await reviewCoordinator.submitDraft({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedDraftVersion: 0,
+          idempotencyKey: `${keyPrefix}-draft-${reviewerCatId}`,
+          verdict: 'approve',
+          findings: [],
+          now: startAt,
+        });
+      }
+      let round = (await reviewRounds.readSafe({ ownerUserId: 'owner-1', roundId })).round;
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        round = await reviewCoordinator.finishIndependent({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedRoundVersion: round.version,
+          idempotencyKey: `${keyPrefix}-independent-${reviewerCatId}`,
+          now: startAt + 1_000,
+        });
+      }
+      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
+        round = await reviewCoordinator.finishCrossReview({
+          ownerUserId: 'owner-1',
+          threadId: hubThreadId,
+          reviewerCatId,
+          roundId,
+          expectedRoundVersion: round.version,
+          idempotencyKey: `${keyPrefix}-cross-${reviewerCatId}`,
+          now: startAt + 2_000,
+        });
+      }
+      await reviewCoordinator.publishConsensus({
+        ownerUserId: 'owner-1',
+        threadId: hubThreadId,
+        reviewerCatId: 'cat-codex',
+        roundId,
+        expectedRoundVersion: round.version,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        idempotencyKey: `${keyPrefix}-consensus`,
+        verdict: 'approved',
+        checksPassed: true,
+        findings: [],
+        resolvedFindingIds: [],
+        now: startAt + 3_000,
+      });
+      return service.readWork({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        now: startAt + 3_100,
+      });
+    }
+
     test('reads only the public project projection and rejects protocol or owner mismatch', async () => {
       const { project } = await arrange();
       const result = await service.readProject({ protocolVersion: 1, ownerUserId: 'owner-1', projectId: project.id });
@@ -1034,7 +1097,7 @@ describe(
       assert.match(desktopWakes[0].objective, new RegExp(roundId));
     });
 
-    test('requires current-chat merge confirmation, records merge, and counts acceptance once', async () => {
+    test('requires acceptance before merge, wakes Desktop, and closes the work from the merge receipt', async () => {
       const { project, bundle } = await arrange();
       let packet = await service.connect({
         protocolVersion: 1,
@@ -1043,6 +1106,7 @@ describe(
         workId: bundle.admission.workId,
         attemptId: bundle.attempt.attemptId,
         runtimeSessionId: 'runtime-1',
+        chatRef: 'chat-merge-flow',
         expectedBindingEpoch: 0,
         expectedManagedWorkVersion: 1,
         idempotencyKey: 'connect-merge-flow',
@@ -1081,85 +1145,57 @@ describe(
         /approved.*green review/i,
       );
 
-      const roundId = packet.reviewRoundId;
-      const hubThreadId = `project-feature-review:${project.id}:backlog-1`;
-      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
-        await reviewCoordinator.submitDraft({
-          ownerUserId: 'owner-1',
-          threadId: hubThreadId,
-          reviewerCatId,
-          roundId,
-          expectedDraftVersion: 0,
-          idempotencyKey: `draft-${reviewerCatId}-merge-flow`,
-          verdict: 'approve',
-          findings: [],
-          now: 4_000,
-        });
-      }
-      let round = (await reviewRounds.readSafe({ ownerUserId: 'owner-1', roundId })).round;
-      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
-        round = await reviewCoordinator.finishIndependent({
-          ownerUserId: 'owner-1',
-          threadId: hubThreadId,
-          reviewerCatId,
-          roundId,
-          expectedRoundVersion: round.version,
-          idempotencyKey: `independent-${reviewerCatId}-merge-flow`,
-          now: 5_000,
-        });
-      }
-      for (const reviewerCatId of ['cat-codex', 'cat-kimi']) {
-        round = await reviewCoordinator.finishCrossReview({
-          ownerUserId: 'owner-1',
-          threadId: hubThreadId,
-          reviewerCatId,
-          roundId,
-          expectedRoundVersion: round.version,
-          idempotencyKey: `cross-${reviewerCatId}-merge-flow`,
-          now: 6_000,
-        });
-      }
-      await reviewCoordinator.publishConsensus({
-        ownerUserId: 'owner-1',
-        threadId: hubThreadId,
-        reviewerCatId: 'cat-codex',
-        roundId,
-        expectedRoundVersion: round.version,
-        expectedManagedWorkVersion: packet.managedWorkVersion,
-        idempotencyKey: 'consensus-merge-flow',
-        verdict: 'approved',
-        checksPassed: true,
-        findings: [],
-        resolvedFindingIds: [],
-        now: 7_000,
-      });
-      packet = await service.readWork({
-        protocolVersion: 1,
-        ownerUserId: 'owner-1',
-        projectId: project.id,
-        workId: bundle.admission.workId,
-        attemptId: bundle.attempt.attemptId,
-        now: 7_100,
-      });
-      assert.equal(packet.phase, 'awaiting_manual_merge_confirmation');
-      assert.deepEqual(packet.nextLegalActions, ['request_merge_confirmation']);
+      packet = await completeApprovedReview({ project, bundle, packet, keyPrefix: 'merge-flow' });
+      assert.equal(packet.acceptancePending, true);
+      assert.equal(packet.phase, 'acceptance_pending');
+      assert.deepEqual(packet.nextLegalActions, ['record_merge_acceptance']);
+      assert.equal(packet.workflowNodes.find((node) => node.id === 'acceptance').status, 'active');
+      assert.equal(packet.workflowNodes.find((node) => node.id === 'merge').status, 'pending');
+      await assert.rejects(
+        () =>
+          service.reportMerged({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            runtimeSessionId: 'runtime-1',
+            bindingEpoch: packet.bindingEpoch,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            exactSha: SHA_A,
+            mergeCommitSha: 'b'.repeat(40),
+            idempotencyKey: 'merge-before-acceptance',
+            now: 7_500,
+          }),
+        /acceptance.*before merge/i,
+      );
 
-      packet = await service.confirmMerge({
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+        pause: async (input) => desktopPauses.push(input),
+      };
+      desktopWakes = [];
+      packet = await service.recordAcceptance({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
         projectId: project.id,
         workId: bundle.admission.workId,
         attemptId: bundle.attempt.attemptId,
-        runtimeSessionId: 'runtime-1',
-        bindingEpoch: packet.bindingEpoch,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         exactSha: SHA_A,
-        idempotencyKey: 'confirm-merge-flow',
+        accepted: true,
+        idempotencyKey: 'accept-before-merge',
         now: 8_000,
       });
-      assert.equal(packet.mergeConfirmed, true);
+      assert.equal(packet.workLifecycle, 'active');
+      assert.equal(packet.acceptancePending, false);
       assert.equal(packet.phase, 'auto_merge_ready');
       assert.deepEqual(packet.nextLegalActions, ['merge_with_native_git']);
+      assert.equal(packet.workflowNodes.find((node) => node.id === 'acceptance').status, 'completed');
+      assert.equal(packet.workflowNodes.find((node) => node.id === 'merge').status, 'active');
+      assert.equal(desktopWakes.length, 1);
+      assert.equal(desktopWakes[0].threadId, 'chat-merge-flow');
+      assert.match(desktopWakes[0].objective, /auto_merge_ready/);
 
       packet = await service.connect({
         protocolVersion: 1,
@@ -1176,39 +1212,7 @@ describe(
         now: 9_000,
       });
       assert.equal(packet.mergeConfirmed, false);
-      assert.equal(packet.phase, 'awaiting_manual_merge_confirmation');
-      await assert.rejects(
-        () =>
-          service.reportMerged({
-            protocolVersion: 1,
-            ownerUserId: 'owner-1',
-            projectId: project.id,
-            workId: bundle.admission.workId,
-            attemptId: bundle.attempt.attemptId,
-            runtimeSessionId: 'runtime-2',
-            bindingEpoch: packet.bindingEpoch,
-            expectedManagedWorkVersion: packet.managedWorkVersion,
-            exactSha: SHA_A,
-            mergeCommitSha: 'b'.repeat(40),
-            idempotencyKey: 'merge-with-stale-confirmation',
-            now: 9_500,
-          }),
-        /current ChatGPT binding/i,
-      );
-
-      packet = await service.confirmMerge({
-        protocolVersion: 1,
-        ownerUserId: 'owner-1',
-        projectId: project.id,
-        workId: bundle.admission.workId,
-        attemptId: bundle.attempt.attemptId,
-        runtimeSessionId: 'runtime-2',
-        bindingEpoch: packet.bindingEpoch,
-        expectedManagedWorkVersion: packet.managedWorkVersion,
-        exactSha: SHA_A,
-        idempotencyKey: 'reconfirm-merge-flow',
-        now: 10_000,
-      });
+      assert.equal(packet.phase, 'auto_merge_ready');
       packet = await service.reportMerged({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -1223,10 +1227,65 @@ describe(
         idempotencyKey: 'report-merged-flow',
         now: 11_000,
       });
-      assert.equal(packet.acceptancePending, true);
-      assert.equal(packet.phase, 'acceptance_pending');
-      assert.deepEqual(packet.nextLegalActions, ['wait_for_final_acceptance']);
+      assert.equal(packet.acceptancePending, false);
+      assert.equal(packet.workLifecycle, 'accepted');
+      assert.equal(packet.phase, 'accepted');
+      assert.deepEqual(packet.nextLegalActions, []);
+      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
 
+      await service.reportMerged({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-2',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        mergeCommitSha: 'b'.repeat(40),
+        idempotencyKey: 'report-merged-flow',
+        now: 13_000,
+      });
+      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
+    });
+
+    test('rejects before merge and creates the next fix attempt in the same delivery cycle', async () => {
+      const { project, bundle } = await arrange();
+      let packet = await service.connect({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-reject',
+        chatRef: 'chat-reject-flow',
+        expectedBindingEpoch: 0,
+        expectedManagedWorkVersion: 1,
+        idempotencyKey: 'connect-reject-flow',
+        workspace: workspace(),
+        now: 2_000,
+      });
+      packet = await service.reportImplementation({
+        protocolVersion: 1,
+        ownerUserId: 'owner-1',
+        projectId: project.id,
+        workId: bundle.admission.workId,
+        attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-reject',
+        bindingEpoch: packet.bindingEpoch,
+        expectedManagedWorkVersion: packet.managedWorkVersion,
+        exactSha: SHA_A,
+        idempotencyKey: 'report-reject-flow',
+        now: 3_000,
+      });
+      packet = await completeApprovedReview({ project, bundle, packet, keyPrefix: 'reject-flow' });
+
+      service.desktopTaskLauncher = {
+        activate: async (input) => desktopWakes.push(input),
+        pause: async (input) => desktopPauses.push(input),
+      };
+      desktopWakes = [];
       packet = await service.recordAcceptance({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
@@ -1235,28 +1294,56 @@ describe(
         attemptId: bundle.attempt.attemptId,
         expectedManagedWorkVersion: packet.managedWorkVersion,
         exactSha: SHA_A,
-        accepted: true,
-        idempotencyKey: 'accept-merge-flow',
-        now: 12_000,
+        accepted: false,
+        idempotencyKey: 'reject-before-merge',
+        now: 8_000,
       });
-      assert.equal(packet.workLifecycle, 'accepted');
-      assert.equal(packet.phase, 'accepted');
-      assert.deepEqual(packet.nextLegalActions, []);
-      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
+      assert.equal(packet.workLifecycle, 'active');
+      assert.equal(packet.merged, false);
+      assert.equal(packet.acceptancePending, false);
+      assert.equal(packet.phase, 'fix_required');
+      assert.deepEqual(packet.nextLegalActions, ['start_fix_attempt']);
+      assert.equal(desktopWakes.length, 1);
+      assert.equal(desktopWakes[0].threadId, 'chat-reject-flow');
+      await assert.rejects(
+        () =>
+          service.reportMerged({
+            protocolVersion: 1,
+            ownerUserId: 'owner-1',
+            projectId: project.id,
+            workId: bundle.admission.workId,
+            attemptId: bundle.attempt.attemptId,
+            runtimeSessionId: 'runtime-reject',
+            bindingEpoch: packet.bindingEpoch,
+            expectedManagedWorkVersion: packet.managedWorkVersion,
+            exactSha: SHA_A,
+            mergeCommitSha: 'c'.repeat(40),
+            idempotencyKey: 'merge-after-rejection',
+            now: 8_500,
+          }),
+        /acceptance.*before merge/i,
+      );
 
-      await service.recordAcceptance({
+      const nextAttempt = await service.connect({
         protocolVersion: 1,
         ownerUserId: 'owner-1',
         projectId: project.id,
         workId: bundle.admission.workId,
         attemptId: bundle.attempt.attemptId,
+        runtimeSessionId: 'runtime-reject',
+        chatRef: 'chat-reject-flow',
+        expectedBindingEpoch: packet.bindingEpoch,
         expectedManagedWorkVersion: packet.managedWorkVersion,
-        exactSha: SHA_A,
-        accepted: true,
-        idempotencyKey: 'accept-merge-flow',
-        now: 13_000,
+        idempotencyKey: 'connect-reject-fix-attempt',
+        workspace: workspace(),
+        now: 9_000,
       });
-      assert.equal((await externalProjects.getById(project.id)).desktopDevelopment.successfulManualPilotCount, 1);
+      assert.notEqual(nextAttempt.attemptId, bundle.attempt.attemptId);
+      assert.equal(nextAttempt.attemptNumber, 2);
+      assert.equal(nextAttempt.deliveryCycleNumber, 1);
+      assert.equal(nextAttempt.workLifecycle, 'active');
+      assert.equal(nextAttempt.phase, 'implementing');
+      assert.deepEqual(nextAttempt.nextLegalActions, ['fix_open_findings']);
     });
   },
 );

@@ -30,11 +30,15 @@ describe('EXT-001 Desktop executor skill contract', () => {
     assert.match(skill, /未取得新 attempt 前不得报告修复 SHA/);
   });
 
-  test('keeps merge confirmation and final acceptance at their intended user gates', () => {
+  test('requires Cat Cafe acceptance before merge and sends rejection to a new attempt', () => {
     assert.match(skill, /cat_cafe_development_merge_confirmation_record/);
     assert.match(skill, /acceptance_pending/);
-    assert.match(skill, /auto-merge/);
-    assert.match(skill, /前两次成功试点完成后.*自动把项目策略切换为自动合入/s);
+    assert.match(skill, /同意\/拒绝合入只在 Cat Café 项目界面/);
+    assert.match(skill, /只有 `nextLegalActions=\[merge_with_native_git\]`/);
+    assert.match(skill, /用户拒绝后，本轮不得合入/);
+    assert.match(skill, /先取得递增的新 attempt/);
+    assert.match(skill, /不能替代 Cat Café 的合入验收/);
+    assert.match(skill, /自动策略不得绕过同意\/拒绝门禁/);
   });
 
   test('stops at the bounded Review and architecture decision gates', () => {

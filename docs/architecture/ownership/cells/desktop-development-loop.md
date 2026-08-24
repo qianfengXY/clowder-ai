@@ -1,7 +1,7 @@
 ---
 cell_id: desktop-development-loop
 title: Desktop Development Loop
-summary: EXT-001-owned project binding, one shared authoritative design branch plus per-feature design documents and discussion/review views, Desktop task/session projection, and guarded merge rollout over existing managed-work and review truth.
+summary: EXT-001-owned project binding, one shared authoritative design branch plus per-feature design documents and discussion/review views, Desktop task/session projection, and user acceptance before each guarded merge over existing managed-work and review truth.
 description: Project-scoped bridge between Cat Café design/review and ChatGPT Desktop implementation, without becoming a second workflow engine.
 description_source: model
 description_author: cat-idwxwjba
@@ -37,7 +37,7 @@ Architecture cell: desktop-development-loop
 
 ## Canonical Owner
 
-EXT-001 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, one authoritative design-branch binding plus deterministic discussion/review views per imported backlog feature, Desktop task/session/workspace bindings, Resume Packet projection, and the two-successful-pilot merge rollout gate. The discussion view is context only; the validated branch commit is the design authority.
+EXT-001 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, one authoritative design-branch binding plus deterministic discussion/review views per imported backlog feature, Desktop task/session/workspace bindings, Resume Packet projection, and the user acceptance gate before each guarded merge. Historical two-successful-pilot fields remain compatibility and observability data only. The discussion view is context only; the validated branch commit is the design authority.
 
 The cell is not a workflow identity root. F275 remains canonical for whole work, ordered attempts, evidence and terminal state. F253 remains canonical for exact-SHA independent review, barrier, consensus and finding closure. EXT-001 owns only the external Desktop session binding over those IDs. F211 remains canonical for Cat runtime sessions with CatId/agent-key/Antigravity provenance and is intentionally not extended for the Desktop developer external actor. F286 owns MCP inventory and authority.
 
@@ -45,7 +45,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 
 1. A project has at most one Desktop development binding and one authoritative local committed design branch; each imported backlog feature selects one or more design documents from it and has one deterministic discussion thread and one deterministic Review thread.
 2. Feature-thread soft deletion restores the same identity; a code SHA or delivery cycle never creates another visible Review thread for that feature. The legacy project Review Hub remains callback-compatible for historical in-flight rounds only.
-3. Project policy updates use optimistic versioning. Automatic merge is illegal before two distinct merged-and-accepted manual pilot works, and the second accepted pilot atomically enables it.
+3. Project policy updates use optimistic versioning. Every current delivery cycle requires an explicit user acceptance decision bound to its exact reviewed SHA before Desktop may merge; a rejection forbids merge and starts a new attempt. Historical pilot counters never bypass this per-cycle decision.
 4. The local checkout path remains a private project field and is absent from Desktop public projections.
 5. Desktop author identity is distinct from reviewer CatIds and cannot appear in the reviewer roster.
 6. Chat disappearance never expires the binding and never deletes work, ReviewRound, evidence or pilot state.

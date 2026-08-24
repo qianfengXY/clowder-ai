@@ -215,7 +215,9 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
                   允许 Desktop 创建 PR
                 </label>
               </div>
-              <p className="text-micro text-cafe-secondary">前两次成功试点仍需在当前 ChatGPT 会话中确认合入。</p>
+              <p className="text-micro text-cafe-secondary">
+                每轮 Review 清零后都先在 Cat Café 同意或拒绝合入；同意后才会触发原 ChatGPT Desktop 窗口。
+              </p>
             </div>
           )}
 

@@ -717,24 +717,33 @@ export class DesktopDevelopmentLoopService {
       projectId: input.projectId,
       workId: input.workId,
     });
-    const startsFixAttempt =
+    const startsReviewFixAttempt =
       review?.round.phase === 'complete' &&
       review.round.attemptId === input.attemptId &&
       review.currentForWork &&
       review.consensus?.verdict === 'changes_requested';
+    const startsAcceptanceFixAttempt =
+      review?.round.phase === 'complete' &&
+      review.round.attemptId === input.attemptId &&
+      review.currentForWork &&
+      review.consensus?.verdict === 'approved' &&
+      acceptanceDecisionForAttempt(snapshot, review.round.exactSha, input.attemptId) === false;
+    const startsFixAttempt = startsReviewFixAttempt || startsAcceptanceFixAttempt;
     if (startsFixAttempt) {
-      const gate = deriveReviewLoopGate({
-        attemptNumber: deliveryCycleAttemptNumber(snapshot),
-        exactSha: review.round.exactSha,
-        findings: review.findings,
-        evidence: currentDeliveryCycleEvidence(snapshot),
-      });
-      if (!canContinueReviewLoop(gate)) {
-        throw new Error(
-          gate.architectureDecisionPending
-            ? 'Review is awaiting a user architecture decision in Cat Cafe'
-            : 'Review reached its 15-attempt limit and is awaiting user continuation approval in Cat Cafe',
-        );
+      if (startsReviewFixAttempt) {
+        const gate = deriveReviewLoopGate({
+          attemptNumber: deliveryCycleAttemptNumber(snapshot),
+          exactSha: review.round.exactSha,
+          findings: review.findings,
+          evidence: currentDeliveryCycleEvidence(snapshot),
+        });
+        if (!canContinueReviewLoop(gate)) {
+          throw new Error(
+            gate.architectureDecisionPending
+              ? 'Review is awaiting a user architecture decision in Cat Cafe'
+              : 'Review reached its 15-attempt limit and is awaiting user continuation approval in Cat Cafe',
+          );
+        }
       }
       snapshot = await this.managedWork.createNextAttempt({
         consumerId: CONSUMER_ID,
@@ -997,20 +1006,29 @@ export class DesktopDevelopmentLoopService {
       if (existing.mergeCommitSha !== mergeCommitSha) {
         throw new Error('Merge receipt conflicts with the existing merge commit SHA');
       }
+      if (managed.state.lifecycle === 'active') {
+        const accepted = acceptanceDecisionForAttempt(managed, exactSha, input.attemptId);
+        if (accepted === true) {
+          const terminal = await this.managedWork.transition({
+            ...identity,
+            target: 'accepted',
+            exactSha,
+            expectedVersion: managed.state.version,
+            idempotencyKey: `${input.idempotencyKey}:terminal`,
+            now,
+          });
+          await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+          return this.readWork(input, terminal.version);
+        }
+      }
+      if (managed.state.lifecycle === 'accepted') {
+        await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+      }
       return this.readWork(input, managed.state.version);
     }
 
-    if (project.desktopDevelopment.mergeMode !== 'automatic') {
-      const currentConfirmation = currentDeliveryCycleEvidence(managed).some(
-        (evidence) =>
-          evidence.kind === 'merge_confirmed' &&
-          evidence.exactSha === exactSha &&
-          evidence.bindingEpoch === session.bindingEpoch &&
-          evidence.confirmedByUserId === input.ownerUserId,
-      );
-      if (!currentConfirmation) {
-        throw new Error('Manual merge requires confirmation from the current ChatGPT binding');
-      }
+    if (acceptanceDecisionForAttempt(managed, exactSha, input.attemptId) !== true) {
+      throw new Error('User acceptance must be recorded in Cat Cafe before merge');
     }
 
     const appended = await this.managedWork.appendEvidence({
@@ -1020,7 +1038,16 @@ export class DesktopDevelopmentLoopService {
       evidence: { kind: 'merged', exactSha, mergeCommitSha },
       now,
     });
-    return this.readWork(input, appended.state.version);
+    const terminal = await this.managedWork.transition({
+      ...identity,
+      target: 'accepted',
+      exactSha,
+      expectedVersion: appended.state.version,
+      idempotencyKey: `${input.idempotencyKey}:terminal`,
+      now,
+    });
+    await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+    return this.readWork(input, terminal.version);
   }
 
   async recordAcceptance(input: RecordDesktopAcceptanceInput): Promise<DesktopDevelopmentResumePacket> {
@@ -1036,13 +1063,9 @@ export class DesktopDevelopmentLoopService {
       workId: input.workId,
     });
     this.assertApprovedGreenReview(exactSha, managed, review);
-    if (
-      !currentDeliveryCycleEvidence(managed).some(
-        (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
-      )
-    ) {
-      throw new Error('Final acceptance requires a matching merge receipt');
-    }
+    const merged = currentDeliveryCycleEvidence(managed).some(
+      (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
+    );
 
     if (managed.state.lifecycle !== 'active') {
       const expectedLifecycle = input.accepted ? 'accepted' : 'rejected';
@@ -1053,23 +1076,40 @@ export class DesktopDevelopmentLoopService {
       return this.readWork(input, managed.state.version);
     }
 
-    const acceptance = await this.managedWork.appendEvidence({
-      ...identity,
-      expectedVersion: input.expectedManagedWorkVersion,
-      idempotencyKey: `${input.idempotencyKey}:acceptance`,
-      evidence: { kind: 'acceptance_recorded', exactSha, accepted: input.accepted },
-      now,
-    });
-    const terminal = await this.managedWork.transition({
-      ...identity,
-      target: input.accepted ? 'accepted' : 'rejected',
-      exactSha,
-      expectedVersion: acceptance.state.version,
-      idempotencyKey: `${input.idempotencyKey}:terminal`,
-      now,
-    });
-    if (input.accepted) await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
-    return this.readWork(input, terminal.version);
+    const existingDecision = acceptanceDecisionForAttempt(managed, exactSha, input.attemptId);
+    if (existingDecision !== null && existingDecision !== input.accepted) {
+      throw new Error('Merge acceptance conflicts with the decision already recorded for this exact SHA');
+    }
+    const acceptance =
+      existingDecision === null
+        ? await this.managedWork.appendEvidence({
+            ...identity,
+            expectedVersion: input.expectedManagedWorkVersion,
+            idempotencyKey: `${input.idempotencyKey}:acceptance`,
+            evidence: { kind: 'acceptance_recorded', exactSha, accepted: input.accepted },
+            now,
+          })
+        : managed;
+
+    // Compatibility for delivery cycles that were already merged under the
+    // former post-merge acceptance order. New cycles never merge before this
+    // decision, but old in-flight records must still be able to terminate.
+    if (merged) {
+      const terminal = await this.managedWork.transition({
+        ...identity,
+        target: input.accepted ? 'accepted' : 'rejected',
+        exactSha,
+        expectedVersion: acceptance.state.version,
+        idempotencyKey: `${input.idempotencyKey}:terminal`,
+        now,
+      });
+      if (input.accepted) await this.externalProjects.recordAcceptedManualPilot(input.projectId, input.workId);
+      return this.readWork(input, terminal.version);
+    }
+
+    const packet = await this.readWork(input, acceptance.state.version);
+    await this.wakeDesktopForCurrentStage(input, packet);
+    return packet;
   }
 
   async approveReviewContinuation(input: ApproveReviewContinuationInput): Promise<DesktopDevelopmentResumePacket> {
@@ -1308,7 +1348,7 @@ export class DesktopDevelopmentLoopService {
       throw new Error('Current stage requires Review continuation approval; approve it instead of retrying it');
     }
     if (work.phase === 'acceptance_pending') {
-      throw new Error('Current stage requires final acceptance; record the acceptance decision instead of retrying it');
+      throw new Error('Current stage requires merge acceptance; record the acceptance decision instead of retrying it');
     }
     throw new Error('Completed or rejected work has no stage to retry');
   }
@@ -1388,7 +1428,6 @@ export class DesktopDevelopmentLoopService {
       session,
       review,
       managed,
-      mergeMode: project.desktopDevelopment.mergeMode,
       designBranchReady: design.status === 'ready',
     });
     const consensusAuthorization = review ? consensusAuthorizationForReview(managed, review) : undefined;
@@ -1423,7 +1462,7 @@ export class DesktopDevelopmentLoopService {
       autoMergeAvailable: project.desktopDevelopment.successfulManualPilotCount >= DESKTOP_DEVELOPMENT_REQUIRED_PILOTS,
       mergeConfirmed,
       merged,
-      acceptancePending: managed.state.lifecycle === 'active' && merged,
+      acceptancePending: derived.phase === 'acceptance_pending',
       reviewRoundId: review?.round.roundId ?? null,
       reviewPhase: review?.round.phase ?? null,
       reviewRoundVersion: review?.round.version ?? null,
@@ -1924,8 +1963,8 @@ function deriveWorkflowNodes(input: {
     crossReviewWorkflowNode(context),
     consensusWorkflowNode(context),
     handoffWorkflowNode(context),
-    mergeWorkflowNode(context),
     acceptanceWorkflowNode(context),
+    mergeWorkflowNode(context),
   ];
 }
 
@@ -1937,6 +1976,7 @@ interface WorkflowProjectionContext {
   readonly implementationAt: number | null;
   readonly mergedAt: number | null;
   readonly acceptanceAt: number | null;
+  readonly acceptanceDecision: boolean | null;
   readonly consensusApproved: boolean;
   readonly design: ProjectFeatureDesignAuthorityView;
 }
@@ -1958,6 +1998,11 @@ function buildWorkflowProjectionContext(input: {
     implementationAt: latestEvidenceAt(input.managed, 'implementation_committed', attemptId),
     mergedAt: latestEvidenceAt(input.managed, 'merged', attemptId),
     acceptanceAt: latestEvidenceAt(input.managed, 'acceptance_recorded', attemptId),
+    acceptanceDecision: acceptanceDecisionForAttempt(
+      input.managed,
+      review?.round.exactSha ?? input.session.workspace.currentSha,
+      attemptId,
+    ),
     consensusApproved: review?.round.phase === 'complete' && review.consensus?.verdict === 'approved',
     design: input.design,
   };
@@ -2076,29 +2121,29 @@ function handoffManualAction(phase: DesktopDevelopmentPhase): DesktopDevelopment
 function mergeWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
   let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
   if (context.mergedAt) status = 'completed';
-  else if (context.consensusApproved) status = 'active';
+  else if (context.acceptanceDecision === true) status = 'active';
   return {
     id: 'merge',
     status,
     actor: 'chatgpt_desktop',
-    startedAt: context.consensusApproved ? (context.review?.round.completedAt ?? null) : null,
+    startedAt: context.acceptanceAt,
     completedAt: context.mergedAt,
-    manualAction: context.consensusApproved && !context.mergedAt ? 'wake_desktop' : null,
+    manualAction: context.acceptanceDecision === true && !context.mergedAt ? 'wake_desktop' : null,
   };
 }
 
 function acceptanceWorkflowNode(context: WorkflowProjectionContext): DesktopDevelopmentWorkflowNode {
-  const terminal = context.managed.state.lifecycle !== 'active';
   let status: DesktopDevelopmentWorkflowNode['status'] = 'pending';
-  if (context.mergedAt && terminal) status = 'completed';
-  else if (context.mergedAt) status = 'active';
+  if (context.acceptanceDecision === true) status = 'completed';
+  else if (context.acceptanceDecision === false) status = 'blocked';
+  else if (context.consensusApproved) status = 'active';
   return {
     id: 'acceptance',
     status,
     actor: 'user',
-    startedAt: context.mergedAt,
+    startedAt: context.consensusApproved ? (context.review?.round.completedAt ?? null) : null,
     completedAt: context.acceptanceAt,
-    manualAction: context.mergedAt && !terminal ? 'record_acceptance' : null,
+    manualAction: context.consensusApproved && context.acceptanceDecision === null ? 'record_acceptance' : null,
   };
 }
 
@@ -2150,7 +2195,6 @@ interface DesktopDevelopmentStateInput {
   session: DesktopSessionBinding;
   review: ReviewRoundSafeView | null;
   managed: ManagedWorkConsumerSnapshot;
-  mergeMode: 'manual_confirm_in_chatgpt' | 'automatic';
   designBranchReady: boolean;
 }
 
@@ -2260,18 +2304,30 @@ function deriveCompletedReviewState(input: DesktopDevelopmentStateInput): Deskto
   const merged = input.managed.evidence.some(
     (evidence) => evidence.kind === 'merged' && evidence.exactSha === exactSha,
   );
-  if (merged) return { phase: 'acceptance_pending', nextLegalActions: ['wait_for_final_acceptance'] };
-  const currentConfirmation = input.managed.evidence.some(
-    (evidence) =>
-      evidence.kind === 'merge_confirmed' &&
-      evidence.exactSha === exactSha &&
-      evidence.bindingEpoch === input.session.bindingEpoch,
-  );
-  if (input.mergeMode === 'automatic' || currentConfirmation) {
-    return { phase: 'auto_merge_ready', nextLegalActions: ['merge_with_native_git'] };
+  const acceptanceDecision = acceptanceDecisionForAttempt(input.managed, exactSha, input.managed.attempt.attemptId);
+  if (merged && acceptanceDecision === null) {
+    return { phase: 'acceptance_pending', nextLegalActions: ['record_merge_acceptance'] };
   }
-  return {
-    phase: 'awaiting_manual_merge_confirmation',
-    nextLegalActions: ['request_merge_confirmation'],
-  };
+  if (acceptanceDecision === false) return { phase: 'fix_required', nextLegalActions: ['start_fix_attempt'] };
+  if (acceptanceDecision === true) return { phase: 'auto_merge_ready', nextLegalActions: ['merge_with_native_git'] };
+  return { phase: 'acceptance_pending', nextLegalActions: ['record_merge_acceptance'] };
+}
+
+function acceptanceDecisionForAttempt(
+  managed: ManagedWorkConsumerSnapshot,
+  exactSha: string,
+  attemptId: string,
+): boolean | null {
+  const currentEvidence = currentDeliveryCycleEvidence(managed);
+  for (let index = currentEvidence.length - 1; index >= 0; index -= 1) {
+    const evidence = currentEvidence[index];
+    if (
+      evidence?.kind === 'acceptance_recorded' &&
+      evidence.attemptId === attemptId &&
+      evidence.exactSha === exactSha
+    ) {
+      return evidence.accepted;
+    }
+  }
+  return null;
 }
