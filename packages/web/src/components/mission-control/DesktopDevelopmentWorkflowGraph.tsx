@@ -40,12 +40,14 @@ export function DesktopDevelopmentWorkflowGraph({
   work,
   retrying,
   onRetry,
+  onOpenPlan,
   onOpenReview,
   defaultCollapsed = true,
 }: {
   work: DesktopDevelopmentResumePacket;
   retrying: boolean;
   onRetry: () => void;
+  onOpenPlan?: () => void;
   onOpenReview?: () => void;
   /** 默认收起：概览由 WorkflowStepper 承担，完整时间轴按需展开 */
   defaultCollapsed?: boolean;
@@ -100,7 +102,27 @@ export function DesktopDevelopmentWorkflowGraph({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+            {onOpenPlan && (
+              <button
+                type="button"
+                onClick={onOpenPlan}
+                className="rounded-xl border border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary hover:text-cafe"
+                data-testid="workflow-open-plan-thread"
+              >
+                方案讨论
+              </button>
+            )}
+            {onOpenReview && (
+              <button
+                type="button"
+                onClick={onOpenReview}
+                className="rounded-xl border border-[var(--console-hover-bg)] bg-[var(--console-shell-bg)] px-3 py-2 text-xs font-medium text-cafe-secondary hover:text-cafe"
+                data-testid="workflow-open-review-thread"
+              >
+                Review 窗口
+              </button>
+            )}
             {retryable && !terminalAccepted && !terminalRejected && (
               <button
                 type="button"

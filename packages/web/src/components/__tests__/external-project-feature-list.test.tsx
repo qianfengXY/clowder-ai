@@ -4,9 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
-const routerPushMock = vi.hoisted(() => vi.fn());
-
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPushMock }) }));
 
 vi.mock('../../utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
@@ -94,7 +91,6 @@ describe('ExternalProjectFeatureList', () => {
 
   beforeEach(() => {
     apiFetchMock.mockReset();
-    routerPushMock.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -280,24 +276,8 @@ describe('ExternalProjectFeatureList', () => {
     expect(container.textContent).toContain('已指定 1 份设计文档');
   });
 
-  it('opens feature-scoped plan and Review conversations', async () => {
-    apiFetchMock.mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === '/api/threads') return { ok: true, json: async () => ({ threads: [] }) };
-      if (init?.method === 'POST' && path.endsWith('/threads/review')) {
-        return {
-          ok: true,
-          json: async () => ({
-            thread: {
-              threadId: 'project-feature-review:project-Traqen:item-F006',
-              projectId: 'project-Traqen',
-              backlogItemId: 'item-F006',
-              featureId: 'F006',
-              kind: 'review',
-              status: 'active',
-            },
-          }),
-        };
-      }
+  it('keeps only the three binding controls beside the lifecycle action', async () => {
+    apiFetchMock.mockImplementation(async (path: string) => {
       return {
         ok: true,
         json: async () =>
@@ -315,17 +295,19 @@ describe('ExternalProjectFeatureList', () => {
       root.render(React.createElement(ExternalProjectFeatureList, { project: project('Traqen'), items: [item()] }));
     });
     await flush();
-    const review = container.querySelector('[data-testid="external-project-review-item-F006"]') as HTMLButtonElement;
-    await act(async () => {
-      review.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    await flush();
-    expect(apiFetchMock).toHaveBeenCalledWith(
-      '/api/external-projects/project-Traqen/development-loop/features/item-F006/threads/review',
-      { method: 'POST' },
+
+    expect(container.querySelector('[data-testid="external-project-plan-item-F006"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-project-review-item-F006"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-project-bind-plan-item-F006"]')?.textContent).toBe(
+      '方案讨论窗口绑定',
     );
-    expect(routerPushMock).toHaveBeenCalledWith('/thread/project-feature-review%3Aproject-Traqen%3Aitem-F006');
+    expect(container.querySelector('[data-testid="external-project-design-documents-item-F006"]')?.textContent).toBe(
+      '设计方案路径绑定',
+    );
+    expect(container.querySelector('[data-testid="external-project-bind-review-item-F006"]')?.textContent).toBe(
+      'Review 窗口绑定',
+    );
+    expect(container.querySelector('[data-testid="external-project-start-item-F006"]')).not.toBeNull();
   });
 
   it('binds an existing project conversation to a feature workspace', async () => {

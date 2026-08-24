@@ -174,6 +174,36 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(joinLabel?.closest('[aria-hidden="true"]')).toBeNull();
   });
 
+  it('places the plan and Review window actions before retry and collapse', () => {
+    const openPlan = vi.fn();
+    const openReview = vi.fn();
+    act(() =>
+      root.render(
+        <DesktopDevelopmentWorkflowGraph
+          work={packet()}
+          retrying={false}
+          onRetry={() => {}}
+          onOpenPlan={openPlan}
+          onOpenReview={openReview}
+          defaultCollapsed={false}
+        />,
+      ),
+    );
+
+    const header = container.querySelector('header');
+    const labels = Array.from(header?.querySelectorAll('button') ?? []).map((button) =>
+      button.textContent?.trim().replace(/\s+/g, ' '),
+    );
+    expect(labels).toEqual(['方案讨论', 'Review 窗口', '再次触发 ChatGPT', '收起流程▾']);
+
+    const planButton = container.querySelector<HTMLButtonElement>('[data-testid="workflow-open-plan-thread"]');
+    const reviewButton = container.querySelector<HTMLButtonElement>('[data-testid="workflow-open-review-thread"]');
+    act(() => planButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => reviewButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(openPlan).toHaveBeenCalledTimes(1);
+    expect(openReview).toHaveBeenCalledTimes(1);
+  });
+
   it('previews a node on focus and opens a persistent detail dialog on click', () => {
     act(() =>
       root.render(

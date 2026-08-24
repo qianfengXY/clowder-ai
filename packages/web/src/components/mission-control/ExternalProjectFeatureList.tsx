@@ -9,9 +9,7 @@ import type {
   FeatureWorkspaceThreadView,
   ProjectDesignAuthorityView,
 } from '@cat-cafe/shared';
-import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { type Thread, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 type ServerLaunchStatus =
@@ -78,7 +76,6 @@ function ExternalProjectFeatureRow({
   designAuthority,
   designDocuments,
   onStart,
-  onOpenThread,
   onBindThread,
   onEditDesignDocuments,
 }: {
@@ -89,7 +86,6 @@ function ExternalProjectFeatureRow({
   designAuthority?: ProjectDesignAuthorityView;
   designDocuments?: FeatureDesignDocumentsView;
   onStart: (item: BacklogItem) => void;
-  onOpenThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
   onBindThread: (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => void;
   onEditDesignDocuments: (item: BacklogItem) => void;
 }) {
@@ -130,12 +126,12 @@ function ExternalProjectFeatureRow({
         <div className="flex shrink-0 flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => onOpenThread(item, 'plan')}
+            onClick={() => onBindThread(item, 'plan')}
             disabled={unavailable}
             className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
-            data-testid={`external-project-plan-${item.id}`}
+            data-testid={`external-project-bind-plan-${item.id}`}
           >
-            方案讨论
+            方案讨论窗口绑定
           </button>
           <button
             type="button"
@@ -144,34 +140,16 @@ function ExternalProjectFeatureRow({
             className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
             data-testid={`external-project-design-documents-${item.id}`}
           >
-            设计文档
-          </button>
-          <button
-            type="button"
-            onClick={() => onBindThread(item, 'plan')}
-            disabled={unavailable}
-            className="rounded-lg px-2 py-1.5 text-micro font-medium text-cafe-secondary underline-offset-2 hover:underline disabled:opacity-40"
-            data-testid={`external-project-bind-plan-${item.id}`}
-          >
-            绑定
-          </button>
-          <button
-            type="button"
-            onClick={() => onOpenThread(item, 'review')}
-            disabled={unavailable}
-            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
-            data-testid={`external-project-review-${item.id}`}
-          >
-            Review
+            设计方案路径绑定
           </button>
           <button
             type="button"
             onClick={() => onBindThread(item, 'review')}
             disabled={unavailable}
-            className="rounded-lg px-2 py-1.5 text-micro font-medium text-cafe-secondary underline-offset-2 hover:underline disabled:opacity-40"
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary disabled:opacity-40"
             data-testid={`external-project-bind-review-${item.id}`}
           >
-            绑定
+            Review 窗口绑定
           </button>
           <button
             type="button"
@@ -199,10 +177,6 @@ function ExternalProjectFeatureRow({
 }
 
 export function ExternalProjectFeatureList({ project, items }: ExternalProjectFeatureListProps) {
-  const router = useRouter();
-  const setCurrentThread = useChatStore((state) => state.setCurrentThread);
-  const setCurrentProject = useChatStore((state) => state.setCurrentProject);
-  const setThreads = useChatStore((state) => state.setThreads);
   const [launchStatuses, setLaunchStatuses] = useState<Record<string, LaunchStatus>>({});
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [designAuthority, setDesignAuthority] = useState<ProjectDesignAuthorityView>();
@@ -445,30 +419,6 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
     }
   };
 
-  const openFeatureThread = async (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => {
-    try {
-      const response = await apiFetch(
-        `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(item.id)}/threads/${kind}`,
-        { method: 'POST' },
-      );
-      const body = (await response.json()) as { thread?: FeatureWorkspaceThreadView; error?: string };
-      if (!response.ok || !body.thread) throw new Error(body.error ?? '无法打开功能会话');
-      const threadResponse = await apiFetch('/api/threads');
-      if (threadResponse.ok) {
-        const threadBody = (await threadResponse.json()) as { threads?: Thread[] };
-        if (threadBody.threads) setThreads(threadBody.threads);
-      }
-      setCurrentProject(project.sourcePath);
-      setCurrentThread(body.thread.threadId);
-      router.push(`/thread/${encodeURIComponent(body.thread.threadId)}`);
-    } catch (error) {
-      setLaunchErrors((current) => ({
-        ...current,
-        [item.id]: error instanceof Error ? error.message : '无法打开功能会话',
-      }));
-    }
-  };
-
   const openBindingEditor = async (item: BacklogItem, kind: FeatureWorkspaceThreadKind) => {
     setBindingEditor({ itemId: item.id, kind, selectedThreadId: '', loading: true, saving: false });
     try {
@@ -624,7 +574,6 @@ export function ExternalProjectFeatureList({ project, items }: ExternalProjectFe
               designAuthority={designAuthority}
               designDocuments={designDocuments[item.id]}
               onStart={(selected) => void startDevelopment(selected)}
-              onOpenThread={(selected, kind) => void openFeatureThread(selected, kind)}
               onBindThread={(selected, kind) => void openBindingEditor(selected, kind)}
               onEditDesignDocuments={(selected) =>
                 setDesignEditor({

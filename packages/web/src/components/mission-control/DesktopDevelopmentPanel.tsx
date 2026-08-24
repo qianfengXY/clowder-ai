@@ -4,6 +4,7 @@ import type {
   DesktopDevelopmentDeliveryCycleEntryMode,
   DesktopDevelopmentResumePacket,
   ExternalProject,
+  FeatureWorkspaceThreadKind,
   FeatureWorkspaceThreadView,
 } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
@@ -53,6 +54,10 @@ interface ProjectDevelopmentLaunchState {
 interface PanelNotice {
   readonly kind: 'success' | 'error';
   readonly text: string;
+}
+
+function workspaceThreadLabel(kind: FeatureWorkspaceThreadKind): string {
+  return kind === 'plan' ? '方案讨论' : 'Review';
 }
 
 export function DesktopDevelopmentPanel({ project }: { project: ExternalProject }) {
@@ -136,15 +141,16 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
     void loadWorks();
   }, [loadWorks]);
 
-  const openFeatureReview = useCallback(
-    async (backlogItemId: string) => {
+  const openFeatureThread = useCallback(
+    async (backlogItemId: string, kind: FeatureWorkspaceThreadKind) => {
+      const label = workspaceThreadLabel(kind);
       try {
         const response = await apiFetch(
-          `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(backlogItemId)}/threads/review`,
+          `/api/external-projects/${encodeURIComponent(project.id)}/development-loop/features/${encodeURIComponent(backlogItemId)}/threads/${kind}`,
           { method: 'POST' },
         );
         const body = (await response.json()) as { thread?: FeatureWorkspaceThreadView; error?: string };
-        if (!response.ok || !body.thread) throw new Error(body.error ?? '无法打开 Review 会话');
+        if (!response.ok || !body.thread) throw new Error(body.error ?? `无法打开${label}会话`);
         const threadResponse = await apiFetch('/api/threads');
         if (threadResponse.ok) {
           const threadBody = (await threadResponse.json()) as { threads?: Thread[] };
@@ -154,7 +160,7 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
         setCurrentThread(body.thread.threadId);
         router.push(`/thread/${encodeURIComponent(body.thread.threadId)}`);
       } catch (error) {
-        notifyError(error instanceof Error ? error.message : '无法打开 Review 会话');
+        notifyError(error instanceof Error ? error.message : `无法打开${label}会话`);
       }
     },
     [notifyError, project.id, project.sourcePath, router, setCurrentProject, setCurrentThread, setThreads],
@@ -770,7 +776,8 @@ export function DesktopDevelopmentPanel({ project }: { project: ExternalProject 
                       work={work}
                       retrying={retryingWorkId === work.workId}
                       onRetry={() => void retryCurrentStage(work)}
-                      onOpenReview={() => void openFeatureReview(launchState.backlogItemId)}
+                      onOpenPlan={() => void openFeatureThread(launchState.backlogItemId, 'plan')}
+                      onOpenReview={() => void openFeatureThread(launchState.backlogItemId, 'review')}
                       defaultCollapsed={false}
                     />
                   )}
