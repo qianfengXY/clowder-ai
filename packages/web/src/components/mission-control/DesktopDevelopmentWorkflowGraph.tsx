@@ -2,6 +2,7 @@
 
 import type { DesktopDevelopmentResumePacket, DesktopDevelopmentWorkflowNode } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
+import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 import {
   ActorChip,
   BranchChip,
@@ -16,18 +17,17 @@ import {
   statusTextClass,
 } from './workflow-graph-parts';
 import {
-  type WorkflowHoverState,
-  type WorkflowInspectionSelection,
   aggregateStatus,
   entryModeLabel,
   handoffDetail,
   mergeModeLabel,
   shortSha,
+  type WorkflowHoverState,
+  type WorkflowInspectionSelection,
   workflowActionLabel,
   workflowActorLabel,
   workflowNodeLabel,
 } from './workflow-graph-support';
-import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 
 /**
  * F289 完整开发闭环 — 时间轴视图。
@@ -301,7 +301,7 @@ function WorkflowTimeline({
                     {statusShortText(reviewStatus)}
                   </span>
                 </div>
-                <div
+                <section
                   className="mt-2 flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto overscroll-x-contain pb-1 md:pb-0"
                   data-testid="workflow-review-stages"
                   aria-label="Review 三阶段，可横向滚动"
@@ -339,7 +339,7 @@ function WorkflowTimeline({
                     owner={reviewOwner(consensus, '共识记录猫猫')}
                     interaction={interactionFor('consensus')}
                   />
-                </div>
+                </section>
               </div>
             </div>
 
@@ -407,9 +407,7 @@ function WorkflowTimeline({
             owner="你"
             interaction={interactionFor('accepted-end')}
           >
-            <div className="mt-1 text-micro text-cafe-secondary">
-              本交付轮次终止；后续方案新增或变更从入口 A 再开启
-            </div>
+            <div className="mt-1 text-micro text-cafe-secondary">本交付轮次终止；后续方案新增或变更从入口 A 再开启</div>
           </Station>
         </div>
       </div>

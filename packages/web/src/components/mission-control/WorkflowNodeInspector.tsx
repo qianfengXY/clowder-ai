@@ -4,13 +4,13 @@ import type { DesktopDevelopmentResumePacket } from '@cat-cafe/shared';
 import { useEffect, useRef } from 'react';
 import { InspectorFact, StatusBadge } from './workflow-graph-parts';
 import {
-  type WorkflowInspectionSelection,
   findingScopeLabel,
   formatWorkflowTime,
   inspectionDetailLine,
   inspectionShaLine,
   isReviewInspection,
   legalActionLabel,
+  type WorkflowInspectionSelection,
   workflowNodeForInspection,
 } from './workflow-graph-support';
 
@@ -136,7 +136,9 @@ export function WorkflowNodeInspector({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-micro font-semibold text-cafe">开放检视意见 {work.openFindings.length} 项</div>
-              <div className="mt-0.5 text-micro text-cafe-secondary">ReviewRound：{work.reviewRoundId ?? '尚未创建'}</div>
+              <div className="mt-0.5 text-micro text-cafe-secondary">
+                ReviewRound：{work.reviewRoundId ?? '尚未创建'}
+              </div>
             </div>
             {onOpenReview && (
               <button

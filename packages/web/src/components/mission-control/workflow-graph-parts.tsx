@@ -3,12 +3,12 @@
 import type { ReactNode } from 'react';
 import {
   type ActorTone,
-  type GraphStatus,
-  type WorkflowInspectionId,
-  type WorkflowInspectionSelection,
   actorDotClass,
+  type GraphStatus,
   graphStatusLabel,
   statusDotClass,
+  type WorkflowInspectionId,
+  type WorkflowInspectionSelection,
 } from './workflow-graph-support';
 
 /** F289 泳道图（时间轴版）视觉原子 — 站点、入口、Review 阶段、分支胶囊、返工轨道 */
@@ -215,7 +215,9 @@ export function EntryChip({
       {status === 'active' && <ActiveNodePulse />}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-cafe">{title}</span>
-        {status === 'completed' && <span className="text-micro font-bold text-[var(--semantic-success)]">✓ 本轮入口</span>}
+        {status === 'completed' && (
+          <span className="text-micro font-bold text-[var(--semantic-success)]">✓ 本轮入口</span>
+        )}
         {status === 'active' && <span className="text-micro font-bold text-[var(--mc-accent)]">● 本轮入口</span>}
       </div>
       <div className="mt-0.5 text-micro text-cafe-muted">{detail}</div>

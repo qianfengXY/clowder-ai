@@ -168,8 +168,8 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
       item.textContent?.includes('仍有意见'),
     );
     expect(inactiveBranch?.className).not.toContain('opacity-');
-    const joinLabel = Array.from(container.querySelectorAll('div')).find((item) =>
-      item.textContent === '↓ 汇入本轮开发',
+    const joinLabel = Array.from(container.querySelectorAll('div')).find(
+      (item) => item.textContent === '↓ 汇入本轮开发',
     );
     expect(joinLabel?.closest('[aria-hidden="true"]')).toBeNull();
   });
