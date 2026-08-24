@@ -2,7 +2,6 @@
 
 import type { DesktopDevelopmentResumePacket, DesktopDevelopmentWorkflowNode } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
-import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 import {
   ActorChip,
   BranchChip,
@@ -17,17 +16,18 @@ import {
   statusTextClass,
 } from './workflow-graph-parts';
 import {
+  type WorkflowHoverState,
+  type WorkflowInspectionSelection,
   aggregateStatus,
   entryModeLabel,
   handoffDetail,
   mergeModeLabel,
   shortSha,
-  type WorkflowHoverState,
-  type WorkflowInspectionSelection,
   workflowActionLabel,
   workflowActorLabel,
   workflowNodeLabel,
 } from './workflow-graph-support';
+import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 
 /**
  * F289 完整开发闭环 — 时间轴视图。
@@ -221,13 +221,12 @@ function WorkflowTimeline({
     >
       {hovered && <WorkflowHoverPreview id={tooltipId} work={work} selection={hovered.selection} top={hovered.top} />}
 
-      <div className="relative py-4 pl-3 pr-9 sm:pl-4 sm:pr-12">
-        {/* 返工大回环：验收未通过 → 入口 B */}
-        <ReturnRail
-          kind="acceptance"
-          active={acceptanceReturnActive}
-          className="-right-[2px] top-[22px] bottom-[24px] w-[26px] sm:-right-[6px] sm:w-[34px]"
-        />
+      {/* 27 寸等宽屏：内容封顶 1080px 并居中；pr-10 是回环轨道的专用天沟 */}
+      <div className="px-3 py-4 sm:px-4">
+      <div className="relative mx-auto w-full max-w-[1080px] pr-10">
+      <div className="relative">
+        {/* 返工大回环：验收未通过 → 入口 B。锚定在内容容器上，避免被外层 overflow-hidden 裁剪 */}
+        <ReturnRail kind="acceptance" active={acceptanceReturnActive} className="-right-[38px] top-6 bottom-[30px] w-4" />
 
         <div className="grid grid-cols-1 items-stretch gap-2 sm:ml-10 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
           <EntryChip
@@ -243,10 +242,16 @@ function WorkflowTimeline({
           <EntryChip
             id="acceptance-rework-entry"
             title="入口 B · 验收未通过 / 返工"
-            detail={`保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据，直接回到实现与 Review`}
+            detail={
+              terminalRejected
+                ? `保留交付 #${work.deliveryCycleNumber} 证据，从返工入口开启下一轮`
+                : `保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据，直接回到实现与 Review`
+            }
             status={reworkEntryStatus}
             interaction={interactionFor('acceptance-rework-entry')}
             returnTarget="acceptance"
+            activeTone="warning"
+            activeHint="● 等待你开启"
           />
         </div>
         <div className="py-1 text-center text-micro text-cafe-muted sm:ml-10">↓ 汇入本轮开发</div>
@@ -258,8 +263,8 @@ function WorkflowTimeline({
           />
 
           <div className="relative">
-            {/* 修复小回环：清零门仍有意见 → 回到 01 */}
-            <ReturnRail kind="review" active={reviewReturnActive} className="-right-5 top-[26px] bottom-[26px] w-4" />
+            {/* 修复小回环：清零门仍有意见 → 回到 01（频段 6..18px，与大回环 22..38px 互不重叠） */}
+            <ReturnRail kind="review" active={reviewReturnActive} className="-right-[18px] top-[26px] bottom-[26px] w-3" />
 
             <Station
               id="implementation"
@@ -301,7 +306,7 @@ function WorkflowTimeline({
                     {statusShortText(reviewStatus)}
                   </span>
                 </div>
-                <section
+                <div
                   className="mt-2 flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto overscroll-x-contain pb-1 md:pb-0"
                   data-testid="workflow-review-stages"
                   aria-label="Review 三阶段，可横向滚动"
@@ -339,7 +344,7 @@ function WorkflowTimeline({
                     owner={reviewOwner(consensus, '共识记录猫猫')}
                     interaction={interactionFor('consensus')}
                   />
-                </section>
+                </div>
               </div>
             </div>
 
@@ -388,15 +393,19 @@ function WorkflowTimeline({
             title="最终验收"
             actorTone="user"
             actorLabel="你"
-            status={node('acceptance')?.status ?? 'pending'}
+            status={terminalRejected ? 'blocked' : (node('acceptance')?.status ?? 'pending')}
+            statusText={terminalRejected ? '✕ 验收未通过' : undefined}
             owner="你"
             interaction={interactionFor('acceptance')}
           >
             <div className="mt-1 text-micro text-cafe-secondary" data-return-source="acceptance">
-              只有你能决定：通过则本轮闭环结束；未通过则走入口 B 开启返工轮次，本轮证据保留
+              {terminalRejected
+                ? '证据已保留 · 沿右侧轨道返回入口 B 开启返工轮次'
+                : '只有你能决定：通过则本轮闭环结束；未通过则走入口 B 开启返工轮次，本轮证据保留'}
             </div>
           </Station>
 
+          {!terminalRejected && (
           <Station
             id="accepted-end"
             step="✓"
@@ -407,9 +416,14 @@ function WorkflowTimeline({
             owner="你"
             interaction={interactionFor('accepted-end')}
           >
-            <div className="mt-1 text-micro text-cafe-secondary">本交付轮次终止；后续方案新增或变更从入口 A 再开启</div>
+            <div className="mt-1 text-micro text-cafe-secondary">
+              本交付轮次终止；后续方案新增或变更从入口 A 再开启
+            </div>
           </Station>
+          )}
         </div>
+      </div>
+      </div>
       </div>
 
       <GraphLegend />

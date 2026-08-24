@@ -3,12 +3,12 @@
 import type { ReactNode } from 'react';
 import {
   type ActorTone,
-  actorDotClass,
   type GraphStatus,
-  graphStatusLabel,
-  statusDotClass,
   type WorkflowInspectionId,
   type WorkflowInspectionSelection,
+  actorDotClass,
+  graphStatusLabel,
+  statusDotClass,
 } from './workflow-graph-support';
 
 /** F289 泳道图（时间轴版）视觉原子 — 站点、入口、Review 阶段、分支胶囊、返工轨道 */
@@ -86,7 +86,7 @@ function pinClass(status: GraphStatus): string {
     case 'active':
       return 'border-[var(--mc-accent)] bg-[var(--mc-accent)] text-[var(--cafe-surface)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--mc-accent)_20%,transparent)]';
     case 'blocked':
-      return 'border-[var(--semantic-warning)] bg-[var(--semantic-warning)] text-[var(--cafe-surface)]';
+      return 'border-[var(--semantic-warning)] bg-[var(--semantic-warning)] text-[var(--cafe-surface)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--semantic-warning)_22%,transparent)]';
     case 'completed':
       return 'border-[var(--semantic-success)] bg-[var(--semantic-success)] text-[var(--cafe-surface)]';
     default:
@@ -103,6 +103,7 @@ export function Station({
   actorTone,
   actorLabel,
   status,
+  statusText,
   owner,
   interaction,
   children,
@@ -114,6 +115,8 @@ export function Station({
   actorTone: ActorTone;
   actorLabel: string;
   status: GraphStatus;
+  /** 覆盖右侧状态短文案（如 rejected 时的“✕ 验收未通过”） */
+  statusText?: string;
   owner: string;
   interaction: StationInteraction;
   children?: ReactNode;
@@ -158,7 +161,7 @@ export function Station({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-cafe">{title}</span>
           <ActorChip tone={actorTone} label={actorLabel} />
-          <span className={`ml-auto text-micro ${statusTextClass(status)}`}>{statusShortText(status)}</span>
+          <span className={`ml-auto text-micro ${statusTextClass(status)}`}>{statusText ?? statusShortText(status)}</span>
         </div>
         {children}
       </button>
@@ -174,6 +177,8 @@ export function EntryChip({
   status,
   interaction,
   returnTarget,
+  activeTone = 'accent',
+  activeHint = '● 本轮入口',
 }: {
   id: 'design-entry' | 'acceptance-rework-entry';
   title: string;
@@ -181,21 +186,26 @@ export function EntryChip({
   status: GraphStatus;
   interaction: StationInteraction;
   returnTarget?: string;
+  /** active 时的强调色：返工入口用 warning，方案入口用 accent */
+  activeTone?: 'accent' | 'warning';
+  activeHint?: string;
 }) {
   const { selected, describedBy, controls, onInspect, onPreview } = interaction;
   const selection = { id, title, owner: '你', status } satisfies WorkflowInspectionSelection;
   const toneClass =
     status === 'completed'
-      ? 'border-[color-mix(in_srgb,var(--semantic-success)_55%,var(--console-border-soft))] bg-[color-mix(in_srgb,var(--semantic-success-surface)_55%,var(--console-card-bg))]'
+      ? 'border-dashed border-[color-mix(in_srgb,var(--semantic-success)_55%,var(--console-border-soft))] bg-[color-mix(in_srgb,var(--semantic-success-surface)_55%,var(--console-card-bg))]'
       : status === 'active'
-        ? 'border-[var(--mc-accent)] bg-[color-mix(in_srgb,var(--mc-accent)_7%,var(--console-card-bg))]'
+        ? activeTone === 'warning'
+          ? 'border-solid border-[var(--semantic-warning)] bg-[color-mix(in_srgb,var(--semantic-warning-surface)_70%,var(--console-card-bg))]'
+          : 'border-dashed border-[var(--mc-accent)] bg-[color-mix(in_srgb,var(--mc-accent)_7%,var(--console-card-bg))]'
         : status === 'inactive'
-          ? 'border-[var(--console-border-soft)] opacity-45'
-          : 'border-[var(--console-border-soft)]';
+          ? 'border-dashed border-[var(--console-border-soft)] opacity-45'
+          : 'border-dashed border-[var(--console-border-soft)]';
   return (
     <button
       type="button"
-      className={`relative rounded-[10px] border-[1.5px] border-dashed px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] ${toneClass} ${
+      className={`relative rounded-[10px] border px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] ${toneClass} ${
         selected ? 'outline outline-2 outline-offset-2 outline-[var(--mc-accent)]' : ''
       }`}
       data-testid={`workflow-graph-node-${id}`}
@@ -215,10 +225,16 @@ export function EntryChip({
       {status === 'active' && <ActiveNodePulse />}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-cafe">{title}</span>
-        {status === 'completed' && (
-          <span className="text-micro font-bold text-[var(--semantic-success)]">✓ 本轮入口</span>
+        {status === 'completed' && <span className="text-micro font-bold text-[var(--semantic-success)]">✓ 本轮入口</span>}
+        {status === 'active' && (
+          <span
+            className={`text-micro font-bold ${
+              activeTone === 'warning' ? 'text-[var(--semantic-warning)]' : 'text-[var(--mc-accent)]'
+            }`}
+          >
+            {activeHint}
+          </span>
         )}
-        {status === 'active' && <span className="text-micro font-bold text-[var(--mc-accent)]">● 本轮入口</span>}
       </div>
       <div className="mt-0.5 text-micro text-cafe-muted">{detail}</div>
     </button>
@@ -314,7 +330,7 @@ export function BranchChip({
   );
 }
 
-/** 右侧返工轨道：纯 CSS 的 ⊐ 形虚线，由包裹容器锚定，无需实测 DOM */
+/** 右侧返工轨道：纯 CSS 的 ⊐ 形虚线，由包裹容器锚定，无需实测 DOM。激活时加粗并发光 */
 export function ReturnRail({
   kind,
   active,
@@ -326,14 +342,16 @@ export function ReturnRail({
 }) {
   return (
     <span
-      className={`pointer-events-none absolute rounded-r-xl border-[1.5px] border-l-0 border-dashed border-[var(--semantic-warning)] ${
-        active ? '' : 'opacity-25'
+      className={`pointer-events-none absolute rounded-r-[14px] border-l-0 border-dashed ${
+        active
+          ? 'border-[1.5px] border-[var(--semantic-warning)] drop-shadow-[0_0_3px_color-mix(in_srgb,var(--semantic-warning)_35%,transparent)]'
+          : 'border border-[color-mix(in_srgb,var(--semantic-warning)_85%,transparent)] opacity-25'
       } ${className}`}
       aria-hidden="true"
       data-testid={`workflow-return-rail-${kind}`}
       data-active={active}
     >
-      <span className="absolute -left-[7px] -top-[5px] h-0 w-0 border-y-[5px] border-y-transparent border-r-[7px] border-r-[var(--semantic-warning)]" />
+      <span className="absolute -left-[7px] -top-[5px] h-0 w-0 border-y-[4px] border-y-transparent border-r-[7px] border-r-[var(--semantic-warning)]" />
     </span>
   );
 }
