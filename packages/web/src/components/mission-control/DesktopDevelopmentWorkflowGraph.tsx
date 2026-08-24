@@ -2,6 +2,7 @@
 
 import type { DesktopDevelopmentResumePacket, DesktopDevelopmentWorkflowNode } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
+import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 import {
   ActorChip,
   BranchChip,
@@ -16,18 +17,17 @@ import {
   statusTextClass,
 } from './workflow-graph-parts';
 import {
-  type WorkflowHoverState,
-  type WorkflowInspectionSelection,
   aggregateStatus,
   entryModeLabel,
   handoffDetail,
   mergeModeLabel,
   shortSha,
+  type WorkflowHoverState,
+  type WorkflowInspectionSelection,
   workflowActionLabel,
   workflowActorLabel,
   workflowNodeLabel,
 } from './workflow-graph-support';
-import { WorkflowHoverPreview, WorkflowNodeInspector } from './WorkflowNodeInspector';
 
 /**
  * F289 完整开发闭环 — 时间轴视图。
@@ -223,207 +223,215 @@ function WorkflowTimeline({
 
       {/* 27 寸等宽屏：内容封顶 1080px 并居中；pr-10 是回环轨道的专用天沟 */}
       <div className="px-3 py-4 sm:px-4">
-      <div className="relative mx-auto w-full max-w-[1080px] pr-10">
-      <div className="relative">
-        {/* 返工大回环：验收未通过 → 入口 B。锚定在内容容器上，避免被外层 overflow-hidden 裁剪 */}
-        <ReturnRail kind="acceptance" active={acceptanceReturnActive} className="-right-[38px] top-6 bottom-[30px] w-4" />
-
-        <div className="grid grid-cols-1 items-stretch gap-2 sm:ml-10 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <EntryChip
-            id="design-entry"
-            title="入口 A · 方案新增 / 方案变更"
-            detail={`${work.designBranch ?? '未配置方案分支'} @ ${shortSha(work.designExactSha)}`}
-            status={designEntryStatus}
-            interaction={interactionFor('design-entry')}
-          />
-          <span className="justify-self-center self-center text-micro text-cafe-muted" aria-hidden="true">
-            或
-          </span>
-          <EntryChip
-            id="acceptance-rework-entry"
-            title="入口 B · 验收未通过 / 返工"
-            detail={
-              terminalRejected
-                ? `保留交付 #${work.deliveryCycleNumber} 证据，从返工入口开启下一轮`
-                : `保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据，直接回到实现与 Review`
-            }
-            status={reworkEntryStatus}
-            interaction={interactionFor('acceptance-rework-entry')}
-            returnTarget="acceptance"
-            activeTone="warning"
-            activeHint="● 等待你开启"
-          />
-        </div>
-        <div className="py-1 text-center text-micro text-cafe-muted sm:ml-10">↓ 汇入本轮开发</div>
-
-        <div className="relative">
-          <span
-            className="absolute left-[13px] top-2 bottom-3 w-0.5 rounded bg-[var(--console-border-soft)]"
-            aria-hidden="true"
-          />
-
+        <div className="relative mx-auto w-full max-w-[1080px] pr-10">
           <div className="relative">
-            {/* 修复小回环：清零门仍有意见 → 回到 01（频段 6..18px，与大回环 22..38px 互不重叠） */}
-            <ReturnRail kind="review" active={reviewReturnActive} className="-right-[18px] top-[26px] bottom-[26px] w-3" />
+            {/* 返工大回环：验收未通过 → 入口 B。锚定在内容容器上，避免被外层 overflow-hidden 裁剪 */}
+            <ReturnRail
+              kind="acceptance"
+              active={acceptanceReturnActive}
+              className="-right-[38px] top-6 bottom-[30px] w-4"
+            />
 
-            <Station
-              id="implementation"
-              step="01"
-              title="ChatGPT 实现 / 修复"
-              actorTone="desktop"
-              actorLabel="ChatGPT Desktop"
-              status={node('implementation')?.status ?? 'pending'}
-              owner="ChatGPT Desktop"
-              interaction={interactionFor('implementation')}
-            >
-              <div className="mt-1 text-micro text-cafe-secondary">
-                实现 #{work.attemptNumber} · <span className="font-mono">{work.branch}</span> @{' '}
-                <span className="font-mono">{shortSha(work.currentSha)}</span> · 原 Desktop 窗口 · 绑定代次{' '}
-                {work.bindingEpoch}
-              </div>
-            </Station>
-
-            <div className="relative flex gap-3 py-2">
-              <span
-                className={`relative z-[1] mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-micro font-bold ${
-                  reviewStatus === 'completed'
-                    ? 'border-[var(--semantic-success)] bg-[var(--semantic-success)] text-[var(--cafe-surface)]'
-                    : reviewStatus === 'active'
-                      ? 'border-[var(--mc-accent)] bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
-                      : reviewStatus === 'blocked'
-                        ? 'border-[var(--semantic-warning)] bg-[var(--semantic-warning)] text-[var(--cafe-surface)]'
-                        : 'border-[var(--console-border-strong)] bg-[var(--console-card-bg)] text-cafe-muted'
-                }`}
-                aria-hidden="true"
-              >
-                02
+            <div className="grid grid-cols-1 items-stretch gap-2 sm:ml-10 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <EntryChip
+                id="design-entry"
+                title="入口 A · 方案新增 / 方案变更"
+                detail={`${work.designBranch ?? '未配置方案分支'} @ ${shortSha(work.designExactSha)}`}
+                status={designEntryStatus}
+                interaction={interactionFor('design-entry')}
+              />
+              <span className="justify-self-center self-center text-micro text-cafe-muted" aria-hidden="true">
+                或
               </span>
-              <div className="min-w-0 flex-1 px-2.5 py-1.5" data-testid="workflow-review-loop">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-cafe">Review 共识循环</span>
-                  <ActorChip tone="review" label="Review 猫猫" />
-                  <span className={`ml-auto text-micro ${statusTextClass(reviewStatus)}`}>
-                    {statusShortText(reviewStatus)}
-                  </span>
-                </div>
-                <div
-                  className="mt-2 flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto overscroll-x-contain pb-1 md:pb-0"
-                  data-testid="workflow-review-stages"
-                  aria-label="Review 三阶段，可横向滚动"
-                >
-                  <StagePill
-                    id="independent_review"
-                    title="独立检视"
-                    detail="草稿隔离"
-                    progress={stageProgress(independentReview)}
-                    status={independentReview?.status ?? 'pending'}
-                    owner={reviewOwner(independentReview, 'Review 猫猫')}
-                    interaction={interactionFor('independent_review')}
-                  />
-                  <span className="flex shrink-0 items-center text-micro text-cafe-muted" aria-hidden="true">
-                    →
-                  </span>
-                  <StagePill
-                    id="cross_review"
-                    title="交叉检视"
-                    detail="核验对方意见"
-                    progress={stageProgress(crossReview)}
-                    status={crossReview?.status ?? 'pending'}
-                    owner={reviewOwner(crossReview, 'Review 猫猫')}
-                    interaction={interactionFor('cross_review')}
-                  />
-                  <span className="flex shrink-0 items-center text-micro text-cafe-muted" aria-hidden="true">
-                    →
-                  </span>
-                  <StagePill
-                    id="consensus"
-                    title="共识整理"
-                    detail={`开放意见 ${work.openFindings.length}`}
-                    progress={stageProgress(consensus)}
-                    status={consensus?.status ?? 'pending'}
-                    owner={reviewOwner(consensus, '共识记录猫猫')}
-                    interaction={interactionFor('consensus')}
-                  />
-                </div>
-              </div>
+              <EntryChip
+                id="acceptance-rework-entry"
+                title="入口 B · 验收未通过 / 返工"
+                detail={
+                  terminalRejected
+                    ? `保留交付 #${work.deliveryCycleNumber} 证据，从返工入口开启下一轮`
+                    : `保留交付 #${Math.max(1, work.deliveryCycleNumber - 1)} 证据，直接回到实现与 Review`
+                }
+                status={reworkEntryStatus}
+                interaction={interactionFor('acceptance-rework-entry')}
+                returnTarget="acceptance"
+                activeTone="warning"
+                activeHint="● 等待你开启"
+              />
             </div>
+            <div className="py-1 text-center text-micro text-cafe-muted sm:ml-10">↓ 汇入本轮开发</div>
 
-            <Station
-              id="handoff"
-              testid="workflow-graph-node-review-gate"
-              step="03"
-              title="检视清零门"
-              actorTone="catcafe"
-              actorLabel="CatCafe 协调器"
-              status={handoff?.status ?? 'pending'}
-              owner={handoff ? workflowActorLabel(handoff.actor) : 'CatCafe 协调器'}
-              interaction={interactionFor('handoff')}
-            >
-              <div className="mt-1 text-micro text-cafe-secondary">{handoffDetail(work)}</div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <BranchChip
-                  tone="warning"
+            <div className="relative">
+              <span
+                className="absolute left-[13px] top-2 bottom-3 w-0.5 rounded bg-[var(--console-border-soft)]"
+                aria-hidden="true"
+              />
+
+              <div className="relative">
+                {/* 修复小回环：清零门仍有意见 → 回到 01（频段 6..18px，与大回环 22..38px 互不重叠） */}
+                <ReturnRail
+                  kind="review"
                   active={reviewReturnActive}
-                  label="↺ 仍有意见 → 回到 01 修复"
-                  returnSource="review"
+                  className="-right-[18px] top-[26px] bottom-[26px] w-3"
                 />
-                <BranchChip tone="success" active={mergeRouteActive} label="意见清零 → 进入 04 合入" />
+
+                <Station
+                  id="implementation"
+                  step="01"
+                  title="ChatGPT 实现 / 修复"
+                  actorTone="desktop"
+                  actorLabel="ChatGPT Desktop"
+                  status={node('implementation')?.status ?? 'pending'}
+                  owner="ChatGPT Desktop"
+                  interaction={interactionFor('implementation')}
+                >
+                  <div className="mt-1 text-micro text-cafe-secondary">
+                    实现 #{work.attemptNumber} · <span className="font-mono">{work.branch}</span> @{' '}
+                    <span className="font-mono">{shortSha(work.currentSha)}</span> · 原 Desktop 窗口 · 绑定代次{' '}
+                    {work.bindingEpoch}
+                  </div>
+                </Station>
+
+                <div className="relative flex gap-3 py-2">
+                  <span
+                    className={`relative z-[1] mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-micro font-bold ${
+                      reviewStatus === 'completed'
+                        ? 'border-[var(--semantic-success)] bg-[var(--semantic-success)] text-[var(--cafe-surface)]'
+                        : reviewStatus === 'active'
+                          ? 'border-[var(--mc-accent)] bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                          : reviewStatus === 'blocked'
+                            ? 'border-[var(--semantic-warning)] bg-[var(--semantic-warning)] text-[var(--cafe-surface)]'
+                            : 'border-[var(--console-border-strong)] bg-[var(--console-card-bg)] text-cafe-muted'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    02
+                  </span>
+                  <div className="min-w-0 flex-1 px-2.5 py-1.5" data-testid="workflow-review-loop">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-cafe">Review 共识循环</span>
+                      <ActorChip tone="review" label="Review 猫猫" />
+                      <span className={`ml-auto text-micro ${statusTextClass(reviewStatus)}`}>
+                        {statusShortText(reviewStatus)}
+                      </span>
+                    </div>
+                    <section
+                      className="mt-2 flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto overscroll-x-contain pb-1 md:pb-0"
+                      data-testid="workflow-review-stages"
+                      aria-label="Review 三阶段，可横向滚动"
+                    >
+                      <StagePill
+                        id="independent_review"
+                        title="独立检视"
+                        detail="草稿隔离"
+                        progress={stageProgress(independentReview)}
+                        status={independentReview?.status ?? 'pending'}
+                        owner={reviewOwner(independentReview, 'Review 猫猫')}
+                        interaction={interactionFor('independent_review')}
+                      />
+                      <span className="flex shrink-0 items-center text-micro text-cafe-muted" aria-hidden="true">
+                        →
+                      </span>
+                      <StagePill
+                        id="cross_review"
+                        title="交叉检视"
+                        detail="核验对方意见"
+                        progress={stageProgress(crossReview)}
+                        status={crossReview?.status ?? 'pending'}
+                        owner={reviewOwner(crossReview, 'Review 猫猫')}
+                        interaction={interactionFor('cross_review')}
+                      />
+                      <span className="flex shrink-0 items-center text-micro text-cafe-muted" aria-hidden="true">
+                        →
+                      </span>
+                      <StagePill
+                        id="consensus"
+                        title="共识整理"
+                        detail={`开放意见 ${work.openFindings.length}`}
+                        progress={stageProgress(consensus)}
+                        status={consensus?.status ?? 'pending'}
+                        owner={reviewOwner(consensus, '共识记录猫猫')}
+                        interaction={interactionFor('consensus')}
+                      />
+                    </section>
+                  </div>
+                </div>
+
+                <Station
+                  id="handoff"
+                  testid="workflow-graph-node-review-gate"
+                  step="03"
+                  title="检视清零门"
+                  actorTone="catcafe"
+                  actorLabel="CatCafe 协调器"
+                  status={handoff?.status ?? 'pending'}
+                  owner={handoff ? workflowActorLabel(handoff.actor) : 'CatCafe 协调器'}
+                  interaction={interactionFor('handoff')}
+                >
+                  <div className="mt-1 text-micro text-cafe-secondary">{handoffDetail(work)}</div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <BranchChip
+                      tone="warning"
+                      active={reviewReturnActive}
+                      label="↺ 仍有意见 → 回到 01 修复"
+                      returnSource="review"
+                    />
+                    <BranchChip tone="success" active={mergeRouteActive} label="意见清零 → 进入 04 合入" />
+                  </div>
+                </Station>
               </div>
-            </Station>
+
+              <Station
+                id="merge"
+                step="04"
+                title="合入 main"
+                actorTone="desktop"
+                actorLabel="ChatGPT Desktop"
+                status={node('merge')?.status ?? 'pending'}
+                owner="ChatGPT Desktop"
+                interaction={interactionFor('merge')}
+              >
+                <div className="mt-1 text-micro text-cafe-secondary">
+                  {work.merged ? '已合入 main' : `通过合入门禁 · ${mergeModeLabel(work.mergeMode)}`}
+                </div>
+              </Station>
+
+              <Station
+                id="acceptance"
+                step="05"
+                title="最终验收"
+                actorTone="user"
+                actorLabel="你"
+                status={terminalRejected ? 'blocked' : (node('acceptance')?.status ?? 'pending')}
+                statusText={terminalRejected ? '✕ 验收未通过' : undefined}
+                owner="你"
+                interaction={interactionFor('acceptance')}
+              >
+                <div className="mt-1 text-micro text-cafe-secondary" data-return-source="acceptance">
+                  {terminalRejected
+                    ? '证据已保留 · 沿右侧轨道返回入口 B 开启返工轮次'
+                    : '只有你能决定：通过则本轮闭环结束；未通过则走入口 B 开启返工轮次，本轮证据保留'}
+                </div>
+              </Station>
+
+              {!terminalRejected && (
+                <Station
+                  id="accepted-end"
+                  step="✓"
+                  title="验收通过 · 结束"
+                  actorTone="user"
+                  actorLabel="你"
+                  status={terminalAccepted ? 'active' : 'pending'}
+                  owner="你"
+                  interaction={interactionFor('accepted-end')}
+                >
+                  <div className="mt-1 text-micro text-cafe-secondary">
+                    本交付轮次终止；后续方案新增或变更从入口 A 再开启
+                  </div>
+                </Station>
+              )}
+            </div>
           </div>
-
-          <Station
-            id="merge"
-            step="04"
-            title="合入 main"
-            actorTone="desktop"
-            actorLabel="ChatGPT Desktop"
-            status={node('merge')?.status ?? 'pending'}
-            owner="ChatGPT Desktop"
-            interaction={interactionFor('merge')}
-          >
-            <div className="mt-1 text-micro text-cafe-secondary">
-              {work.merged ? '已合入 main' : `通过合入门禁 · ${mergeModeLabel(work.mergeMode)}`}
-            </div>
-          </Station>
-
-          <Station
-            id="acceptance"
-            step="05"
-            title="最终验收"
-            actorTone="user"
-            actorLabel="你"
-            status={terminalRejected ? 'blocked' : (node('acceptance')?.status ?? 'pending')}
-            statusText={terminalRejected ? '✕ 验收未通过' : undefined}
-            owner="你"
-            interaction={interactionFor('acceptance')}
-          >
-            <div className="mt-1 text-micro text-cafe-secondary" data-return-source="acceptance">
-              {terminalRejected
-                ? '证据已保留 · 沿右侧轨道返回入口 B 开启返工轮次'
-                : '只有你能决定：通过则本轮闭环结束；未通过则走入口 B 开启返工轮次，本轮证据保留'}
-            </div>
-          </Station>
-
-          {!terminalRejected && (
-          <Station
-            id="accepted-end"
-            step="✓"
-            title="验收通过 · 结束"
-            actorTone="user"
-            actorLabel="你"
-            status={terminalAccepted ? 'active' : 'pending'}
-            owner="你"
-            interaction={interactionFor('accepted-end')}
-          >
-            <div className="mt-1 text-micro text-cafe-secondary">
-              本交付轮次终止；后续方案新增或变更从入口 A 再开启
-            </div>
-          </Station>
-          )}
         </div>
-      </div>
-      </div>
       </div>
 
       <GraphLegend />
