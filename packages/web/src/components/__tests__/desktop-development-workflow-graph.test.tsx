@@ -129,11 +129,11 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     expect(container.textContent).toContain('本轮入口：方案新增 / 变更');
     expect(container.textContent).toContain('方案新增 / 方案变更');
     expect(container.textContent).toContain('验收未通过 / 返工');
-    expect(container.textContent).toContain('仍有检视意见：回到 ChatGPT 修复，再次进入 Review');
+    expect(container.textContent).toContain('仍有意见 → 回到 01 修复');
     expect(container.querySelector('[data-testid="workflow-swimlane-graph"]')).not.toBeNull();
-    expect(container.textContent).toContain('ChatGPT 持球');
-    expect(container.textContent).toContain('多猫检视');
-    expect(container.textContent).toContain('协调与门控');
+    expect(container.textContent).toContain('Review 共识循环');
+    expect(container.textContent).toContain('检视清零门');
+    expect(container.textContent).toContain('CatCafe 协调器');
     expect(
       container.querySelector('[data-testid="workflow-graph-node-implementation"]')?.getAttribute('data-status'),
     ).toBe('active');
@@ -148,7 +148,7 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
     ).not.toBeNull();
   });
 
-  it('uses measured return rails and keeps inactive route text readable', () => {
+  it('renders css return rails and keeps the inactive gate branch readable', () => {
     act(() =>
       root.render(
         <DesktopDevelopmentWorkflowGraph
@@ -160,18 +160,18 @@ describe('DesktopDevelopmentWorkflowGraph', () => {
       ),
     );
 
-    const rails = container.querySelector('[data-testid="workflow-return-rails"]');
-    expect(rails?.getAttribute('preserveAspectRatio')).toBeNull();
-    expect(rails?.getAttribute('viewBox')).toBeNull();
-    expect(rails?.querySelector('marker')?.getAttribute('markerUnits')).toBe('userSpaceOnUse');
-    const inactiveRoute = Array.from(container.querySelectorAll('li[data-active="false"]')).find((item) =>
-      item.textContent?.includes('仍有检视意见'),
+    const reviewRail = container.querySelector('[data-testid="workflow-return-rail-review"]');
+    const acceptanceRail = container.querySelector('[data-testid="workflow-return-rail-acceptance"]');
+    expect(reviewRail?.getAttribute('data-active')).toBe('false');
+    expect(acceptanceRail?.getAttribute('data-active')).toBe('false');
+    const inactiveBranch = Array.from(container.querySelectorAll('span[data-active="false"]')).find((item) =>
+      item.textContent?.includes('仍有意见'),
     );
-    expect(inactiveRoute?.className).not.toContain('opacity-');
-    const transitionLabel = Array.from(container.querySelectorAll('span')).find((item) =>
-      item.textContent?.includes('提交精确 commit'),
+    expect(inactiveBranch?.className).not.toContain('opacity-');
+    const joinLabel = Array.from(container.querySelectorAll('div')).find((item) =>
+      item.textContent === '↓ 汇入本轮开发',
     );
-    expect(transitionLabel?.closest('[aria-hidden="true"]')).toBeNull();
+    expect(joinLabel?.closest('[aria-hidden="true"]')).toBeNull();
   });
 
   it('previews a node on focus and opens a persistent detail dialog on click', () => {
