@@ -677,11 +677,11 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 24 total rules in development.yaml (including post-merge runtime activation truth)
-    assert.equal(results.length, 24, `expected 24 rules, got ${results.length}`);
+    // 30 total rules in development.yaml (including ChatGPT Review governance)
+    assert.equal(results.length, 30, `expected 30 rules, got ${results.length}`);
 
-    // 11 manual_only rules -> skipped (runtime activation truth requires external live-state evidence)
-    assert.equal(skipped.length, 11, `expected 11 skipped (manual_only), got ${skipped.length}`);
+    // 17 manual_only rules -> skipped (semantic governance requires external evidence)
+    assert.equal(skipped.length, 17, `expected 17 skipped (manual_only), got ${skipped.length}`);
 
     // Nominal trace should produce 0 violations
     assert.equal(

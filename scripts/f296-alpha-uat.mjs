@@ -126,6 +126,14 @@ export function selectProviderExecution(executions, catId) {
   );
 }
 
+function resolveExpectedRevision(options) {
+  if (options.expectedRevision === undefined) {
+    return execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
+  }
+  if (!/^[0-9a-f]{40}$/.test(options.expectedRevision)) throw new UatError('failed', 'invalid_options');
+  return options.expectedRevision;
+}
+
 async function awaitProviderInvocation(options, parentInvocationId) {
   const deadline = Date.now() + options.timeoutMs;
   while (Date.now() < deadline) {
@@ -217,7 +225,9 @@ async function observe(options, threadId, journey, content, expected) {
 export async function runAlphaUat(options) {
   validateCanonicalContract();
   validateAlphaCoordinates(options.apiUrl, options.redisUrl);
-  const expectedRevision = execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
+  // Unit callers inject the same immutable revision returned by their mocked health endpoint.
+  // The CLI intentionally exposes no override and continues to require origin/main fail closed.
+  const expectedRevision = resolveExpectedRevision(options);
   const sessionOptions = await establishSession(options);
   const [health, readiness, cats] = await Promise.all([
     json(sessionOptions, '/health'),

@@ -299,7 +299,10 @@ function resolveFeatureOwnerCatId(owner: string | undefined): string | undefined
 
 function buildFeatIndexQueryHaystack(item: FeatIndexEntry): string {
   const ownerCatId = resolveFeatureOwnerCatId(item.owner);
-  return [item.featId, item.name, item.status, item.kind, item.owner, ownerCatId].filter(Boolean).join(' ').toLowerCase();
+  return [item.featId, item.name, item.status, item.kind, item.owner, ownerCatId]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 }
 
 function buildFeatIndexSuggestedAction(

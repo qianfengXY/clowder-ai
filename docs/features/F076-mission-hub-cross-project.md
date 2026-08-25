@@ -4,6 +4,7 @@ related_features: [F049, F058, F070, F152, F306]
 topics: [mission-hub, cross-project, dispatch, reflux, command-center, client-governance]
 doc_kind: spec
 created: 2026-03-07
+tips_exempt: "Superseded Mission Hub projection; the current user journey and discovery action are owned by the F306 project-workspaces capability tip."
 ---
 
 # F076: Mission Hub 跨项目作战面板 + 甲方项目治理引擎

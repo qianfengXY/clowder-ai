@@ -5,8 +5,8 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 await import('tsx/esm');
 const { ImageExporter } = await import('../../../api/src/services/ImageExporter.ts');
@@ -14,6 +14,12 @@ const { ImageExporter } = await import('../../../api/src/services/ImageExporter.
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
 const FIXTURE_MESSAGE_ID = 'html-widget-export-fixture-message';
+const BROWSER_CASE_TIMEOUT_MS = 30_000;
+const BROWSER_SUITE_TIMEOUT_MS = 180_000;
+
+function runBrowserCase(context, name, body) {
+  return context.test(name, { timeout: BROWSER_CASE_TIMEOUT_MS }, body);
+}
 
 async function findFreePort() {
   const server = createServer();
@@ -67,7 +73,7 @@ async function countMagentaPixels(png) {
 
 test(
   'html_widget remeasures across desktop and 360px layouts, then exports the bottom sentinel',
-  { timeout: 120_000 },
+  { timeout: BROWSER_SUITE_TIMEOUT_MS },
   async (t) => {
     const port = await findFreePort();
     const output = [];
@@ -88,41 +94,45 @@ test(
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       await page.goto(url, { waitUntil: 'networkidle' });
 
-      await t.test('live 14KB message mounts and refreshes without ever committing an empty iframe', async () => {
-        const livePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        const liveUrl = `http://127.0.0.1:${port}/dev/f294-html-widget-live-message`;
-        const assertVisibleLiveWidget = async () => {
-          const liveWidget = await waitForWidgetMeasurement(livePage);
-          assert.equal(
-            await livePage.locator('[data-live-message-widget-fixture]').getAttribute('data-source-html-code-points'),
-            '14904',
-            'fixture must retain the exact persisted 14KB html_widget document',
-          );
-          assert.equal(
-            await livePage.locator('[data-live-message-widget-fixture]').getAttribute('data-empty-iframe-observed'),
-            'false',
-            'message-flow mount must not commit a real iframe whose srcDoc is the empty server placeholder',
-          );
-          const childFrame = livePage.frames().find((frame) => frame.parentFrame() === livePage.mainFrame());
-          assert.ok(childFrame, 'live message iframe must create a child browsing context');
-          await childFrame.waitForSelector('main.page');
-          assert.match(
-            await childFrame.locator('body').innerText(),
-            /不从三百件事开始/,
-            'live message iframe must expose visible body content, not only payload/height metadata',
-          );
-          assert.equal(await liveWidget.locator('iframe').getAttribute('sandbox'), 'allow-scripts');
-        };
+      await runBrowserCase(
+        t,
+        'live 14KB message mounts and refreshes without ever committing an empty iframe',
+        async () => {
+          const livePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+          const liveUrl = `http://127.0.0.1:${port}/dev/f294-html-widget-live-message`;
+          const assertVisibleLiveWidget = async () => {
+            const liveWidget = await waitForWidgetMeasurement(livePage);
+            assert.equal(
+              await livePage.locator('[data-live-message-widget-fixture]').getAttribute('data-source-html-code-points'),
+              '14904',
+              'fixture must retain the exact persisted 14KB html_widget document',
+            );
+            assert.equal(
+              await livePage.locator('[data-live-message-widget-fixture]').getAttribute('data-empty-iframe-observed'),
+              'false',
+              'message-flow mount must not commit a real iframe whose srcDoc is the empty server placeholder',
+            );
+            const childFrame = livePage.frames().find((frame) => frame.parentFrame() === livePage.mainFrame());
+            assert.ok(childFrame, 'live message iframe must create a child browsing context');
+            await childFrame.waitForSelector('main.page');
+            assert.match(
+              await childFrame.locator('body').innerText(),
+              /不从三百件事开始/,
+              'live message iframe must expose visible body content, not only payload/height metadata',
+            );
+            assert.equal(await liveWidget.locator('iframe').getAttribute('sandbox'), 'allow-scripts');
+          };
 
-        try {
-          await livePage.goto(liveUrl, { waitUntil: 'networkidle' });
-          await assertVisibleLiveWidget();
-          await livePage.reload({ waitUntil: 'networkidle' });
-          await assertVisibleLiveWidget();
-        } finally {
-          await livePage.close();
-        }
-      });
+          try {
+            await livePage.goto(liveUrl, { waitUntil: 'networkidle' });
+            await assertVisibleLiveWidget();
+            await livePage.reload({ waitUntil: 'networkidle' });
+            await assertVisibleLiveWidget();
+          } finally {
+            await livePage.close();
+          }
+        },
+      );
 
       const widget = await waitForWidgetMeasurement(page);
       const desktopHeight = Number(await widget.getAttribute('data-html-widget-measured-height'));
@@ -174,7 +184,7 @@ test(
       await page.getByRole('button', { name: '收起完整内容' }).click();
       assert.equal(await widget.locator('iframe').evaluate((iframe) => iframe.style.height), '720px');
 
-      await t.test('short content auto-fits below the initial hint and iframe viewport', async () => {
+      await runBrowserCase(t, 'short content auto-fits below the initial hint and iframe viewport', async () => {
         const shortPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         try {
           await shortPage.goto(`${url}?fixture=short`, { waitUntil: 'networkidle' });
@@ -193,7 +203,7 @@ test(
         }
       });
 
-      await t.test('viewport-relative CSS converges without parent-child height amplification', async () => {
+      await runBrowserCase(t, 'viewport-relative CSS converges without parent-child height amplification', async () => {
         const viewportRelativePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         try {
           await viewportRelativePage.goto(`${url}?fixture=viewport-relative`, { waitUntil: 'networkidle' });
@@ -220,7 +230,7 @@ test(
       const magentaPixels = await countMagentaPixels(png);
       assert.ok(magentaPixels > 1_000, `exported PNG lost the bottom sentinel (${magentaPixels} magenta pixels)`);
 
-      await t.test('async descendant geometry invalidates readiness before PNG capture', async () => {
+      await runBrowserCase(t, 'async descendant geometry invalidates readiness before PNG capture', async () => {
         const asyncPng = await exporter.capture(`${url}?fixture=async-image`, 'browser-test-user', {
           selectionMessageIds: [FIXTURE_MESSAGE_ID],
         });
@@ -231,7 +241,7 @@ test(
         );
       });
 
-      await t.test('CSS generated content is included in the selective PNG', async () => {
+      await runBrowserCase(t, 'CSS generated content is included in the selective PNG', async () => {
         const pseudoPng = await exporter.capture(`${url}?fixture=pseudo-content`, 'browser-test-user', {
           selectionMessageIds: [FIXTURE_MESSAGE_ID],
         });
@@ -242,7 +252,7 @@ test(
         );
       });
 
-      await t.test('documentElement generated content is included in the selective PNG', async () => {
+      await runBrowserCase(t, 'documentElement generated content is included in the selective PNG', async () => {
         const rootPseudoPng = await exporter.capture(`${url}?fixture=root-pseudo-content`, 'browser-test-user', {
           selectionMessageIds: [FIXTURE_MESSAGE_ID],
         });
@@ -253,29 +263,37 @@ test(
         );
       });
 
-      await t.test('viewport-bound documentElement generated overflow rejects instead of clipping', async () => {
-        await assert.rejects(
-          () =>
-            exporter.capture(`${url}?fixture=root-pseudo-feedback`, 'browser-test-user', {
-              selectionMessageIds: [FIXTURE_MESSAGE_ID],
-            }),
-          /HTML widget layout failed/,
-          'root generated overflow that moves with the iframe viewport must fail closed',
-        );
-      });
+      await runBrowserCase(
+        t,
+        'viewport-bound documentElement generated overflow rejects instead of clipping',
+        async () => {
+          await assert.rejects(
+            () =>
+              exporter.capture(`${url}?fixture=root-pseudo-feedback`, 'browser-test-user', {
+                selectionMessageIds: [FIXTURE_MESSAGE_ID],
+              }),
+            /HTML widget layout failed/,
+            'root generated overflow that moves with the iframe viewport must fail closed',
+          );
+        },
+      );
 
-      await t.test('fixed generated paint outside every scroll extent rejects instead of clipping', async () => {
-        await assert.rejects(
-          () =>
-            exporter.capture(`${url}?fixture=fixed-root-pseudo`, 'browser-test-user', {
-              selectionMessageIds: [FIXTURE_MESSAGE_ID],
-            }),
-          /HTML widget layout failed/,
-          'a generated fixed box outside descendant/body/root extents must fail closed',
-        );
-      });
+      await runBrowserCase(
+        t,
+        'fixed generated paint outside every scroll extent rejects instead of clipping',
+        async () => {
+          await assert.rejects(
+            () =>
+              exporter.capture(`${url}?fixture=fixed-root-pseudo`, 'browser-test-user', {
+                selectionMessageIds: [FIXTURE_MESSAGE_ID],
+              }),
+            /HTML widget layout failed/,
+            'a generated fixed box outside descendant/body/root extents must fail closed',
+          );
+        },
+      );
 
-      await t.test('CSSOM-generated fixed paint revokes stale readiness before screenshot', async () => {
+      await runBrowserCase(t, 'CSSOM-generated fixed paint revokes stale readiness before screenshot', async () => {
         await assert.rejects(
           () =>
             exporter.capture(`${url}?fixture=cssom-fixed-root-pseudo`, 'browser-test-user', {
@@ -286,18 +304,22 @@ test(
         );
       });
 
-      await t.test('CSSOM paint inserted after the final pre-capture proof invalidates the candidate PNG', async () => {
-        await assert.rejects(
-          () =>
-            exporter.capture(`${url}?fixture=cssom-final-proof-race`, 'browser-test-user', {
-              selectionMessageIds: [FIXTURE_MESSAGE_ID],
-            }),
-          /HTML widget layout failed/,
-          'a fixed pseudo inserted after the final proof ack must discard the candidate screenshot',
-        );
-      });
+      await runBrowserCase(
+        t,
+        'CSSOM paint inserted after the final pre-capture proof invalidates the candidate PNG',
+        async () => {
+          await assert.rejects(
+            () =>
+              exporter.capture(`${url}?fixture=cssom-final-proof-race`, 'browser-test-user', {
+                selectionMessageIds: [FIXTURE_MESSAGE_ID],
+              }),
+            /HTML widget layout failed/,
+            'a fixed pseudo inserted after the final proof ack must discard the candidate screenshot',
+          );
+        },
+      );
 
-      await t.test('measurable CSSOM-generated flow refreshes proof and enters the PNG', async () => {
+      await runBrowserCase(t, 'measurable CSSOM-generated flow refreshes proof and enters the PNG', async () => {
         const cssomPseudoPng = await exporter.capture(`${url}?fixture=cssom-root-pseudo-content`, 'browser-test-user', {
           selectionMessageIds: [FIXTURE_MESSAGE_ID],
         });
@@ -308,18 +330,22 @@ test(
         );
       });
 
-      await t.test('viewport-dependent overflow rejects instead of capturing a clipped sentinel', async () => {
-        await assert.rejects(
-          () =>
-            exporter.capture(`${url}?fixture=viewport-feedback`, 'browser-test-user', {
-              selectionMessageIds: [FIXTURE_MESSAGE_ID],
-            }),
-          /HTML widget layout failed/,
-          'an unresolvable 100vh + 100px feedback cycle must fail closed',
-        );
-      });
+      await runBrowserCase(
+        t,
+        'viewport-dependent overflow rejects instead of capturing a clipped sentinel',
+        async () => {
+          await assert.rejects(
+            () =>
+              exporter.capture(`${url}?fixture=viewport-feedback`, 'browser-test-user', {
+                selectionMessageIds: [FIXTURE_MESSAGE_ID],
+              }),
+            /HTML widget layout failed/,
+            'an unresolvable 100vh + 100px feedback cycle must fail closed',
+          );
+        },
+      );
 
-      await t.test('unstable export rejects instead of silently capturing', async () => {
+      await runBrowserCase(t, 'unstable export rejects instead of silently capturing', async () => {
         const exporterBrowser = exporter.browser;
         assert.ok(exporterBrowser, 'the prior successful export must initialize the shared browser');
         const pagesBeforeFailure = (await exporterBrowser.pages()).length;

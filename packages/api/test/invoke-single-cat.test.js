@@ -304,7 +304,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       threadStore: {
-        get: async () => ({ backlogItemId: 'item-managed', createdBy: 'owner-1' }),
+        get: async (threadId) => ({ id: threadId, backlogItemId: 'item-managed', createdBy: 'owner-1' }),
         updateParticipantActivity: async () => {},
       },
       workflowSopStore: {
@@ -371,8 +371,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       threadStore: {
         get: async (threadId) =>
           threadId === 'thread-ordinary'
-            ? { createdBy: 'owner-1' }
-            : { backlogItemId: 'item-managed', createdBy: 'owner-1' },
+            ? { id: threadId, createdBy: 'owner-1' }
+            : { id: threadId, backlogItemId: 'item-managed', createdBy: 'owner-1' },
         updateParticipantActivity: async () => {},
       },
       workflowSopStore: {

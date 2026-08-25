@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { describe, test } from 'node:test';
 import {
@@ -147,7 +146,6 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
   test('polls the real trace read until the completed invocation span is exported', async (t) => {
     const originalFetch = globalThis.fetch;
     const sessionCookie = `cat_cafe_session=${'1'.repeat(64)}`;
-    const deployedRevision = execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
     const traceReads = new Map();
     let invocationNumber = 0;
     let metricsValue = 0;
@@ -184,7 +182,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
           { headers: { 'set-cookie': `${sessionCookie}; Path=/; HttpOnly` } },
         );
       }
-      if (url.pathname === '/health') return Response.json({ deploymentRevision: deployedRevision });
+      if (url.pathname === '/health') return Response.json({ deploymentRevision: revision });
       if (url.pathname === '/ready') return Response.json({ status: 'ready' });
       if (url.pathname === '/api/cats') {
         return Response.json({
@@ -228,6 +226,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       userId: 'f296-alpha-uat',
       timeoutMs: 1000,
       pollMs: 100,
+      expectedRevision: revision,
     });
     assert.equal(manifest.journeys[0].outcome, 'passed');
     assert.equal(traceReads.get('child-1'), 2);

@@ -497,7 +497,10 @@ export const ChatMessage = memo(function ChatMessage({
           )}
           <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left ${toneClass}`}>
             {isReviewOrchestration && (
-              <span className="mb-1 block text-xs font-semibold tracking-wide" data-testid="review-system-message-label">
+              <span
+                className="mb-1 block text-xs font-semibold tracking-wide"
+                data-testid="review-system-message-label"
+              >
                 Review 系统消息
               </span>
             )}

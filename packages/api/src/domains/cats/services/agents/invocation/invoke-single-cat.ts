@@ -100,7 +100,6 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   authoritativeCompactionEventFromSession,
   resolveAuthoritativeCompactionSupport,
@@ -111,6 +110,7 @@ import {
   recordContextProjectionFinalGeneration,
   recordContextProjectionLedgerOutcome,
 } from '../../session/context-continuity-telemetry.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';

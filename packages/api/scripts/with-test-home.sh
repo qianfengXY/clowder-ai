@@ -46,6 +46,11 @@ unset CAT_CAFE_CLAUDE_CARRIER
 # an individual test explicitly sets the host under test.
 unset API_SERVER_HOST
 
+# Trusted remote single-user mode expands the authorization boundary beyond
+# loopback. Tests must opt into that authority explicitly instead of inheriting
+# it from the runtime process that launched the suite.
+unset CAT_CAFE_TRUST_REMOTE_SINGLE_USER
+
 # DEFAULT_CAT_ID is user/runtime preference, not test fixture state. Leaving it
 # inherited makes routing tests depend on which cat launched the test command.
 unset DEFAULT_CAT_ID

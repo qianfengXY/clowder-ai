@@ -42,7 +42,19 @@ const ALLOWLIST = new Map([
   ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
   ['CLAUDE_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
-  ['CODEX_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  [
+    'CODEX_BIN',
+    'Codex host executable override used by Desktop integration and the F254 live fixture; process-owned, not Hub user config',
+  ],
+  [
+    'CHATGPT_APP_CODEX_BIN',
+    'ChatGPT Desktop bundled Codex executable override; host integration detail, not Hub user config',
+  ],
+  [
+    'CODEX_APP_SERVER_SOCKET',
+    'ChatGPT Desktop app-server control socket override; host integration detail, not Hub user config',
+  ],
+  ['KIMI_CODE_HOME', 'Kimi CLI-owned home directory override; provider process convention, not Hub user config'],
   ['F254_CLAUDE_MODEL', 'F254 developer-only Claude capability fixture model override; not a runtime setting'],
   ['F254_CODEX_TRANSPORT', 'F254 developer-only Codex fixture transport selector; not a runtime setting'],
   ['CAT_OPUS_MODEL', 'Existing provider model env reused only as a developer fixture fallback'],
@@ -162,6 +174,7 @@ describe('env-registry completeness', () => {
     'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
     'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
   ];
+  const hostIntegrationEnvNames = ['CODEX_BIN', 'CHATGPT_APP_CODEX_BIN', 'CODEX_APP_SERVER_SOCKET', 'KIMI_CODE_HOME'];
 
   it('every allowlist entry has a non-empty reason', () => {
     for (const [name, reason] of ALLOWLIST) {
@@ -187,6 +200,13 @@ describe('env-registry completeness', () => {
     for (const name of weixinRuntimeFlagNames) {
       assert.ok(registeredNames.has(name), `${name} should stay registered; it is not a connector credential`);
       assert.ok(!ALLOWLIST.has(name), `${name} is not declared in connectors/weixin/connector.yaml`);
+    }
+  });
+
+  it('keeps host and provider-owned path overrides out of Hub runtime config', () => {
+    for (const name of hostIntegrationEnvNames) {
+      assert.ok(ALLOWLIST.has(name), `${name} should remain a reasoned host/provider integration exception`);
+      assert.ok(!registeredNames.has(name), `${name} is not Hub user config and must not enter env-registry.ts`);
     }
   });
 
