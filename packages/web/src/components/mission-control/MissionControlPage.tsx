@@ -6,10 +6,24 @@ import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import { apiFetch } from '@/utils/api-client';
 import { DependencyGraphTab } from './DependencyGraphTab';
-import { ExternalProjectTab } from './ExternalProjectTab';
 import { extractFeatureId } from './FeatureBirdEyePanel';
 import { FeatureRowList } from './FeatureRowList';
 import { ImportProjectModal } from './ImportProjectModal';
+import { ProjectWorkspaceNav } from './ProjectWorkspaceNav';
+import {
+  buildProjectWorkspaces,
+  getProjectBacklogCreatePath,
+  getProjectBacklogImportPath,
+  getProjectBacklogItemsPath,
+  isCanonicalProjectItem,
+  LEGACY_MISSION_HUB_ACTIVE_TAB_KEY,
+  MISSION_HUB_ACTIVE_PROJECT_KEY,
+  type ProjectWorkspaceRef,
+  type ProjectWorkspaceView,
+  projectViewPreferenceKey,
+  resolveProjectPreference,
+  resolveProjectViewPreference,
+} from './project-workspace';
 import { QuickCreateForm } from './QuickCreateForm';
 import { SuggestionDrawer } from './SuggestionDrawer';
 import { ThreadSituationPanel } from './ThreadSituationPanel';
@@ -39,7 +53,6 @@ type SelfClaimPolicyBlocker = 'once' | 'thread' | null;
 
 const CONTENT_SURFACE_CLASS =
   'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-1 px-2 py-4 sm:m-3 sm:px-9 sm:py-8';
-const MISSION_HUB_ACTIVE_TAB_KEY = 'cat-cafe:mission-hub:active-tab';
 
 function detectSelfClaimPolicyBlocker(rawError: string): SelfClaimPolicyBlocker {
   if (rawError.includes('Self-claim once policy already consumed')) return 'once';
@@ -67,7 +80,12 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+function describeBacklogLoadError(error: unknown): string {
+  return error instanceof Error ? error.message : '加载 backlog 失败';
+}
+
 export function MissionControlPage() {
+  const itemRequestSeq = useRef(0);
   const threadSituationRequestSeq = useRef(0);
   const [selfClaimScopes, setSelfClaimScopes] = useState<Record<string, MissionHubSelfClaimScope>>({});
   const [selfClaimPolicyBlocker, setSelfClaimPolicyBlocker] = useState<SelfClaimPolicyBlocker>(null);
@@ -90,21 +108,149 @@ export function MissionControlPage() {
     setSelectedPhase,
     setError,
   } = useMissionControlStore();
+  const { projects, setProjects, setActiveProjectId } = useExternalProjectStore();
+  const [activeProjectKey, setActiveProjectKey] = useState<string>('home');
+  const [activeView, setActiveView] = useState<ProjectWorkspaceView>('features');
+  const [navigationPreference, setNavigationPreference] = useState<{
+    savedProjectKey: string | null;
+    legacyActiveTab: string | null;
+  } | null>(null);
+  const [externalProjectsLoaded, setExternalProjectsLoaded] = useState(false);
+  const [navigationReady, setNavigationReady] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
-  const loadItems = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const workspaces = useMemo(() => buildProjectWorkspaces(projects), [projects]);
+  const activeProject = useMemo(
+    () => workspaces.find((project) => project.key === activeProjectKey) ?? workspaces[0],
+    [activeProjectKey, workspaces],
+  ) as ProjectWorkspaceRef;
+  const activeProjectKeyRef = useRef(activeProject.key);
+
+  useEffect(() => {
+    activeProjectKeyRef.current = activeProject.key;
+  }, [activeProject.key]);
+
+  const loadExternalProjects = useCallback(async () => {
     try {
-      const response = await apiFetch('/api/backlog/items');
-      if (!response.ok) throw new Error(await parseError(response));
-      const body = (await response.json()) as BacklogListResponse;
-      setItems(body.items ?? []);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载 backlog 失败');
+      const response = await apiFetch('/api/external-projects');
+      if (response.ok) {
+        const body = (await response.json()) as { projects: ExternalProject[] };
+        setProjects(body.projects);
+      }
+    } catch {
+      // Cat Café remains usable when the external project registry is unavailable.
     } finally {
-      setLoading(false);
+      setExternalProjectsLoaded(true);
     }
-  }, [setError, setItems, setLoading]);
+  }, [setProjects]);
+
+  useEffect(() => {
+    let savedProjectKey: string | null = null;
+    let legacyActiveTab: string | null = null;
+    try {
+      savedProjectKey = window.localStorage.getItem(MISSION_HUB_ACTIVE_PROJECT_KEY)?.trim() || null;
+      legacyActiveTab = window.localStorage.getItem(LEGACY_MISSION_HUB_ACTIVE_TAB_KEY)?.trim() || null;
+    } catch {
+      // Local storage is an optional navigation convenience.
+    }
+    setNavigationPreference({ savedProjectKey, legacyActiveTab });
+  }, []);
+
+  useEffect(() => {
+    void loadExternalProjects();
+  }, [loadExternalProjects]);
+
+  useEffect(() => {
+    if (!navigationPreference || !externalProjectsLoaded || navigationReady) return;
+    const project = resolveProjectPreference(
+      projects,
+      navigationPreference.savedProjectKey,
+      navigationPreference.legacyActiveTab,
+    );
+    let savedView: string | null = null;
+    try {
+      savedView = window.localStorage.getItem(projectViewPreferenceKey(project.key));
+    } catch {
+      // Local storage is an optional navigation convenience.
+    }
+    setActiveProjectKey(project.key);
+    setActiveView(
+      resolveProjectViewPreference(
+        savedView,
+        navigationPreference.savedProjectKey ? null : navigationPreference.legacyActiveTab,
+      ),
+    );
+    setNavigationReady(true);
+  }, [externalProjectsLoaded, navigationPreference, navigationReady, projects]);
+
+  const selectActiveProject = useCallback((project: ProjectWorkspaceRef) => {
+    let savedView: string | null = null;
+    try {
+      window.localStorage.setItem(MISSION_HUB_ACTIVE_PROJECT_KEY, project.key);
+      savedView = window.localStorage.getItem(projectViewPreferenceKey(project.key));
+    } catch {
+      // Local storage is an optional navigation convenience.
+    }
+    activeProjectKeyRef.current = project.key;
+    setActiveProjectKey(project.key);
+    setActiveView(resolveProjectViewPreference(savedView, null));
+  }, []);
+
+  const selectActiveView = useCallback(
+    (view: ProjectWorkspaceView) => {
+      setActiveView(view);
+      try {
+        window.localStorage.setItem(projectViewPreferenceKey(activeProject.key), view);
+      } catch {
+        // Local storage is an optional navigation convenience.
+      }
+    },
+    [activeProject.key],
+  );
+
+  useEffect(() => {
+    setActiveProjectId(activeProject.kind === 'external' ? activeProject.id : null);
+  }, [activeProject, setActiveProjectId]);
+
+  const loadItems = useCallback(
+    async (project: ProjectWorkspaceRef) => {
+      const requestSeq = ++itemRequestSeq.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await apiFetch(getProjectBacklogItemsPath(project));
+        if (!response.ok) throw new Error(await parseError(response));
+        const body = (await response.json()) as BacklogListResponse;
+        if (requestSeq !== itemRequestSeq.current) return;
+        setItems((body.items ?? []).filter(isCanonicalProjectItem));
+      } catch (loadError) {
+        if (requestSeq !== itemRequestSeq.current) return;
+        setItems([]);
+        setError(describeBacklogLoadError(loadError));
+      } finally {
+        if (requestSeq === itemRequestSeq.current) setLoading(false);
+      }
+    },
+    [setError, setItems, setLoading],
+  );
+
+  const reloadItems = useCallback(async () => {
+    if (activeProjectKeyRef.current !== activeProject.key) return;
+    await loadItems(activeProject);
+  }, [activeProject, loadItems]);
+
+  useEffect(() => {
+    if (!navigationReady) return;
+    setItems([]);
+    setSelectedItemId(null);
+    setThreadsByBacklogId({});
+    setThreadsByFeatureId({});
+    setThreadCountByFeature({});
+    void loadItems(activeProject);
+    return () => {
+      itemRequestSeq.current += 1;
+    };
+  }, [activeProject, loadItems, navigationReady, setItems, setSelectedItemId]);
 
   const loadSelfClaimScopes = useCallback(async () => {
     try {
@@ -116,10 +262,6 @@ export function MissionControlPage() {
       setError(loadError instanceof Error ? loadError.message : '加载 self-claim policy 失败');
     }
   }, [setError]);
-
-  useEffect(() => {
-    void loadItems();
-  }, [loadItems]);
 
   useEffect(() => {
     void loadSelfClaimScopes();
@@ -142,13 +284,14 @@ export function MissionControlPage() {
 
   /** F058 Phase G: unique feature IDs from all items for thread title search */
   const uniqueFeatureIds = useMemo(() => {
+    if (activeProject.kind === 'external') return [];
     const ids = new Set<string>();
     for (const item of items) {
       const fid = extractFeatureId(item.tags);
       if (fid !== 'Untagged') ids.add(fid);
     }
     return [...ids];
-  }, [items]);
+  }, [activeProject.kind, items]);
 
   const loadThreadSituations = useCallback(async (backlogItemIds: string[]) => {
     const requestSeq = ++threadSituationRequestSeq.current;
@@ -175,8 +318,7 @@ export function MissionControlPage() {
       if (requestSeq !== threadSituationRequestSeq.current) return;
       setThreadsByBacklogId({});
     } finally {
-      if (requestSeq !== threadSituationRequestSeq.current) return;
-      setThreadsLoading(false);
+      if (requestSeq === threadSituationRequestSeq.current) setThreadsLoading(false);
     }
   }, []);
 
@@ -222,13 +364,14 @@ export function MissionControlPage() {
   }, [uniqueFeatureIds]);
 
   const withSubmitGuard = useCallback(
-    async (task: () => Promise<void>) => {
+    async (task: () => Promise<void>, projectKey: string) => {
       setSubmitting(true);
       setSelfClaimPolicyBlocker(null);
       setError(null);
       try {
         await task();
       } catch (submitError) {
+        if (activeProjectKeyRef.current !== projectKey) return;
         const rawError = submitError instanceof Error ? submitError.message : '请求失败';
         setSelfClaimPolicyBlocker(detectSelfClaimPolicyBlocker(rawError));
         setError(formatMissionHubError(rawError));
@@ -239,25 +382,30 @@ export function MissionControlPage() {
     [setError, setSubmitting],
   );
 
+  const withActiveProjectSubmitGuard = useCallback(
+    async (task: () => Promise<void>) => withSubmitGuard(task, activeProject.key),
+    [activeProject.key, withSubmitGuard],
+  );
+
   const handleCreate = useCallback(
     async (payload: { title: string; summary: string; priority: BacklogItem['priority']; tags: string[] }) =>
-      withSubmitGuard(async () => {
-        const response = await apiFetch('/api/backlog/items', {
+      withActiveProjectSubmitGuard(async () => {
+        const response = await apiFetch(getProjectBacklogCreatePath(activeProject), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         if (!response.ok) throw new Error(await parseError(response));
         const created = (await response.json()) as BacklogItem;
-        setSelectedItemId(created.id);
-        await loadItems();
+        if (activeProjectKeyRef.current === activeProject.key) setSelectedItemId(created.id);
+        await reloadItems();
       }),
-    [loadItems, setSelectedItemId, withSubmitGuard],
+    [activeProject, reloadItems, setSelectedItemId, withActiveProjectSubmitGuard],
   );
 
   const handleSuggest = useCallback(
     async (payload: { itemId: string; catId: string; why: string; plan: string; requestedPhase: ThreadPhase }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/suggest-claim`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -269,14 +417,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleApprove = useCallback(
     async (payload: { itemId: string; threadPhase: ThreadPhase }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/decide-claim`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -286,14 +434,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleReject = useCallback(
     async (payload: { itemId: string; note?: string }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/decide-claim`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -303,14 +451,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleSelfClaim = useCallback(
     async (payload: { itemId: string; catId: string; why: string; plan: string; requestedPhase: ThreadPhase }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/self-claim`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -322,14 +470,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleAcquireLease = useCallback(
     async (payload: { itemId: string; catId: string; ttlMs?: number }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/lease/acquire`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -339,14 +487,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleHeartbeatLease = useCallback(
     async (payload: { itemId: string; catId: string; ttlMs?: number }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/lease/heartbeat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -356,14 +504,14 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleReleaseLease = useCallback(
     async (payload: { itemId: string; catId?: string }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/lease/release`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -372,33 +520,33 @@ export function MissionControlPage() {
           }),
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleReclaimLease = useCallback(
     async (payload: { itemId: string }) =>
-      withSubmitGuard(async () => {
+      withActiveProjectSubmitGuard(async () => {
         const response = await apiFetch(`/api/backlog/items/${encodeURIComponent(payload.itemId)}/lease/reclaim`, {
           method: 'POST',
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [reloadItems, withActiveProjectSubmitGuard],
   );
 
   const handleImportFromDocs = useCallback(
     async () =>
-      withSubmitGuard(async () => {
-        const response = await apiFetch('/api/backlog/import-active-features', {
+      withActiveProjectSubmitGuard(async () => {
+        const response = await apiFetch(getProjectBacklogImportPath(activeProject), {
           method: 'POST',
         });
         if (!response.ok) throw new Error(await parseError(response));
-        await loadItems();
+        await reloadItems();
       }),
-    [loadItems, withSubmitGuard],
+    [activeProject, reloadItems, withActiveProjectSubmitGuard],
   );
 
   // Status summary counts
@@ -408,74 +556,6 @@ export function MissionControlPage() {
   );
   const activeCount = useMemo(() => items.filter((i) => i.status === 'dispatched').length, [items]);
   const doneCount = useMemo(() => items.filter((i) => i.status === 'done').length, [items]);
-
-  // Tab state (string allows project IDs as tab values)
-  const [activeTab, setActiveTab] = useState<string>('features');
-  const [tabPreferenceReady, setTabPreferenceReady] = useState(false);
-  const [hadSavedTab, setHadSavedTab] = useState(false);
-  const [externalProjectsLoaded, setExternalProjectsLoaded] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const { projects, setProjects, setActiveProjectId } = useExternalProjectStore();
-
-  const loadExternalProjects = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/external-projects');
-      if (res.ok) {
-        const body = (await res.json()) as { projects: ExternalProject[] };
-        setProjects(body.projects);
-      }
-    } catch {
-      /* ignore */
-    } finally {
-      setExternalProjectsLoaded(true);
-    }
-  }, [setProjects]);
-
-  const selectActiveTab = useCallback((tab: string) => {
-    setActiveTab(tab);
-    setHadSavedTab(true);
-    try {
-      window.localStorage.setItem(MISSION_HUB_ACTIVE_TAB_KEY, tab);
-    } catch {
-      /* local storage is an optional navigation convenience */
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      const savedTab = window.localStorage.getItem(MISSION_HUB_ACTIVE_TAB_KEY)?.trim();
-      if (savedTab) {
-        setActiveTab(savedTab);
-        setHadSavedTab(true);
-      }
-    } catch {
-      /* local storage may be unavailable in hardened browsers */
-    } finally {
-      setTabPreferenceReady(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadExternalProjects();
-  }, [loadExternalProjects]);
-
-  useEffect(() => {
-    if (!tabPreferenceReady || !externalProjectsLoaded) return;
-    const isBuiltInTab = activeTab === 'features' || activeTab === 'dependencies';
-    const isKnownProject = projects.some((project) => project.id === activeTab);
-    const defaultProject = projects.find((project) => project.name.trim().toLowerCase() === 'traqen') ?? projects[0];
-    if (!hadSavedTab && projects.length > 0) {
-      selectActiveTab(defaultProject.id);
-    } else if (!isBuiltInTab && !isKnownProject) {
-      selectActiveTab(defaultProject?.id ?? 'features');
-    }
-  }, [activeTab, externalProjectsLoaded, hadSavedTab, projects, selectActiveTab, tabPreferenceReady]);
-
-  // Sync active project
-  const activeProject = useMemo(() => projects.find((p) => p.id === activeTab) ?? null, [projects, activeTab]);
-  useEffect(() => {
-    setActiveProjectId(activeProject?.id ?? null);
-  }, [activeProject, setActiveProjectId]);
 
   return (
     <div className="flex h-screen bg-[var(--console-panel-bg)]">
@@ -511,47 +591,13 @@ export function MissionControlPage() {
             />
           )}
 
-          <div className="mt-4 flex console-divider-b">
-            <button
-              type="button"
-              onClick={() => selectActiveTab('features')}
-              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
-                activeTab === 'features'
-                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
-                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
-              }`}
-              data-testid="mc-tab-features"
-            >
-              功能列表
-            </button>
-            <button
-              type="button"
-              onClick={() => selectActiveTab('dependencies')}
-              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
-                activeTab === 'dependencies'
-                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
-                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
-              }`}
-              data-testid="mc-tab-dependencies"
-            >
-              依赖全景
-            </button>
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => selectActiveTab(p.id)}
-                data-testid={`mc-tab-project-${p.id}`}
-                className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
-                  activeTab === p.id
-                    ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
-                    : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
-                }`}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
+          <ProjectWorkspaceNav
+            workspaces={workspaces}
+            activeProjectKey={activeProject.key}
+            activeView={activeView}
+            onSelectProject={selectActiveProject}
+            onSelectView={selectActiveView}
+          />
 
           <div className="flex flex-wrap items-center gap-5 console-divider-b py-2.5">
             <StatusDot
@@ -582,9 +628,7 @@ export function MissionControlPage() {
           )}
 
           <div className="min-h-0 flex-1 pt-4">
-            {activeProject ? (
-              <ExternalProjectTab key={activeProject.id} project={activeProject} />
-            ) : activeTab === 'features' ? (
+            {activeView === 'features' ? (
               <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="space-y-4">
                   <QuickCreateForm disabled={submitting} onCreate={handleCreate} />
@@ -593,6 +637,7 @@ export function MissionControlPage() {
                     threadsByBacklogId={threadsByBacklogId}
                     threadCountByFeature={threadCountByFeature}
                     threadsByFeatureId={threadsByFeatureId}
+                    featureDocDetailEnabled={activeProject.kind === 'home'}
                     selectedItemId={selectedItemId}
                     onSelectItem={setSelectedItemId}
                   />
@@ -673,7 +718,9 @@ export function MissionControlPage() {
             )}
           </div>
 
-          {loading && items.length === 0 && <p className="pt-3 text-xs text-cafe-muted">加载 backlog 中...</p>}
+          {(!navigationReady || (loading && items.length === 0)) && (
+            <p className="pt-3 text-xs text-cafe-muted">加载 backlog 中...</p>
+          )}
         </div>
       </main>
     </div>

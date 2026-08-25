@@ -10,6 +10,7 @@ interface FeatureRowListProps {
   threadsByBacklogId: Record<string, ThreadSituationSummary>;
   threadCountByFeature: Record<string, number>;
   threadsByFeatureId?: Record<string, ThreadSituationSummary[]>;
+  featureDocDetailEnabled?: boolean;
   selectedItemId: string | null;
   onSelectItem: (id: string) => void;
 }
@@ -38,6 +39,7 @@ export function FeatureRowList({
   threadsByBacklogId,
   threadCountByFeature,
   threadsByFeatureId = {},
+  featureDocDetailEnabled = true,
   selectedItemId,
   onSelectItem,
 }: FeatureRowListProps) {
@@ -57,6 +59,7 @@ export function FeatureRowList({
           threadsByBacklogId={threadsByBacklogId}
           threadCount={threadCountByFeature[tag] ?? 0}
           titleMatchedThreads={threadsByFeatureId[tag] ?? []}
+          featureDocDetailEnabled={featureDocDetailEnabled}
           expanded={expandedFeature === tag}
           onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
           selectedItemId={selectedItemId}
@@ -88,6 +91,7 @@ export function FeatureRowList({
                   threadsByBacklogId={threadsByBacklogId}
                   threadCount={threadCountByFeature[tag] ?? 0}
                   titleMatchedThreads={threadsByFeatureId[tag] ?? []}
+                  featureDocDetailEnabled={featureDocDetailEnabled}
                   expanded={expandedFeature === tag}
                   onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
                   selectedItemId={selectedItemId}

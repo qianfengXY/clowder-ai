@@ -61,6 +61,7 @@ interface FeatureRowProps {
   threadsByBacklogId: Record<string, ThreadSituationSummary>;
   threadCount: number;
   titleMatchedThreads: ThreadSituationSummary[];
+  featureDocDetailEnabled?: boolean;
   expanded: boolean;
   onToggle: () => void;
   selectedItemId: string | null;
@@ -73,6 +74,7 @@ export function FeatureRow({
   threadsByBacklogId,
   threadCount,
   titleMatchedThreads,
+  featureDocDetailEnabled = true,
   expanded,
   onToggle,
   selectedItemId,
@@ -84,7 +86,7 @@ export function FeatureRow({
   const badge = STATUS_BADGE[status];
   const dispatchedItems = featureItems.filter((item) => item.status === 'dispatched' && threadsByBacklogId[item.id]);
   const totalThreadCount = Math.max(threadCount, dispatchedItems.length);
-  const { detail, loading: detailLoading } = useFeatureDocDetail(expanded ? tag : null);
+  const { detail, loading: detailLoading } = useFeatureDocDetail(expanded && featureDocDetailEnabled ? tag : null);
 
   return (
     <div

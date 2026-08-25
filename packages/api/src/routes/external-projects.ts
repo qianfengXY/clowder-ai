@@ -1,10 +1,11 @@
 /**
- * F076: External Project routes — CRUD + BACKLOG import
+ * F076/F306: External Project registry and ownership-scoped BACKLOG routes
  */
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
+  CatId,
   CreateDesktopDevelopmentProjectBindingInput,
   DesktopDevelopmentPolicyUpdate,
   ExternalProject,
@@ -21,6 +22,7 @@ import {
   getFeatureTagId,
   parseActiveFeaturesFromBacklog,
 } from './backlog-doc-import.js';
+import { createBacklogItemSchema } from './backlog-request-schemas.js';
 import { DEFAULT_EXTENSION_CATALOG_RELATIVE_PATH, readExtensionFeatureRows } from './extension-feature-catalog.js';
 import { migrateLegacyExtensionItems } from './extension-feature-migration.js';
 
@@ -127,6 +129,30 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     if (!project) return;
     await externalProjectStore.delete(id);
     return reply.status(204).send();
+  });
+
+  app.post('/api/external-projects/:id/backlog/items', async (request, reply) => {
+    const userId = requireUserId(request, reply);
+    if (!userId) return;
+    const { id } = request.params as { id: string };
+    const project = await requireOwnedProject(id, userId, reply);
+    if (!project) return;
+
+    const parsed = createBacklogItemSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid request body', details: parsed.error.issues });
+    }
+
+    const item = await backlogStore.create({
+      userId,
+      projectId: project.id,
+      title: parsed.data.title,
+      summary: parsed.data.summary,
+      priority: parsed.data.priority,
+      tags: parsed.data.tags,
+      createdBy: parsed.data.createdBy as CatId | 'user',
+    });
+    return reply.status(201).send(item);
   });
 
   // --- BACKLOG import ---

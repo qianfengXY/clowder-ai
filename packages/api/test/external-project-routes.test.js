@@ -183,6 +183,85 @@ describe('External Project Routes', () => {
     assert.equal(getRes.statusCode, 404);
   });
 
+  test('POST project backlog item injects the owned project scope', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: '/tmp/traqen' },
+    });
+    const projectId = createRes.json().project.id;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/backlog/items`,
+      headers: H,
+      payload: {
+        title: '[F008] Project task',
+        summary: 'Must belong to Traqen',
+        priority: 'p1',
+        tags: ['feature:f008'],
+        projectId: 'attacker-controlled',
+        userId: 'other-user',
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.json().projectId, projectId);
+    assert.equal(res.json().userId, 'user1');
+    const stored = await backlogStore.listByUser('user1');
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].projectId, projectId);
+  });
+
+  test('POST project backlog item rejects invalid input', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: '/tmp/traqen' },
+    });
+    const projectId = createRes.json().project.id;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/backlog/items`,
+      headers: H,
+      payload: { title: '', summary: '', priority: 'urgent' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal((await backlogStore.listByUser('user1')).length, 0);
+  });
+
+  test('POST project backlog item rejects unknown and cross-user projects', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Private', description: '', sourcePath: '/tmp/private' },
+    });
+    const projectId = createRes.json().project.id;
+    const payload = { title: 'Task', summary: 'Private', priority: 'p2', tags: [] };
+
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects/missing/backlog/items',
+      headers: H,
+      payload,
+    });
+    assert.equal(missing.statusCode, 404);
+
+    const crossUser = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/backlog/items`,
+      headers: { 'x-cat-cafe-user': 'other' },
+      payload,
+    });
+    assert.equal(crossUser.statusCode, 404);
+    assert.equal((await backlogStore.listByUser('user1')).length, 0);
+  });
+
   // --- Intent Card routes ---
 
   test('POST intent-cards creates card', async () => {
