@@ -33,6 +33,7 @@ export interface MutableBacklogAuditEntry {
 export interface MutableBacklogItem {
   id: string;
   userId: string;
+  projectId?: string;
   title: string;
   summary: string;
   priority: 'p0' | 'p1' | 'p2' | 'p3';
@@ -171,8 +172,13 @@ export function createMissionControlMockBackend(): MissionControlMockBackend {
       });
     }
 
-    if (path === '/api/backlog/items' && (!init?.method || init.method === 'GET')) {
-      return mockResponse(200, { items: items.map((item) => cloneItem(item)) });
+    if (path.startsWith('/api/backlog/items') && (!init?.method || init.method === 'GET')) {
+      const url = new URL(path, 'http://localhost');
+      const projectId = url.searchParams.get('projectId');
+      const scopedItems = projectId
+        ? items.filter((item) => item.projectId === projectId)
+        : items.filter((item) => !item.projectId);
+      return mockResponse(200, { items: scopedItems.map((item) => cloneItem(item)) });
     }
 
     if (path.startsWith('/api/threads') && (!init?.method || init.method === 'GET')) {
@@ -266,6 +272,28 @@ export function createMissionControlMockBackend(): MissionControlMockBackend {
             timestamp: now,
           },
         ],
+      };
+      items = [item, ...items];
+      return mockResponse(201, item);
+    }
+
+    const projectCreateMatch = path.match(/^\/api\/external-projects\/([^/]+)\/backlog\/items$/);
+    if (projectCreateMatch && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as CreateItemBody;
+      const now = Date.now();
+      const item: MutableBacklogItem = {
+        id: `b-${itemSeq++}`,
+        userId: 'u_test',
+        projectId: decodeURIComponent(projectCreateMatch[1] ?? ''),
+        title: body.title,
+        summary: body.summary,
+        priority: body.priority,
+        tags: body.tags ?? [],
+        status: 'open',
+        createdBy: 'user',
+        createdAt: now,
+        updatedAt: now,
+        audit: [{ id: `a-${now}`, action: 'created', actor: { kind: 'user', id: 'u_test' }, timestamp: now }],
       };
       items = [item, ...items];
       return mockResponse(201, item);

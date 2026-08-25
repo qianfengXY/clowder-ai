@@ -8,8 +8,9 @@ import { FeatureRow, type ThreadSituationSummary } from './FeatureRow';
 interface FeatureRowListProps {
   items: BacklogItem[];
   threadsByBacklogId: Record<string, ThreadSituationSummary>;
-  threadCountByFeature: Record<string, number>;
+  threadCountByFeature?: Record<string, number>;
   threadsByFeatureId?: Record<string, ThreadSituationSummary[]>;
+  featureDocDetailEnabled?: boolean;
   selectedItemId: string | null;
   onSelectItem: (id: string) => void;
 }
@@ -36,8 +37,9 @@ function isAllDone(featureItems: BacklogItem[]): boolean {
 export function FeatureRowList({
   items,
   threadsByBacklogId,
-  threadCountByFeature,
+  threadCountByFeature = {},
   threadsByFeatureId = {},
+  featureDocDetailEnabled = true,
   selectedItemId,
   onSelectItem,
 }: FeatureRowListProps) {
@@ -57,6 +59,7 @@ export function FeatureRowList({
           threadsByBacklogId={threadsByBacklogId}
           threadCount={threadCountByFeature[tag] ?? 0}
           titleMatchedThreads={threadsByFeatureId[tag] ?? []}
+          featureDocDetailEnabled={featureDocDetailEnabled}
           expanded={expandedFeature === tag}
           onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
           selectedItemId={selectedItemId}
@@ -88,6 +91,7 @@ export function FeatureRowList({
                   threadsByBacklogId={threadsByBacklogId}
                   threadCount={threadCountByFeature[tag] ?? 0}
                   titleMatchedThreads={threadsByFeatureId[tag] ?? []}
+                  featureDocDetailEnabled={featureDocDetailEnabled}
                   expanded={expandedFeature === tag}
                   onToggle={() => setExpandedFeature(expandedFeature === tag ? null : tag)}
                   selectedItemId={selectedItemId}

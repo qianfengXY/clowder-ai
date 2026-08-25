@@ -44,7 +44,7 @@ describe('MissionControlPage', () => {
   });
 
   beforeEach(() => {
-    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
+    window.localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1035,7 +1035,7 @@ describe('MissionControlPage — Done lane + dependencies', () => {
   });
 
   beforeEach(() => {
-    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
+    window.localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1162,7 +1162,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
   });
 
   beforeEach(() => {
-    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
+    window.localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -1198,7 +1198,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     expect(depsTab?.textContent).toContain('依赖全景');
   });
 
-  it('opens Traqen features initially and restores the last Mission Hub location', async () => {
+  it('treats Cat Café and Traqen as peer projects and restores project plus per-project view', async () => {
     const projects: ExternalProject[] = [
       {
         id: 'project-nalo',
@@ -1221,15 +1221,37 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         updatedAt: 1,
       },
     ];
-    window.localStorage.removeItem('cat-cafe:mission-hub:project-sub-tab:project-traqen');
+    backend.setItems([
+      {
+        id: 'home-f306',
+        userId: 'u_test',
+        title: '[F306] Home feature',
+        summary: 'Cat Café',
+        priority: 'p1',
+        tags: ['feature:f306'],
+        status: 'open',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+        audit: [],
+      },
+      {
+        id: 'traqen-f007',
+        userId: 'u_test',
+        projectId: 'project-traqen',
+        title: '[F007] Traqen restart',
+        summary: 'Traqen',
+        priority: 'p0',
+        tags: ['feature:f007'],
+        status: 'dispatched',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+        audit: [],
+      },
+    ]);
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
-      if (path.includes('/intent-cards')) return Promise.resolve(mockResponse(200, { cards: [] }));
-      if (path.endsWith('/frame')) return Promise.resolve(mockResponse(200, { frame: null }));
-      if (path.startsWith('/api/execution-digests')) return Promise.resolve(mockResponse(200, { digests: [] }));
-      if (path.endsWith('/resolutions')) return Promise.resolve(mockResponse(200, { resolutions: [] }));
-      if (path.endsWith('/slices')) return Promise.resolve(mockResponse(200, { slices: [] }));
-      if (path.endsWith('/reflux-patterns')) return Promise.resolve(mockResponse(200, { patterns: [] }));
       return backend.handleRequest(path, init);
     });
 
@@ -1239,32 +1261,322 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     await flush(act);
     await flush(act);
 
-    const traqenTab = container.querySelector('[data-testid="mc-tab-project-project-traqen"]') as HTMLButtonElement;
-    const featuresSubTab = container.querySelector(
-      '[data-testid="external-project-sub-tab-features"]',
-    ) as HTMLButtonElement;
-    expect(traqenTab.className).toContain('console-active-bg');
-    expect(featuresSubTab.className).toContain('mc-accent');
+    const homeProject = container.querySelector('[data-testid="mc-project-home"]') as HTMLButtonElement;
+    const traqenProject = container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement;
+    expect(homeProject.getAttribute('aria-current')).toBe('page');
+    expect(container.textContent).toContain('Home feature');
+    expect(container.textContent).not.toContain('Traqen restart');
 
-    const auditSubTab = container.querySelector('[data-testid="external-project-sub-tab-audit"]') as HTMLButtonElement;
-    await act(async () => auditSubTab.click());
-    expect(window.localStorage.getItem('cat-cafe:mission-hub:project-sub-tab:project-traqen')).toBe('audit');
+    await act(async () => traqenProject.click());
+    await flush(act);
+    expect(traqenProject.getAttribute('aria-current')).toBe('page');
+    expect(container.textContent).toContain('Traqen restart');
+    expect(container.textContent).not.toContain('Home feature');
+    expect(container.querySelector('[data-testid="external-project-sub-tab-features"]')).toBeNull();
+    expect(container.textContent).not.toContain('开发闭环');
 
     const dependenciesTab = container.querySelector('[data-testid="mc-tab-dependencies"]') as HTMLButtonElement;
     await act(async () => dependenciesTab.click());
-    await act(async () => traqenTab.click());
-    await flush(act);
-    expect(
-      (container.querySelector('[data-testid="external-project-sub-tab-audit"]') as HTMLButtonElement).className,
-    ).toContain('mc-accent');
+    expect(window.localStorage.getItem('cat-cafe:mission-hub:project-view:external:project-traqen')).toBe(
+      'dependencies',
+    );
+    expect(window.localStorage.getItem('cat-cafe:mission-hub:active-project')).toBe('external:project-traqen');
 
-    await act(async () => dependenciesTab.click());
     await act(async () => root.render(React.createElement('div')));
     await act(async () => root.render(React.createElement(MissionControlPage)));
     await flush(act);
+    await flush(act);
+    expect(
+      (container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement).getAttribute(
+        'aria-current',
+      ),
+    ).toBe('page');
     expect((container.querySelector('[data-testid="mc-tab-dependencies"]') as HTMLButtonElement).className).toContain(
       'console-active-bg',
     );
+  });
+
+  it('uses the active external project for quick create and Backlog import', async () => {
+    const projects: ExternalProject[] = [
+      {
+        id: 'project-traqen',
+        userId: 'u_test',
+        name: 'Traqen',
+        description: '',
+        sourcePath: '/work/Traqen',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
+      if (path === '/api/external-projects/project-traqen/import-backlog' && init?.method === 'POST') {
+        return Promise.resolve(mockResponse(200, { imported: 0, skipped: 0, total: 0 }));
+      }
+      return backend.handleRequest(path, init);
+    });
+
+    await act(async () => root.render(React.createElement(MissionControlPage)));
+    await flush(act);
+    await flush(act);
+    const traqenProject = container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement;
+    mockApiFetch.mockClear();
+    await act(async () => traqenProject.click());
+    await flush(act);
+
+    const titleInput = container.querySelector('[data-testid="mc-create-title"]') as HTMLInputElement;
+    const summaryInput = container.querySelector('[data-testid="mc-create-summary"]') as HTMLInputElement;
+    const submitButton = container.querySelector('[data-testid="mc-create-submit"]') as HTMLButtonElement;
+    await act(async () => {
+      setNativeValue(titleInput, '[F008] Traqen task');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setNativeValue(summaryInput, 'Project scoped');
+      summaryInput.dispatchEvent(new Event('input', { bubbles: true }));
+      submitButton.click();
+    });
+    await flush(act);
+
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/external-projects/project-traqen/backlog/items',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(backend.getItems().find((item) => item.title === '[F008] Traqen task')?.projectId).toBe('project-traqen');
+
+    const importButton = container.querySelector('[data-testid="mc-import-docs"]') as HTMLButtonElement;
+    await act(async () => importButton.click());
+    await flush(act);
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/external-projects/project-traqen/import-backlog',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('hides EXT items and disables unscoped Feature-ID document and Thread lookups for external projects', async () => {
+    const projects: ExternalProject[] = [
+      {
+        id: 'project-traqen',
+        userId: 'u_test',
+        name: 'Traqen',
+        description: '',
+        sourcePath: '/work/Traqen',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    backend.setItems([
+      {
+        id: 'traqen-f007',
+        userId: 'u_test',
+        projectId: 'project-traqen',
+        title: '[F007] Traqen restart',
+        summary: 'Canonical project work',
+        priority: 'p0',
+        tags: ['feature:f007'],
+        status: 'dispatched',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+        dispatchedThreadId: 'thread-traqen-f007',
+        dispatchedThreadPhase: 'coding',
+        audit: [],
+      },
+      {
+        id: 'traqen-ext',
+        userId: 'u_test',
+        projectId: 'project-traqen',
+        title: '[EXT-001] ChatGPT Desktop loop',
+        summary: 'Legacy custom adapter',
+        priority: 'p2',
+        tags: ['feature:ext-001', 'feature-kind:extension'],
+        status: 'done',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+        audit: [],
+      },
+    ]);
+    backend.setThreads([
+      {
+        id: 'thread-traqen-f007',
+        title: '[F007] Traqen implementation',
+        createdBy: 'u_test',
+        lastActiveAt: 10,
+        participants: ['codex' as CatId],
+        backlogItemId: 'traqen-f007',
+      },
+    ]);
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
+      return backend.handleRequest(path, init);
+    });
+
+    await act(async () => root.render(React.createElement(MissionControlPage)));
+    await flush(act);
+    await flush(act);
+    const traqenProject = container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement;
+    mockApiFetch.mockClear();
+    await act(async () => traqenProject.click());
+    await flush(act);
+    expect(container.textContent).toContain('Traqen restart');
+    expect(container.textContent).not.toContain('ChatGPT Desktop loop');
+
+    const row = container.querySelector('[data-testid="mc-feature-row-F007"]');
+    await act(async () => (row?.querySelector('[data-feature-row-toggle]') as HTMLButtonElement | null)?.click());
+    await flush(act);
+    const calledPaths = mockApiFetch.mock.calls.map(([path]) => String(path));
+    expect(calledPaths.some((path) => path.includes('featureIds='))).toBe(false);
+    expect(calledPaths.some((path) => path.includes('/api/backlog/feature-doc-detail?featureId=F007'))).toBe(false);
+    expect(calledPaths.some((path) => path.includes('backlogItemIds=traqen-f007'))).toBe(true);
+
+    const threadsTab = container.querySelector('[data-testid="mc-right-tab-threads"]') as HTMLButtonElement;
+    await act(async () => threadsTab.click());
+    expect(container.textContent).toContain('[F007] Traqen implementation');
+  });
+
+  it('ignores a late backlog response from the previously selected project', async () => {
+    const projects: ExternalProject[] = [
+      {
+        id: 'project-traqen',
+        userId: 'u_test',
+        name: 'Traqen',
+        description: '',
+        sourcePath: '/work/Traqen',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    const homeItem = {
+      id: 'home-item',
+      userId: 'u_test',
+      title: '[F306] Home remains current',
+      summary: 'Home',
+      priority: 'p1' as const,
+      tags: ['feature:f306'],
+      status: 'open' as const,
+      createdBy: 'user' as const,
+      createdAt: 1,
+      updatedAt: 1,
+      audit: [],
+    };
+    let resolveTraqen: ((response: Response) => void) | null = null;
+    const traqenResponse = new Promise<Response>((resolve) => {
+      resolveTraqen = resolve;
+    });
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
+      if (path === '/api/backlog/items?projectId=project-traqen') return traqenResponse;
+      if (path === '/api/backlog/items') return Promise.resolve(mockResponse(200, { items: [homeItem] }));
+      return backend.handleRequest(path, init);
+    });
+
+    await act(async () => root.render(React.createElement(MissionControlPage)));
+    await flush(act);
+    await flush(act);
+    const traqenProject = container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement;
+    const homeProject = container.querySelector('[data-testid="mc-project-home"]') as HTMLButtonElement;
+    await act(async () => traqenProject.click());
+    await act(async () => homeProject.click());
+    await flush(act);
+    await act(async () => {
+      resolveTraqen?.(
+        mockResponse(200, {
+          items: [{ ...homeItem, id: 'late-traqen', projectId: 'project-traqen', title: '[F007] Late Traqen' }],
+        }),
+      );
+    });
+    await flush(act);
+
+    expect(homeProject.getAttribute('aria-current')).toBe('page');
+    expect(container.textContent).toContain('Home remains current');
+    expect(container.textContent).not.toContain('Late Traqen');
+  });
+
+  it('does not reload or select the previous project after a late quick-create response', async () => {
+    const projects: ExternalProject[] = [
+      {
+        id: 'project-traqen',
+        userId: 'u_test',
+        name: 'Traqen',
+        description: '',
+        sourcePath: '/work/Traqen',
+        backlogPath: 'docs/ROADMAP.md',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    backend.setItems([
+      {
+        id: 'home-item',
+        userId: 'u_test',
+        title: '[F306] Home remains selected',
+        summary: 'Home',
+        priority: 'p1',
+        tags: ['feature:f306'],
+        status: 'open',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+        audit: [],
+      },
+    ]);
+    let resolveCreate: ((response: Response) => void) | null = null;
+    const createResponse = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/external-projects') return Promise.resolve(mockResponse(200, { projects }));
+      if (path === '/api/external-projects/project-traqen/backlog/items' && init?.method === 'POST') {
+        return createResponse;
+      }
+      return backend.handleRequest(path, init);
+    });
+
+    await act(async () => root.render(React.createElement(MissionControlPage)));
+    await flush(act);
+    await flush(act);
+    const traqenProject = container.querySelector('[data-testid="mc-project-project-traqen"]') as HTMLButtonElement;
+    const homeProject = container.querySelector('[data-testid="mc-project-home"]') as HTMLButtonElement;
+    await act(async () => traqenProject.click());
+    await flush(act);
+
+    const titleInput = container.querySelector('[data-testid="mc-create-title"]') as HTMLInputElement;
+    const summaryInput = container.querySelector('[data-testid="mc-create-summary"]') as HTMLInputElement;
+    const submitButton = container.querySelector('[data-testid="mc-create-submit"]') as HTMLButtonElement;
+    await act(async () => {
+      setNativeValue(titleInput, '[F008] Late Traqen create');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setNativeValue(summaryInput, 'Must stay scoped');
+      summaryInput.dispatchEvent(new Event('input', { bubbles: true }));
+      submitButton.click();
+    });
+    await act(async () => homeProject.click());
+    await flush(act);
+    const traqenReloadsBeforeCreateSettles = mockApiFetch.mock.calls.filter(
+      ([path, init]) =>
+        path === '/api/backlog/items?projectId=project-traqen' && (!init?.method || init.method === 'GET'),
+    ).length;
+    await act(async () => {
+      resolveCreate?.(
+        mockResponse(201, {
+          id: 'late-create',
+          projectId: 'project-traqen',
+          title: '[F008] Late Traqen create',
+        }),
+      );
+    });
+    await flush(act);
+
+    const traqenReloads = mockApiFetch.mock.calls.filter(
+      ([path, init]) =>
+        path === '/api/backlog/items?projectId=project-traqen' && (!init?.method || init.method === 'GET'),
+    );
+    expect(traqenReloads).toHaveLength(traqenReloadsBeforeCreateSettles);
+    expect(homeProject.getAttribute('aria-current')).toBe('page');
+    expect(container.textContent).toContain('Home remains selected');
+    expect(container.textContent).not.toContain('Late Traqen create');
   });
 
   it('shows feature row list by default, dep graph after tab switch', async () => {
@@ -1685,7 +1997,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     });
   });
 
-  it('thread-situation falls back to title-matched threads when no backlogItemId link', async () => {
+  it('does not attribute an unbound title-matched thread to the Cat Café project', async () => {
     const now = Date.now();
     backend.setItems([
       {
@@ -1705,7 +2017,8 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         audit: [{ id: 'a-tm', action: 'dispatched', actor: { kind: 'user', id: 'u_test' }, timestamp: now - 5_000 }],
       } satisfies MutableBacklogItem,
     ]);
-    // Thread has F099 in title but NO backlogItemId → should match via title
+    // The title alone is not project attribution. This could be an external
+    // project's F099 thread, so Mission Hub must fail closed.
     backend.setThreads([
       {
         id: 'thread-title-f099',
@@ -1733,10 +2046,10 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
 
     const panel = container.querySelector('[data-testid="mc-thread-situation"]');
     expect(panel).not.toBeNull();
-    // Should show the title-matched thread instead of "暂无关联 thread"
-    expect(panel?.textContent).toContain('[F099] some related thread');
-    expect(panel?.textContent).toContain('通过标题匹配');
-    expect(panel?.textContent).not.toContain('暂无关联 thread');
+    expect(panel?.textContent).not.toContain('[F099] some related thread');
+    expect(panel?.textContent).not.toContain('通过标题匹配');
+    expect(panel?.textContent).toContain('暂无关联 thread');
+    expect(mockApiFetch.mock.calls.some(([path]) => String(path).includes('featureIds='))).toBe(false);
   });
 
   it('thread-situation prefers direct backlogItemId over title match', async () => {
@@ -1812,7 +2125,7 @@ describe('Feature progress panel', () => {
   });
 
   beforeEach(() => {
-    window.localStorage.removeItem('cat-cafe:mission-hub:active-tab');
+    window.localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
