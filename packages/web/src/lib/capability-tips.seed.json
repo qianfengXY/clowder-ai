@@ -424,6 +424,28 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f153-observability",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F153-observability-infra.md", "anchor": "User Journey" },
+    "structureSource": {
+      "path": "docs/features/F153-observability-infra.md",
+      "anchor": "Primary — 从异常症状定位到可验证的运行时证据"
+    },
+    "bodySource": {
+      "path": "docs/features/F153-observability-infra.md",
+      "anchor": "operator 在 Hub 可观测界面看到服务健康"
+    },
+    "contexts": ["thinking", "long_running", "feature_dev"],
+    "audience": ["cvo", "developer", "maintainer"],
+    "body": "排查猫猫调用异常时，到设置 → 运维监控 → 监控面板查看健康、Traces 和脱敏指标，再按 invocation 定位 provider 或路由阶段。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "怎么排查",
+      "draftPrompt": "请告诉我怎么从设置里的监控面板查看健康、Traces 和脱敏指标，并按 invocation 定位异常。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f210-agy-gemini-default",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F210-antigravity-cli-migration.md", "anchor": "AGY model-flag refresh" },

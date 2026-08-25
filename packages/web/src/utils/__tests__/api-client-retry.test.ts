@@ -177,9 +177,9 @@ describe('apiFetch 401 retry', () => {
             });
           });
         }
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
-      return Promise.resolve({ ok: true, status: 200 });
+      return Promise.resolve(new Response('{}', { status: 200 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -196,7 +196,7 @@ describe('apiFetch 401 retry', () => {
     vi.useFakeTimers();
     let messageAttempts = 0;
     const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes('/api/session')) return Promise.resolve({ ok: true, status: 200 });
+      if (url.includes('/api/session')) return Promise.resolve(new Response('{}', { status: 200 }));
       messageAttempts += 1;
       if (messageAttempts === 1) {
         return new Promise((_resolve, reject) => {
@@ -205,7 +205,7 @@ describe('apiFetch 401 retry', () => {
           });
         });
       }
-      return Promise.resolve({ ok: true, status: 200 });
+      return Promise.resolve(new Response('{}', { status: 200 }));
     });
     globalThis.fetch = mockFetch;
 

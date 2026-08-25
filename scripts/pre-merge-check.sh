@@ -301,10 +301,12 @@ STEP_START=$SECONDS
 # 接口改了但测试 mock 没同步的情况会静默通过 gate，
 # 直到 runtime build 或 CI 才暴露。
 #
-# 这一步对所有包（含测试文件）跑 tsc --noEmit，堵住盲区。
+# 这一步对所有配置了 tsconfig.json 的包（含测试文件）跑 tsc --noEmit，堵住盲区。
+# 不能只看 PATH 中是否存在 tsc：pnpm workspace 会把根依赖暴露给纯 JS 包，
+# 这类包没有 tsconfig，裸跑 tsc 只会打印帮助并以 1 退出。
 
 echo "── Step 4/6: TypeScript 全量类型检查（含测试） ──"
-if ! pnpm -r exec bash -lc 'if command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'; then
+if ! pnpm -r exec bash -lc 'if [ -f tsconfig.json ] && command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'; then
   echo ""
   echo -e "${RED}❌ TypeScript 类型检查失败${NC}"
   echo "   测试文件的类型也必须通过 — 请同步更新 mock 对象"

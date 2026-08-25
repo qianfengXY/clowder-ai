@@ -177,9 +177,10 @@ export class KimiAgentService implements AgentService {
     // Official Kimi Code reads $KIMI_CODE_HOME/mcp.json and has no
     // --mcp-config-file flag. Its MCP subprocesses inherit this invocation's
     // callbackEnv. Only legacy kimi-cli accepts the temporary config flag.
-    const tempMcpConfig = isLegacy && this.mcpServerPath
-      ? await writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
-      : null;
+    const tempMcpConfig =
+      isLegacy && this.mcpServerPath
+        ? await writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
+        : null;
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
     const supportsThinking =
       modelConfig.capabilities.includes('thinking') ||

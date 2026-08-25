@@ -8,7 +8,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   _resetDossierCache,
@@ -48,9 +47,21 @@ identity:
 oneLiner: "Fast and flexible"
 l0RosterSummary: "Quick and versatile coding"
 \`\`\`
-`;
 
-const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+## fable-5
+
+\`\`\`yaml
+# structured-profile: cat:fable-5
+entityId: "cat:fable-5"
+engagementPolicy:
+  quota: "weekly_subscription_scarce"
+  defaultMode: "one_shot_calibration"
+  highValueUses:
+    - "final architecture synthesis"
+  routineRepairReturn: "author_then_routine_reviewer_if_needed"
+  reentry: "only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request"
+\`\`\`
+`;
 
 afterEach(() => {
   _resetDossierCache();
@@ -90,11 +101,20 @@ describe('R2-P1: ENOENT vs non-ENOENT error classification', () => {
 });
 
 describe('R2-P2: hasDossierEntry warning scope', () => {
-  test('canonical Fable engagement policy survives the typed loader', () => {
-    const policy = loadDossierProfiles(REPO_ROOT).get('fable-5')?.engagementPolicy;
+  test('Fable engagement policy survives the typed loader without the private dossier', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-fable-policy-'));
+    const dossierDir = join(tempRoot, 'docs', 'team');
+    mkdirSync(dossierDir, { recursive: true });
+    writeFileSync(join(dossierDir, 'cat-dossier.md'), MINIMAL_DOSSIER);
 
-    expect(policy?.defaultMode).toBe('one_shot_calibration');
-    expect(policy?.reentry).toBe('only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request');
+    try {
+      const policy = loadDossierProfiles(tempRoot).get('fable-5')?.engagementPolicy;
+
+      expect(policy?.defaultMode).toBe('one_shot_calibration');
+      expect(policy?.reentry).toBe('only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('hydrates identity.pronouns from the structured dossier profile', () => {

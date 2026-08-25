@@ -56,6 +56,7 @@ const CAT_HANDLES = [
   'antigravity',
   'antig-opus',
   'gpt-pro',
+  'co-creator',
 ];
 
 /**

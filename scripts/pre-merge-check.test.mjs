@@ -168,6 +168,16 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
+  it('only runs workspace TypeScript checks where a tsconfig exists', () => {
+    const source = readFileSync(scriptPath, 'utf8');
+
+    assert.match(
+      source,
+      /if \[ -f tsconfig\.json \] && command -v tsc >\/dev\/null 2>&1; then tsc --noEmit; fi/,
+      'JS-only workspaces may inherit the root tsc binary but must not be treated as TypeScript projects',
+    );
+  });
+
   it('keeps the directory-size guard in the root check chain', () => {
     const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 

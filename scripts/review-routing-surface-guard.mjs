@@ -33,7 +33,7 @@ export function checkChatgptReviewRoundLanguage(source) {
     '英文翻译件',
     '最终可见回复使用中文',
     '用户旅程、前端产品体验、交互、验收标准',
-    '`refs/chatgpt-review-user-journey.md`',
+    '`../.cat-cafe-shared-refs/chatgpt-review-user-journey.md`',
     'Barrier 前不得读取或推测其他 reviewer 意见',
     '`cat_cafe_review_draft_submit`',
     '`cat_cafe_review_independent_finish`',

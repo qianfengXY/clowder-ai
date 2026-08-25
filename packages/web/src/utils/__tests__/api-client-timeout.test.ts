@@ -50,20 +50,22 @@ describe('apiFetch bounded completion', () => {
 
   it('rejects when the native session bootstrap fetch never settles, then allows a later retry', async () => {
     let sessionAttempts = 0;
+    let failuresBeforeRecovery = Number.POSITIVE_INFINITY;
     const mockFetch = vi.fn((url: string) => {
       if (url.includes('/api/session')) {
         sessionAttempts += 1;
-        if (sessionAttempts === 1) return new Promise<Response>(() => undefined);
+        if (sessionAttempts <= failuresBeforeRecovery) return new Promise<Response>(() => undefined);
         return Promise.resolve(new Response('{}', { status: 200 }));
       }
       return Promise.resolve(new Response('{}', { status: 200 }));
     });
     globalThis.fetch = mockFetch as typeof fetch;
-    const apiFetch = await loadApiFetch();
+    const { apiFetch, SESSION_BOOTSTRAP_ATTEMPTS } = await import('../api-client');
+    failuresBeforeRecovery = SESSION_BOOTSTRAP_ATTEMPTS;
 
     const firstRequest = apiFetch('/api/messages');
     const firstObserved = observe(firstRequest);
-    await vi.runOnlyPendingTimersAsync();
+    await vi.runAllTimersAsync();
 
     const firstOutcome = await settledOutcome(firstObserved);
     expect(firstOutcome).toMatchObject({
@@ -72,7 +74,7 @@ describe('apiFetch bounded completion', () => {
     });
 
     await expect(apiFetch('/api/messages')).resolves.toMatchObject({ status: 200 });
-    expect(sessionAttempts).toBe(2);
+    expect(sessionAttempts).toBe(SESSION_BOOTSTRAP_ATTEMPTS + 1);
     expect(mockFetch.mock.calls.filter(([url]) => String(url).includes('/api/messages'))).toHaveLength(1);
   });
 

@@ -57,7 +57,7 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 - 现有 EXT 源码、历史 backlog、Workflow SOP、Review 与 Desktop binding 均保留；本轮不删除、不迁移、不伪造完成。
 - EXT-001 可在未来以显式 opt-in 插件/适配器重新挂载，但不得重新定义项目、Feature 或工作流真相。
 
-## User Journeys
+## User Journey
 
 ### Primary — 在 Mission Hub 选择项目并推进 Feature
 

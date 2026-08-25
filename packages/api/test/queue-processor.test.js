@@ -331,7 +331,7 @@ describe('QueueProcessor', () => {
     assert.equal(
       queueDeps.router.routeExecution.mock.calls.some((call) => call.arguments[1]?.includes(recalledSource.content)),
       false,
-      );
+    );
   });
 
   it('ADR-042 claims an exact supplement, rebuilds its prompt, and enforces read-only routing', async () => {

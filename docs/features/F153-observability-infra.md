@@ -17,6 +17,21 @@ Clowder AI 当前缺乏系统性运行时可观测能力：异常难定位、超
 
 operator experience（2026-04-09）："这是可观测性基础设施 PR，核心是在 packages/api 里接入 OTel SDK，补 telemetry redaction、metrics allowlist、Prometheus/OTLP、/ready 健康检查，以及 cli-spawn 参数脱敏。"
 
+## User Journey
+
+### Primary — 从异常症状定位到可验证的运行时证据
+
+1. operator 在 Hub 可观测界面看到服务健康、调用错误率或延迟异常。
+2. operator 按 thread、invocation 或 trace 进入对应调用链，查看经过脱敏的 span、metrics 与工具事件。
+3. operator 将异常定位到具体 provider、CLI session 或路由阶段，而不接触用户正文、原始凭证或无限基数标签。
+4. 服务重启后，operator 仍能通过持久化指针和消息数据恢复近期 trace 关系；健康探针与告警继续给出可验证状态。
+
+### Supporting — 本地维护者调试 tracing 管线
+
+1. 维护者只在开发或测试环境显式启用 telemetry debug。
+2. 调试 exporter 输出完整本地 span；Hub 和持久化路径仍只消费脱敏 DTO。
+3. 关闭调试开关后，生产启动语义保持 default-deny，Hub 也不暴露运行时修改入口。
+
 ## What
 
 ### Phase A: OTel SDK + Metrics + Health Check（社区 PR intake）
@@ -533,6 +548,10 @@ F153 Phase E 做了 Hub 嵌入式可观测面板（`HubObservabilityTab`），�
 - [x] AC-G8: Route aggregate attributes（`ROUTE_TOTAL_CATS_INVOKED`/`ROUTE_TOTAL_TOKENS`/`ROUTE_HAS_A2A_HANDOFF`）设在 route span. Wired in route-serial / route-parallel via PR #619.
 - [x] AC-G9: `LocalTraceStore` 默认 TTL 从 2h 提升到 24h，导出 `LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS` 常量. Done in PR #619 (Phase E follow-up bundled into Phase G intake).
 - [x] AC-G10: Prompt X-Ray 必须覆盖 F203 native L0 channel，或在 UI/API 中明确拆分 native system prompt vs user/effective prompt，避免把空 `System` tab 误读成未捕获. Closed in Phase G-Followup (2026-06-09, KD-44): `PromptCapture` schema gained `nativeSystemPrompt` / `nativeSystemPromptSource` / `nativeSystemTokenEstimate` / `totalTokenEstimate` / `captureDiagnostics`; bridge async-fetches L0 from `compileL0ViaSubprocess` for `service.injectsL0Natively()` providers (Claude/Codex); Hub X-Ray Inspector System tab now zones Native L0 (system role) above the message-system pack appendix; resume amber banner now distinguishes message-system path from native L0; token bar and Meta tab break out native L0 vs message tokens to fix silent under-count. `l0-compiler.ts` gained in-flight Promise dedup + generation guard so capture and native injection sharing a cold cache don't double-spawn, and old compiles cannot repopulate stale L0 after `clearL0Cache()`. Test coverage: `l0-compiler.test.js` 15/15 (4 new AC-G10 dedup/invalidation tests) + `prompt-capture.test.js` 20/20 (5 new AC-G10 tests: backward compat, native capture, fail-safe diagnostic, non-native passthrough).
+
+### Phase H（后续增强 — Backlog）
+
+- [ ] AC-H1: 更广的 runtime exporter 级 tracing tests 覆盖 provider 间真实父子关系。当前 blocker：尚未定义并实现跨 provider 的 exporter fixture/coverage matrix；该项保持 backlog，F153 继续为 `in-progress`，不把已合入的局部 phase 伪报为整项完成。
 
 ### Phase I（Step Summary — Agent Loop 行为节奏度量）✅
 - [x] AC-I1: Hub Traces tab 暴露 "Step Summary" 子视图（per `cat_cafe.route`），展示 `agent_loop_count` / `tool_call_count` / `a2a_dispatch_count` / `duration_ms` / `token_total` / `error_count`

@@ -848,10 +848,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
             // \s* allows optional space between prefix and number
             // 0* allows optional leading zeros
             // (?!\d) prevents matching f661 when looking for f66
-            patternsByCanonical.set(
-              fid.toUpperCase(),
-              new RegExp(`(?:f(?:eat(?:ure)?)?)\\s*0*${num}(?!\\d)`, 'i'),
-            );
+            patternsByCanonical.set(fid.toUpperCase(), new RegExp(`(?:f(?:eat(?:ure)?)?)\\s*0*${num}(?!\\d)`, 'i'));
           }
         }
         const threadsByFeature: Record<

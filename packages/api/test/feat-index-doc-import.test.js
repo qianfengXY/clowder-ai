@@ -221,7 +221,9 @@ test('extension catalog entries join the unified feature index after canonical f
       kind: 'extension',
       owner: 'CodeX',
     });
-    assert.ok(entries.findIndex((entry) => entry.featId === 'F289') < entries.findIndex((entry) => entry.featId === 'EXT-001'));
+    assert.ok(
+      entries.findIndex((entry) => entry.featId === 'F289') < entries.findIndex((entry) => entry.featId === 'EXT-001'),
+    );
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

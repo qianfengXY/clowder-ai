@@ -63,7 +63,11 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
     },
     del: async (key) => (values.delete(key) ? 1 : 0),
   };
-  const launcher = new CodexDesktopTaskLauncher(redis);
+  const launcherOptions = {
+    recoveryIntervalMs: 0,
+    openThread: async () => {},
+  };
+  const launcher = new CodexDesktopTaskLauncher(redis, launcherOptions);
   launcher.threadExists = async () => true;
   launcher.activate = async () => {};
   let starts = 0;
@@ -87,7 +91,7 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
   assert.deepEqual(await launcher.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
   assert.equal(starts, 1);
 
-  const afterRestart = new CodexDesktopTaskLauncher(redis);
+  const afterRestart = new CodexDesktopTaskLauncher(redis, launcherOptions);
   afterRestart.threadExists = async () => true;
   afterRestart.activate = async () => {};
   afterRestart.start = async () => {
@@ -95,7 +99,7 @@ test('Desktop task launcher reuses the persisted task for one project feature', 
   };
   assert.deepEqual(await afterRestart.launch(input), { status: 'created', threadId: 'codex-thread-f006' });
 
-  const afterDeletion = new CodexDesktopTaskLauncher(redis);
+  const afterDeletion = new CodexDesktopTaskLauncher(redis, launcherOptions);
   afterDeletion.threadExists = async () => false;
   afterDeletion.start = async (_input, existingThreadId) => {
     assert.equal(existingThreadId, undefined);

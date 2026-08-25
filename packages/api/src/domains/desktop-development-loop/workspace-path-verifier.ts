@@ -34,10 +34,7 @@ export const verifyWorkspacePath: WorkspacePathVerifier = async (projectSourcePa
   let sourcePath: string;
   let workspacePath: string;
   try {
-    [sourcePath, workspacePath] = await Promise.all([
-      canonicalPath(projectSourcePath),
-      canonicalPath(worktreePath),
-    ]);
+    [sourcePath, workspacePath] = await Promise.all([canonicalPath(projectSourcePath), canonicalPath(worktreePath)]);
   } catch {
     throw new Error('Project workspace path is unavailable');
   }
