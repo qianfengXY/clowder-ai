@@ -1,6 +1,6 @@
 # EXT-001 Design — Project-scoped ChatGPT Desktop Development Loop
 
-Date: 2026-08-24<br>
+Date: 2026-08-25<br>
 Status: implementation design (requires fresh non-author review after code delta)<br>
 Feature truth: `docs/extensions/EXT-001-chatgpt-desktop-development-loop.md`
 
@@ -30,6 +30,36 @@ Cat Café Project
                               ChatGPT Desktop session binding
                               permanent worktree + native Git tools
 ```
+
+## Mission Hub workflow visualization contract
+
+Mission Hub is the operator-facing approval and recovery workbench for this loop. Its first job is to answer three questions without requiring the operator to inspect every delivery record: **which feature needs attention, who currently owns the next action, and what exact action is legal now**.
+
+This section carries forward the durable product requirements from the former F289 workflow-graph draft and the Traqen pilot analysis. It is a presentation contract over the existing EXT-001 state model, not a second source of lifecycle truth and not a claim that the current UI already satisfies the contract.
+
+### Authority and information hierarchy
+
+1. `DesktopDevelopmentResumePacket.workflowNodes`, `phase`, `openFindings`, `nextLegalActions`, exact design/implementation SHAs, and server-derived launch state remain authoritative. The Web client must not reconstruct a competing state machine from timestamps, labels, or local heuristics.
+2. Project-level operator decisions (`acceptance_pending`, architecture decision, review continuation, and consensus authorization) are aggregated before per-feature detail. An empty decision queue must be explicit rather than indistinguishable from loading failure.
+3. Every feature has a compact summary showing current phase, actor/custodian, progress, blocking reason, and whether the operator must act. Project binding metadata and protocol/debug fields are secondary disclosure, not the visual headline.
+4. Exact SHA, binding epoch, protocol version, task/chat reference, and recovery diagnostics remain reachable in a detail inspector without competing with the primary workflow status.
+
+### Progressive disclosure and loop semantics
+
+- The default feature view is a compact ordered stepper or timeline. The full actor-lane/ReviewRound view is opt-in detail so multiple features remain scannable on one screen.
+- Independent review, cross-review, consensus, handoff, merge, and acceptance remain individually visible stages; the UI must not compress the review barrier into an unexplained generic “Review” badge.
+- The `fix_required → implementation` loop and `acceptance rejected → next delivery cycle` loop must be visually explicit. On narrow layouts they may become labelled “return to step” transitions, but the loop information cannot disappear.
+- Completed, active, blocked, and pending states require distinguishable text/icon semantics in addition to color. Active and blocked nodes show the responsible actor plus the next legal action or blocking reason.
+- A node/phase detail inspector may expose timestamps, reviewer progress, findings, exact SHAs, and navigation to the deterministic discussion or Review thread. Hover-only information cannot be the sole path to required data or actions.
+
+### Interaction, responsive, and accessibility requirements
+
+- Operator actions stay close to the decision that requires them and reuse the existing server-side version/idempotency gates. A summary action and an expanded action must not create two independent client locks or mutation paths.
+- Desktop layouts may use actor lanes; narrow layouts use an ordered vertical timeline while retaining actor labels, Review sub-stage progress, and return-path semantics.
+- Interactive nodes expose keyboard focus, `aria-current`/`aria-expanded` or equivalent state, and a visible affordance that they are actionable. Motion honors reduced-motion preferences and is never the only active-state signal.
+- Status/error feedback is typed and rendered next to the triggering action. A single page-bottom string is insufficient for approval, retry, and acceptance outcomes.
+
+Non-goals: adding persistence fields solely for decoration, inventing client-owned lifecycle phases, making Traqen a hard-coded default project, prescribing one component tree or graph library, or treating a visually complete graph as evidence that Review/acceptance gates passed.
 
 ## Ownership decisions
 
