@@ -1,8 +1,8 @@
 ---
 cell_id: desktop-development-loop
 title: Desktop Development Loop
-summary: EXT-001-owned project binding, one shared authoritative design branch plus per-feature design documents and discussion/review views, Desktop task/session projection, and user acceptance before each guarded merge over existing managed-work and review truth.
-description: Project-scoped bridge between Cat Café design/review and ChatGPT Desktop implementation, without becoming a second workflow engine.
+summary: Optional EXT-001 Desktop policy, design authority, task/session projection, and user acceptance adapter over an existing Mission Hub project and managed-work/review truth.
+description: Opt-in bridge between an existing Mission Hub project and ChatGPT Desktop implementation, without owning project registration or becoming a second workflow engine.
 description_source: model
 description_author: cat-idwxwjba
 description_generated_by: cat-idwxwjba@gpt-5
@@ -12,8 +12,6 @@ created: 2026-08-07
 canonical_features: [EXT-001]
 code_anchors:
   - packages/shared/src/types/desktop-development-loop.ts
-  - packages/shared/src/types/external-project.ts
-  - packages/api/src/domains/projects/external-project-store.ts
   - packages/api/src/domains/projects/project-review-hub-service.ts
   - packages/api/src/domains/desktop-development-loop/desktop-session-store.ts
   - packages/api/src/domains/desktop-development-loop/design-branch-resolver.ts
@@ -21,7 +19,6 @@ code_anchors:
   - packages/api/src/domains/desktop-development-loop/codex-desktop-task-launcher.ts
   - packages/api/src/routes/desktop-development-loop.ts
   - packages/web/src/components/mission-control/DesktopDevelopmentPanel.tsx
-  - packages/web/src/components/mission-control/ImportProjectModal.tsx
 doc_anchors:
   - docs/extensions/EXT-001-chatgpt-desktop-development-loop.md
   - docs/design/EXT-001-chatgpt-desktop-development-loop.md
@@ -37,7 +34,9 @@ Architecture cell: desktop-development-loop
 
 ## Canonical Owner
 
-EXT-001 owns the project-scoped adapter that connects Cat Café design/review to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to an existing ExternalProject, one authoritative design-branch binding plus deterministic discussion/review views per imported backlog feature, Desktop task/session/workspace bindings, Resume Packet projection, and the user acceptance gate before each guarded merge. Historical two-successful-pilot fields remain compatibility and observability data only. The discussion view is context only; the validated branch commit is the design authority.
+EXT-001 owns the opt-in adapter that connects an existing Mission Hub project to ChatGPT Desktop implementation. Its canonical state is limited to the Desktop development policy attached to that project, one authoritative design-branch binding plus deterministic discussion/review views per imported backlog feature, Desktop task/session/workspace bindings, Resume Packet projection, and the user acceptance gate before each guarded merge. Historical two-successful-pilot fields remain compatibility and observability data only. The discussion view is context only; the validated branch commit is the design authority.
+
+F306 `mission-hub-projects` owns `ExternalProject`, its durable registry, project registration/import UI and the common project-scoped Feature workflow. EXT-001 may reference a project ID and optional policy fields, but it cannot make Desktop configuration part of project existence or the default Mission Hub entry experience.
 
 The cell is not a workflow identity root. F275 remains canonical for whole work, ordered attempts, evidence and terminal state. F253 remains canonical for exact-SHA independent review, barrier, consensus and finding closure. EXT-001 owns only the external Desktop session binding over those IDs. F211 remains canonical for Cat runtime sessions with CatId/agent-key/Antigravity provenance and is intentionally not extended for the Desktop developer external actor. F286 owns MCP inventory and authority.
 
@@ -60,6 +59,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 - Add ReviewRound persistence through the F253 review-coordination boundary; expose only barrier-safe consensus to Desktop.
 - Add lifecycle tools only through the F286 strict `desktop:development-loop` profile with server-derived actor, scope and legal actions.
 - Add optional repository publication adapters as downstream consumers of consensus; never make them core round-completion requirements.
+- Attach the adapter only through an explicit project capability/setting; never add its fields back to the canonical project import journey.
 
 ## Do NOT Unify With
 
@@ -68,6 +68,7 @@ The cell is not a workflow identity root. F275 remains canonical for whole work,
 - Do not let EXT-001 own or infer F275 attempt order/terminal state.
 - Do not let visible Hub/chat deletion cascade into durable lifecycle deletion.
 - Do not expose shell, arbitrary filesystem writes, Git merge/deploy or credentials through the MCP profile.
+- Do not own `ExternalProjectStore`, project selection, project backlog import or the common Mission Hub Feature surface; those belong to `mission-hub-projects`.
 
 ## Static Scan Hints
 

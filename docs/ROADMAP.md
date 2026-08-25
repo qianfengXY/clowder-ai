@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Clowder AI Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-08-21（F302 runtime-first portable governance kickoff）
+> 维护者：三猫 | 最后更新：2026-08-25（F306 Mission Hub project workspaces kickoff）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -122,3 +122,4 @@ created: 2026-02-26
 | F303 | Design Gate 归一性加固 — 防止新增 consumer 另造规则；复用 F083/F191/F217，代码级 references 走 LSP/rg，F242 仅覆盖约定面；按 claim 选择已有机制，让风险匹配证据在 review 与 landed Alpha 前出现 | spec / Architecture Design Gate | 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)，kickoff reviewer Ragdoll (@fable5) | internal (operator 2026-08-21：不要造多套概念、语言和规则；先完成立项，再由 Fable 单次审核) | [F303](features/F303-design-gate-integrity.md) · Discussion (internal) |
 | F304 | Local Interaction Request Liveness — 后台重负载下，前台创建及时进入 API；一个原子事故 PR 关闭本次链路，一个独立债务 PR落实 scheduler 真取消 | spec / Architecture Design Gate | 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | internal (operator 2026-08-21：一个 Feature 统一管理；事故一个 PR、内部拆 commits，债务另清，重启不落中间态) | [F304](features/F304-local-interaction-request-liveness.md) · Discussion (internal) |
 | F305 | UI Design Gate Closure — 按用户可见表面叠加触发 F083，把 ADR-043/F056 投影到唯一在地检查单；以真实壳确认和 Approval / Needs Me 共享 pattern 阻止 schema 再次直接长成 UI | spec / Experience Design Gate | 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | internal (operator 2026-08-22：由Maine Coon负责闭环，并提供未来一句话纠偏入口“先看真页面”) | [F305](features/F305-ui-design-gate-closure.md) · Discussion (internal) |
+| F306 | Mission Hub Project Workspaces — Cat Café、Traqen 与未来项目成为对等一级入口；每个项目复用同一套 Feature/任务/Thread/Review/SOP，EXT-001 退出默认投影但历史保留 | in-progress | 砚砚/CodeX (@cat-idwxwjba, GPT-5.6) | internal (operator 2026-08-25：备份 main 后开始改造；Mission Hub 直接看到项目，功能一致，EXT 定制不在新一轮体现) | [F306](features/F306-mission-hub-project-workspaces.md) · [Design Gate](design/F306-mission-hub-project-workspaces.md) |

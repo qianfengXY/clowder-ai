@@ -138,6 +138,27 @@
     "owner": "codex"
   },
   {
+    "id": "capability-mission-hub-project-workspaces",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "anchor": "Primary — 在 Mission Hub 选择项目并推进 Feature"
+    },
+    "structureSource": {
+      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "anchor": "核心模型"
+    },
+    "bodySource": {
+      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "anchor": "Supporting — 导入新项目"
+    },
+    "contexts": ["feature_dev", "long_running"],
+    "audience": ["cvo", "developer"],
+    "body": "在 Mission Hub 顶部先选择 Cat Café 或外部项目，再在项目内查看 Feature、依赖和推进状态；“导入 Backlog”只刷新当前项目。",
+    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "owner": "codex"
+  },
+  {
     "id": "capability-image-generation",
     "kind": "capability",
     "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "image-generation" },
