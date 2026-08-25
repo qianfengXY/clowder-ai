@@ -8,7 +8,7 @@ import { FeatureRow, type ThreadSituationSummary } from './FeatureRow';
 interface FeatureRowListProps {
   items: BacklogItem[];
   threadsByBacklogId: Record<string, ThreadSituationSummary>;
-  threadCountByFeature: Record<string, number>;
+  threadCountByFeature?: Record<string, number>;
   threadsByFeatureId?: Record<string, ThreadSituationSummary[]>;
   featureDocDetailEnabled?: boolean;
   selectedItemId: string | null;
@@ -37,7 +37,7 @@ function isAllDone(featureItems: BacklogItem[]): boolean {
 export function FeatureRowList({
   items,
   threadsByBacklogId,
-  threadCountByFeature,
+  threadCountByFeature = {},
   threadsByFeatureId = {},
   featureDocDetailEnabled = true,
   selectedItemId,

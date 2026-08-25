@@ -6,7 +6,6 @@ import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import { apiFetch } from '@/utils/api-client';
 import { DependencyGraphTab } from './DependencyGraphTab';
-import { extractFeatureId } from './FeatureBirdEyePanel';
 import { FeatureRowList } from './FeatureRowList';
 import { ImportProjectModal } from './ImportProjectModal';
 import { ProjectWorkspaceNav } from './ProjectWorkspaceNav';
@@ -15,6 +14,7 @@ import {
   getProjectBacklogCreatePath,
   getProjectBacklogImportPath,
   getProjectBacklogItemsPath,
+  HOME_PROJECT_WORKSPACE,
   isCanonicalProjectItem,
   LEGACY_MISSION_HUB_ACTIVE_TAB_KEY,
   MISSION_HUB_ACTIVE_PROJECT_KEY,
@@ -90,8 +90,6 @@ export function MissionControlPage() {
   const [selfClaimScopes, setSelfClaimScopes] = useState<Record<string, MissionHubSelfClaimScope>>({});
   const [selfClaimPolicyBlocker, setSelfClaimPolicyBlocker] = useState<SelfClaimPolicyBlocker>(null);
   const [threadsByBacklogId, setThreadsByBacklogId] = useState<Record<string, ThreadSituationSummary>>({});
-  const [threadCountByFeature, setThreadCountByFeature] = useState<Record<string, number>>({});
-  const [threadsByFeatureId, setThreadsByFeatureId] = useState<Record<string, ThreadSituationSummary[]>>({});
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<'suggestion' | 'sop' | 'threads'>('suggestion');
   const {
@@ -121,9 +119,9 @@ export function MissionControlPage() {
 
   const workspaces = useMemo(() => buildProjectWorkspaces(projects), [projects]);
   const activeProject = useMemo(
-    () => workspaces.find((project) => project.key === activeProjectKey) ?? workspaces[0],
+    () => workspaces.find((project) => project.key === activeProjectKey) ?? HOME_PROJECT_WORKSPACE,
     [activeProjectKey, workspaces],
-  ) as ProjectWorkspaceRef;
+  );
   const activeProjectKeyRef = useRef(activeProject.key);
 
   useEffect(() => {
@@ -244,8 +242,6 @@ export function MissionControlPage() {
     setItems([]);
     setSelectedItemId(null);
     setThreadsByBacklogId({});
-    setThreadsByFeatureId({});
-    setThreadCountByFeature({});
     void loadItems(activeProject);
     return () => {
       itemRequestSeq.current += 1;
@@ -282,17 +278,6 @@ export function MissionControlPage() {
   const dispatchedItems = useMemo(() => items.filter((item) => item.status === 'dispatched'), [items]);
   const dispatchedBacklogIds = useMemo(() => dispatchedItems.map((item) => item.id), [dispatchedItems]);
 
-  /** F058 Phase G: unique feature IDs from all items for thread title search */
-  const uniqueFeatureIds = useMemo(() => {
-    if (activeProject.kind === 'external') return [];
-    const ids = new Set<string>();
-    for (const item of items) {
-      const fid = extractFeatureId(item.tags);
-      if (fid !== 'Untagged') ids.add(fid);
-    }
-    return [...ids];
-  }, [activeProject.kind, items]);
-
   const loadThreadSituations = useCallback(async (backlogItemIds: string[]) => {
     const requestSeq = ++threadSituationRequestSeq.current;
     if (backlogItemIds.length === 0) {
@@ -325,43 +310,6 @@ export function MissionControlPage() {
   useEffect(() => {
     void loadThreadSituations(dispatchedBacklogIds);
   }, [dispatchedBacklogIds, loadThreadSituations]);
-
-  /** F058 Phase G: Fetch thread counts by feature ID from title matching (chunked to respect 50-ID limit) */
-  useEffect(() => {
-    if (uniqueFeatureIds.length === 0) {
-      setThreadCountByFeature({});
-      setThreadsByFeatureId({});
-      return;
-    }
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const CHUNK_SIZE = 50;
-        const mergedCounts: Record<string, number> = {};
-        const mergedThreads: Record<string, ThreadSituationSummary[]> = {};
-        for (let i = 0; i < uniqueFeatureIds.length; i += CHUNK_SIZE) {
-          if (controller.signal.aborted) return;
-          const chunk = uniqueFeatureIds.slice(i, i + CHUNK_SIZE);
-          const response = await apiFetch(`/api/threads?featureIds=${encodeURIComponent(chunk.join(','))}`, {
-            signal: controller.signal,
-          });
-          if (!response.ok || controller.signal.aborted) return;
-          const body = (await response.json()) as { threadsByFeature?: Record<string, ThreadSituationSummary[]> };
-          for (const [fid, threads] of Object.entries(body.threadsByFeature ?? {})) {
-            mergedCounts[fid] = (mergedCounts[fid] ?? 0) + threads.length;
-            mergedThreads[fid] = [...(mergedThreads[fid] ?? []), ...threads];
-          }
-        }
-        if (!controller.signal.aborted) {
-          setThreadCountByFeature(mergedCounts);
-          setThreadsByFeatureId(mergedThreads);
-        }
-      } catch {
-        // ignore abort / network errors
-      }
-    })();
-    return () => controller.abort();
-  }, [uniqueFeatureIds]);
 
   const withSubmitGuard = useCallback(
     async (task: () => Promise<void>, projectKey: string) => {
@@ -635,8 +583,6 @@ export function MissionControlPage() {
                   <FeatureRowList
                     items={items}
                     threadsByBacklogId={threadsByBacklogId}
-                    threadCountByFeature={threadCountByFeature}
-                    threadsByFeatureId={threadsByFeatureId}
                     featureDocDetailEnabled={activeProject.kind === 'home'}
                     selectedItemId={selectedItemId}
                     onSelectItem={setSelectedItemId}
@@ -707,7 +653,6 @@ export function MissionControlPage() {
                         dispatchedItems={dispatchedItems}
                         loading={threadsLoading}
                         threadsByBacklogId={threadsByBacklogId}
-                        threadsByFeatureId={threadsByFeatureId}
                       />
                     )}
                   </div>

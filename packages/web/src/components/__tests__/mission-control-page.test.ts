@@ -1997,7 +1997,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     });
   });
 
-  it('thread-situation falls back to title-matched threads when no backlogItemId link', async () => {
+  it('does not attribute an unbound title-matched thread to the Cat Café project', async () => {
     const now = Date.now();
     backend.setItems([
       {
@@ -2017,7 +2017,8 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         audit: [{ id: 'a-tm', action: 'dispatched', actor: { kind: 'user', id: 'u_test' }, timestamp: now - 5_000 }],
       } satisfies MutableBacklogItem,
     ]);
-    // Thread has F099 in title but NO backlogItemId → should match via title
+    // The title alone is not project attribution. This could be an external
+    // project's F099 thread, so Mission Hub must fail closed.
     backend.setThreads([
       {
         id: 'thread-title-f099',
@@ -2045,10 +2046,10 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
 
     const panel = container.querySelector('[data-testid="mc-thread-situation"]');
     expect(panel).not.toBeNull();
-    // Should show the title-matched thread instead of "暂无关联 thread"
-    expect(panel?.textContent).toContain('[F099] some related thread');
-    expect(panel?.textContent).toContain('通过标题匹配');
-    expect(panel?.textContent).not.toContain('暂无关联 thread');
+    expect(panel?.textContent).not.toContain('[F099] some related thread');
+    expect(panel?.textContent).not.toContain('通过标题匹配');
+    expect(panel?.textContent).toContain('暂无关联 thread');
+    expect(mockApiFetch.mock.calls.some(([path]) => String(path).includes('featureIds='))).toBe(false);
   });
 
   it('thread-situation prefers direct backlogItemId over title match', async () => {
