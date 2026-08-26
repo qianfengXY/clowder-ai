@@ -171,7 +171,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await store.updateDispatchProgress(created.id, {
       updatedBy: 'default-user',
       dispatchAttemptId: 'attempt-1',
-      pendingThreadId: 'thread-pending',
+      pendingThreadId: 'thread-dispatched',
       kickoffMessageId: 'message-kickoff',
     });
     await store.markDispatched(created.id, {
