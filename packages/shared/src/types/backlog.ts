@@ -38,6 +38,7 @@ export type BacklogAuditAction =
   | 'rejected'
   | 'dispatched'
   | 'done'
+  | 'reopened'
   | 'lease_acquired'
   | 'lease_heartbeat'
   | 'lease_released'
@@ -156,6 +157,12 @@ export interface ReclaimBacklogLeaseInput {
 
 export interface MarkDoneInput {
   readonly doneBy: string;
+}
+
+/** An explicit, audited correction of an incorrectly completed backlog item. */
+export interface ReopenBacklogItemInput {
+  readonly reopenedBy: string;
+  readonly reason: string;
 }
 
 export interface BacklogDependencies {

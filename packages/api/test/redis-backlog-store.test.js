@@ -124,6 +124,30 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal((await store.listByUser('default-user'))[0]?.projectId, 'project-traqen');
   });
 
+  it('reopen transitions a done item to open with an auditable correction reason', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: 'Imported F001',
+      summary: 'must remain active',
+      priority: 'p0',
+      tags: ['feature:f001'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+    await store.markDone(created.id, { doneBy: 'default-user' });
+
+    const reopened = await store.reopen(created.id, {
+      reopenedBy: 'default-user',
+      reason: 'Correct cross-project import status collision',
+    });
+
+    assert.equal(reopened?.status, 'open');
+    assert.equal(reopened?.doneAt, undefined);
+    assert.equal(reopened?.audit.at(-1)?.action, 'reopened');
+    assert.equal(reopened?.audit.at(-1)?.detail, 'Correct cross-project import status collision');
+  });
+
   it('concurrent acquire by different cats: only one succeeds', async () => {
     const itemId = await createDispatchedItem('acquire-race');
 

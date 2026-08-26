@@ -597,6 +597,38 @@ describe('BacklogStore markDone', () => {
     assert.strictEqual(again.status, 'done');
   });
 
+  test('reopen transitions done → open, clears doneAt, and records the correction reason', () => {
+    const item = createAndDispatch();
+    now += 5000;
+    store.markDone(item.id, { doneBy: 'u1' });
+
+    const reopened = store.reopen(item.id, {
+      reopenedBy: 'u1',
+      reason: 'Correct cross-project import status collision',
+    });
+
+    assert.strictEqual(reopened.status, 'open');
+    assert.strictEqual(reopened.doneAt, undefined);
+    assert.strictEqual(reopened.audit.at(-1).action, 'reopened');
+    assert.deepStrictEqual(reopened.audit.at(-1).actor, { kind: 'user', id: 'u1' });
+    assert.strictEqual(reopened.audit.at(-1).detail, 'Correct cross-project import status collision');
+  });
+
+  test('reopen is an idempotent no-op for an already open item', () => {
+    const item = store.create({
+      userId: 'u1',
+      title: 'Still active',
+      summary: 'does not need reopening',
+      priority: 'p2',
+      tags: [],
+      createdBy: 'user',
+    });
+
+    const reopened = store.reopen(item.id, { reopenedBy: 'u1', reason: 'duplicate correction request' });
+    assert.strictEqual(reopened.status, 'open');
+    assert.strictEqual(reopened.audit.length, item.audit.length);
+  });
+
   test('transitions open → done (disappeared feature)', () => {
     const item = store.create({
       userId: 'u1',

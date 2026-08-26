@@ -1658,6 +1658,74 @@ describe('Backlog mark-done route', () => {
     });
     assert.strictEqual(res.statusCode, 404);
   });
+
+  test('POST reopen restores a done item to open and preserves a correction audit reason', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: H,
+      payload: { title: 'Imported F001', summary: 'must remain active', priority: 'p0', tags: ['feature:f001'] },
+    });
+    const itemId = createRes.json().id;
+    await backlogStore.markDone(itemId, { doneBy: 'default-user' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/reopen`,
+      headers: H,
+      payload: { reason: 'Correct cross-project import status collision' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.json().item.status, 'open');
+    assert.strictEqual(res.json().item.doneAt, undefined);
+    assert.strictEqual(res.json().item.audit.at(-1).action, 'reopened');
+    assert.strictEqual(res.json().item.audit.at(-1).detail, 'Correct cross-project import status collision');
+  });
+
+  test('POST reopen requires a non-empty audit reason', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: H,
+      payload: { title: 'Done item', summary: 'requires an audit reason', priority: 'p2', tags: [] },
+    });
+    await backlogStore.markDone(createRes.json().id, { doneBy: 'default-user' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${createRes.json().id}/reopen`,
+      headers: H,
+      payload: { reason: ' ' },
+    });
+
+    assert.strictEqual(res.statusCode, 400);
+  });
+
+  test('POST reopen cannot change another user’s completed item', async () => {
+    const app = await createApp();
+    const ownerHeaders = { 'x-cat-cafe-user': 'owner-user' };
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: ownerHeaders,
+      payload: { title: 'Owner item', summary: 'must remain isolated', priority: 'p1', tags: [] },
+    });
+    const itemId = createRes.json().id;
+    await backlogStore.markDone(itemId, { doneBy: 'owner-user' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/reopen`,
+      headers: H,
+      payload: { reason: 'must not be accepted' },
+    });
+
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual((await backlogStore.get(itemId, 'owner-user')).status, 'done');
+  });
 });
 
 describe('Import sync marks disappeared items as done (any status)', () => {

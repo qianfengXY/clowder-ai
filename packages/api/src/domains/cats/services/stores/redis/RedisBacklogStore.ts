@@ -12,6 +12,7 @@ import type {
   ReclaimBacklogLeaseInput,
   RefreshBacklogItemInput,
   ReleaseBacklogLeaseInput,
+  ReopenBacklogItemInput,
   SuggestBacklogClaimInput,
   ThreadPhase,
   UpdateBacklogDispatchProgressInput,
@@ -714,6 +715,35 @@ export class RedisBacklogStore implements IBacklogStore {
           action: 'done',
           actor: makeUserActor(input.doneBy),
           timestamp: now,
+        },
+      ],
+    };
+    await this.writeItem(updated);
+    return updated;
+  }
+
+  async reopen(itemId: string, input: ReopenBacklogItemInput): Promise<BacklogItem | null> {
+    const existing = await this.get(itemId);
+    if (!existing) return null;
+    if (existing.status === 'open') return existing;
+    if (existing.status !== 'done') {
+      throw new BacklogTransitionError('Invalid backlog transition: only done items can be reopened');
+    }
+
+    const { doneAt: _doneAt, ...withoutDoneAt } = existing;
+    const now = Date.now();
+    const updated: BacklogItem = {
+      ...withoutDoneAt,
+      status: 'open',
+      updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'reopened',
+          actor: makeUserActor(input.reopenedBy),
+          timestamp: now,
+          detail: input.reason,
         },
       ],
     };
