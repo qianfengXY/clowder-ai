@@ -4,6 +4,10 @@ related_features: [F049, F058, F076, F152, EXT-001]
 topics: [mission-hub, projects, backlog, workflow, external-projects, ui]
 doc_kind: spec
 created: 2026-08-25
+status: done
+completed: 2026-08-25
+reflection: project-reflections/2026-08-25-f306-mission-hub-project-workspaces-capsule.md
+harness_feedback: docs/harness-feedback/reviews/F306-feature-close-trace.md
 description: "把 Mission Hub 的一级坐标从功能/依赖/外部项目混排，归一为 Cat Café 与外部项目对等的项目工作区；每个项目复用同一套 Feature、任务、Thread、Review 与 SOP 体验。"
 description_source: human
 description_author: co-creator
@@ -13,11 +17,11 @@ cvo_signoff: "2026-08-25 — sourceMessageId 0001787646630262-000070-97b500b9：
 
 # F306: Mission Hub Project Workspaces — 项目工作区归一
 
-> **Status**: in-progress | **Owner**: 砚砚/CodeX (@cat-idwxwjba, GPT-5.6) | **Priority**: P0
+> **Status**: done | **Completed**: 2026-08-25 | **Owner**: 砚砚/CodeX (@cat-idwxwjba, GPT-5.6) | **Priority**: P0
 
 Architecture cell: `mission-hub-projects`
 
-Map delta: `new cell required`
+Map delta: implemented in `docs/architecture/ownership/cells/mission-hub-projects.md`
 
 Why: F049/F058 拥有 Feature 工作流，F076 首次登记外部项目但把它实现成与“功能列表/依赖全景”并列的特殊 Tab，EXT-001 又把 Desktop 定制入口叠在外部项目表面。F306 建立项目 registry 到统一工作区的投影边界；不接管 Feature 生命周期、Thread、Review、SOP 或 EXT-001 的业务真相。
 
@@ -106,25 +110,25 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 
 ### Phase A（项目坐标与安全作用域）
 
-- [ ] AC-A1: Mission Hub 一级项目选择器同时显示 Cat Café、Traqen 与其他已登记项目，且默认/恢复逻辑不再偏爱 Traqen。
-- [ ] AC-A2: 当前项目唯一决定 Feature 列表、状态计数、依赖视图、选中项、SOP、Thread 与所有 mutation 的 backlog 作用域。
-- [ ] AC-A3: 外部项目快速创建只能通过服务端 ownership check，跨用户/不存在项目均 fail closed，创建结果持久化正确 `projectId`。
-- [ ] AC-A4: 外部项目不使用 Cat Café-only Feature doc 或无项目限定的 Feature-ID Thread 匹配；同名 Feature 不发生跨项目归因。
-- [ ] AC-A5: 快速切换项目时，较晚返回的旧请求不能覆盖当前项目数据、loading、error 或 selection。
+- [x] AC-A1: Mission Hub 一级项目选择器同时显示 Cat Café、Traqen 与其他已登记项目，且默认/恢复逻辑不再偏爱 Traqen。
+- [x] AC-A2: 当前项目唯一决定 Feature 列表、状态计数、依赖视图、选中项、SOP、Thread 与所有 mutation 的 backlog 作用域。
+- [x] AC-A3: 外部项目快速创建只能通过服务端 ownership check，跨用户/不存在项目均 fail closed，创建结果持久化正确 `projectId`。
+- [x] AC-A4: 外部项目不使用 Cat Café-only Feature doc 或无项目限定的 Feature-ID Thread 匹配；同名 Feature 不发生跨项目归因。
+- [x] AC-A5: 快速切换项目时，较晚返回的旧请求不能覆盖当前项目数据、loading、error 或 selection。
 
 ### Phase B（体验归一与 EXT 退场）
 
-- [ ] AC-B1: Cat Café 和外部项目共享同一套“功能列表 / 依赖全景”二级导航及 Feature 工作流组件，不再渲染 `ExternalProjectTab` 的独立体验。
-- [ ] AC-B2: “导入 Backlog”根据当前项目调用 Cat Café 或对应外部项目入口，完成后仍停留在该项目并刷新正确列表。
-- [ ] AC-B3: 项目导入表单不出现 ChatGPT Desktop、Review roster、push/PR 等 EXT-001 配置，也不提交 `desktopDevelopment`。
-- [ ] AC-B4: 默认项目工作区不展示 `feature-kind:extension` / `EXT-*` 项；既有 EXT 数据与源码不删除。
-- [ ] AC-B5: 项目选择、二级视图和主操作具备可见 focus、语义状态与窄屏可达性。
+- [x] AC-B1: Cat Café 和外部项目共享同一套“功能列表 / 依赖全景”二级导航及 Feature 工作流组件，不再渲染 `ExternalProjectTab` 的独立体验。
+- [x] AC-B2: “导入 Backlog”根据当前项目调用 Cat Café 或对应外部项目入口，完成后仍停留在该项目并刷新正确列表。
+- [x] AC-B3: 项目导入表单不出现 ChatGPT Desktop、Review roster、push/PR 等 EXT-001 配置，也不提交 `desktopDevelopment`。
+- [x] AC-B4: 默认项目工作区不展示 `feature-kind:extension` / `EXT-*` 项；既有 EXT 数据与源码不删除。
+- [x] AC-B5: 项目选择、二级视图和主操作具备可见 focus、语义状态与窄屏可达性。
 
 ### Phase C（验证与闭环）
 
-- [ ] AC-C1: 自动化测试覆盖项目选择、持久化恢复、项目作用域、错误/空态、导入端点、EXT 隐藏与请求竞态。
-- [ ] AC-C2: 隔离开发实例完成 Cat Café → Traqen → Cat Café 的真实旅程验证，并保存 browser-preview 证据。
-- [ ] AC-C3: 非作者 review 对项目隔离、持久化安全、EXT 兼容与 UI 契约给出无阻塞 verdict。
+- [x] AC-C1: 自动化测试覆盖项目选择、持久化恢复、项目作用域、错误/空态、导入端点、EXT 隐藏与请求竞态。
+- [x] AC-C2: 隔离开发实例完成 Cat Café → Traqen → Cat Café 的真实旅程验证，并保存 browser-preview 证据。
+- [x] AC-C3: 非作者 review 对项目隔离、持久化安全、EXT 兼容与 UI 契约给出无阻塞 verdict。
 
 ## Tips Contribution（F244）
 
@@ -162,11 +166,105 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 | 日期 | 事件 |
 |------|------|
 | 2026-08-25 | operator 明确项目一级导航、Cat Café/Traqen 对等与 EXT 退场；完成 main 完整备份后立项开工 |
+| 2026-08-25 | 初始实现 PR #9 合入 `6e3c7e965`；首次独立验收发现跨项目写污染与长导入不刷新，结论 BLOCKED |
+| 2026-08-25 | 验收修复 PR #11 合入 `2ab1335c7`；Kimi exact-HEAD review 与 GitHub 五项 CI 全绿 |
+| 2026-08-25 | Terra 在隔离浏览器完成 68.064 秒长导入、同名 F305 跨项目隔离、往返切换与窄屏验收，APPROVED；Feature closed |
 
 ## Review Gate
 
-- Phase A/B: API 权限与跨项目隔离、前端竞态和持久化兼容必须走非作者 code review。
-- Phase C: browser-preview 只能验证体验，不能替代自动化回归或代码 review。
+- [x] Phase A/B: Kimi 对最终修复 HEAD `c23ef4251` 完成非作者 review，0 个开放 P1/P2。
+- [x] Phase C: Terra 对 merge SHA `2ab1335c7` 完成非作者、非 reviewer 的隔离浏览器愿景验收并 APPROVED。
+
+## Completion Gate
+
+### User Visibility Disclosure
+
+| Surface | 用户达成态 | Feature close 时实际状态 | 缺失/退化 | 处置 |
+|---------|------------|--------------------------|-----------|------|
+| 一级项目导航 | 同屏选择 Cat Café、Traqen 与未来项目 | 隔离浏览器实测 Cat Café 默认、Traqen 可导入并往返切换 | 无 | met |
+| 项目内工作流 | 两项目共用 Features、Dependencies、右侧 Suggestion/SOP/Threads | 同一套组件与交互已实测 | 无 | met |
+| 导入与刷新 | 当前项目独立导入，长任务成功后自动刷新 | 真实浏览器请求 68,064 ms，跨过 30 秒后 200 并自动刷新 | 无 | met |
+| 项目数据隔离 | home mutation 不得读取或改写 external item | Traqen 同名 F305 在 Cat Café 导入前后全对象一致 | 无 | met |
+| EXT 默认表面 | 不展示 Desktop/EXT 配置，历史数据保留 | 项目导入表单仅 4 字段，默认工作区无 EXT；底层记录与源码未删除 | 无 | met |
+| 窄屏与语义 | 375px 可达、焦点与 `aria-current` 正确 | Terra 在 375×812 与键盘路径实测通过 | 无 | met |
+| Live runtime | 合入代码可由正式启动流程加载 | `main=landed:2ab1335c7`；`live=dormant`，未经 operator 授权未重启 | 当前在线实例未激活新代码 | release activation 不属于代码 close；保持真实 dormant 状态 |
+
+### Independent Vision Sign-off
+
+| 守护猫 | 独立性 | 愿景三问与 User Journey | 结论 |
+|--------|--------|--------------------------|------|
+| 搬砖工 / GPT-5.6 Terra | 非作者、非 reviewer | 读取本 spec、Design、ownership cell；在隔离 Web `5172` / API `3172` / Redis `6328` 重走项目导航、EXT 隐藏、跨项目隔离、68 秒导入和窄屏旅程 | **APPROVED**，无开放 P1/P2（message `0001787718046678-000224-9447de8f`） |
+
+证据历史保留为两份互不覆盖的归档：
+
+- 首次阻断：`project-evidence/F306-acceptance-2026-08-25/`
+- 最终通过：`project-evidence/F306-acceptance-2026-08-25-final/`
+
+### CloseGateReport
+
+```yaml
+close_gate_report:
+  feature_id: F306
+  spec_path: docs/features/F306-mission-hub-project-workspaces.md
+  head_sha: "2ab1335c70f9bd29d1b3ee59b2c86cd280362418"
+  report_date: 2026-08-25
+  guardian: "搬砖工/GPT-5.6 Terra (cat-4v94tazw; non-author, non-reviewer)"
+  reflection: project-reflections/2026-08-25-f306-mission-hub-project-workspaces-capsule.md
+  harness_feedback: docs/harness-feedback/reviews/F306-feature-close-trace.md
+  ac_matrix:
+    - ac_id: AC-A1
+      status: met
+      evidence: [{kind: screenshot, ref: "project-evidence/F306-acceptance-2026-08-25-final/S1-project-first-nav-catcafe-traqen.png"}]
+      resolution: null
+    - ac_id: AC-A2
+      status: met
+      evidence: [{kind: pr, ref: "qianfengXY/clowder-ai#11", description: "home import is limited to items without projectId"}]
+      resolution: null
+    - ac_id: AC-A3
+      status: met
+      evidence: [{kind: test, ref: "packages/api/test/external-project-routes.test.js", description: "ownership and project-bound creation, 32/32"}]
+      resolution: null
+    - ac_id: AC-A4
+      status: met
+      evidence: [{kind: test, ref: "packages/web/src/components/__tests__/mission-control-page.test.ts", description: "project-bound thread and Feature attribution"}]
+      resolution: null
+    - ac_id: AC-A5
+      status: met
+      evidence: [{kind: test, ref: "packages/web/src/components/__tests__/mission-control-page.test.ts", description: "stale request fences for data, loading, error and selection"}]
+      resolution: null
+    - ac_id: AC-B1
+      status: met
+      evidence: [{kind: screenshot, ref: "project-evidence/F306-acceptance-2026-08-25-final/S1-project-first-nav-catcafe-traqen.png"}]
+      resolution: null
+    - ac_id: AC-B2
+      status: met
+      evidence: [{kind: doc, ref: "project-evidence/F306-acceptance-2026-08-25-final/acceptance-browser-report.json", description: "68,064 ms real browser import returned 200 and auto-refreshed"}]
+      resolution: null
+    - ac_id: AC-B3
+      status: met
+      evidence: [{kind: screenshot, ref: "project-evidence/F306-acceptance-2026-08-25-final/S2-import-form-no-ext-fields.png"}]
+      resolution: null
+    - ac_id: AC-B4
+      status: met
+      evidence: [{kind: screenshot, ref: "project-evidence/F306-acceptance-2026-08-25-final/S2-import-form-no-ext-fields.png", description: "default surface omits EXT/Desktop configuration while source and records remain"}]
+      resolution: null
+    - ac_id: AC-B5
+      status: met
+      evidence: [{kind: doc, ref: "project-evidence/F306-acceptance-2026-08-25-final/ACCEPTANCE-REPORT.md", description: "375x812, keyboard focus and aria-current passed"}]
+      resolution: null
+    - ac_id: AC-C1
+      status: met
+      evidence: [{kind: test, ref: "PR #11 exact-head CI", description: "five GitHub checks green; API 34/34 and Web 46/46 focused regressions"}]
+      resolution: null
+    - ac_id: AC-C2
+      status: met
+      evidence: [{kind: doc, ref: "project-evidence/F306-acceptance-2026-08-25-final/ACCEPTANCE-REPORT.md", description: "isolated Cat Café to Traqen to Cat Café browser journey"}]
+      resolution: null
+    - ac_id: AC-C3
+      status: met
+      evidence: [{kind: message, ref: "0001787715274584-000216-5f79108e", description: "Kimi exact-HEAD approved"}, {kind: message, ref: "0001787718046678-000224-9447de8f", description: "Terra post-merge APPROVED"}]
+      resolution: null
+```
 
 ## Links
 
@@ -175,3 +273,7 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 | **Design Gate** | `docs/design/F306-mission-hub-project-workspaces.md` | 在地双层导航与关键状态 |
 | **Plan** | `feature-specs/2026-08-25-mission-hub-project-workspaces.md` | TDD 实施计划 |
 | **Pre-change backup** | `/Volumes/WorkSSD/clowder-ai-history/2026-08-25-pre-mission-hub-project-workspaces/` | `bb9e8c4e` 的完整 bundle + 校验说明 |
+| **Reflection** | `project-reflections/2026-08-25-f306-mission-hub-project-workspaces-capsule.md` | 实施、验收与流程反思 |
+| **Harness feedback** | `docs/harness-feedback/reviews/F306-feature-close-trace.md` | remote 坐标与 review settlement trace anomaly |
+| **Acceptance — blocked** | `project-evidence/F306-acceptance-2026-08-25/` | 初次守护发现 P1/P2 的历史证据 |
+| **Acceptance — approved** | `project-evidence/F306-acceptance-2026-08-25-final/` | 修复后 exact-merge 隔离浏览器证据 |

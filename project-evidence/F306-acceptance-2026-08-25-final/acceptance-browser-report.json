@@ -1,0 +1,97 @@
+{
+  "mergeSha": "2ab1335c70f9bd29d1b3ee59b2c86cd280362418",
+  "webUrl": "http://localhost:5172/mission-hub",
+  "apiUrl": "http://localhost:3172",
+  "sourcePath": "/tmp/cat-cafe-f306-traqen.5eNQtC",
+  "journeys": [
+    {
+      "step": "home-first-load",
+      "result": "pass",
+      "activeProject": "Cat Café"
+    },
+    {
+      "step": "import-form-default-surface",
+      "result": "pass",
+      "fields": 4,
+      "extDesktopSurface": false
+    },
+    {
+      "step": "project-first-navigation",
+      "result": "pass",
+      "projects": [
+        "Cat Café",
+        "Traqen"
+      ]
+    },
+    {
+      "step": "external-common-workflow",
+      "result": "pass",
+      "views": [
+        "features",
+        "dependencies"
+      ],
+      "rightWorkflow": [
+        "suggestion",
+        "sop",
+        "threads"
+      ]
+    },
+    {
+      "step": "rapid-project-round-trip",
+      "result": "pass",
+      "finalProject": "Cat Café",
+      "staleSelection": false,
+      "staleError": false
+    },
+    {
+      "step": "home-import-over-30s",
+      "result": "pass",
+      "durationMs": 68064,
+      "autoRefresh": true,
+      "externalSameFeatureUnchanged": true,
+      "importedHomeItemId": "0001787717514267-000773-e013ae40",
+      "externalItemId": "0001787717616587-000776-ecf86c12"
+    },
+    {
+      "step": "narrow-keyboard-semantic-state",
+      "result": "pass",
+      "viewport": "375x812",
+      "focusedTestId": "mc-project-ep-0001787717214007-000000-c76779d2",
+      "controls": [
+        {
+          "testId": "mc-import-docs",
+          "width": 97.546875,
+          "height": 28,
+          "visible": true
+        },
+        {
+          "testId": "mc-project-home",
+          "width": 90.25,
+          "height": 36,
+          "visible": true
+        },
+        {
+          "testId": "mc-project-ep-0001787717214007-000000-c76779d2",
+          "width": 78.921875,
+          "height": 36,
+          "visible": true
+        },
+        {
+          "testId": "mc-tab-features",
+          "width": 88,
+          "height": 36,
+          "visible": true
+        },
+        {
+          "testId": "mc-tab-dependencies",
+          "width": 88,
+          "height": 36,
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "consoleErrors": [],
+  "verdict": "APPROVED",
+  "completedAt": "2026-08-26T04:14:51.676Z"
+}
