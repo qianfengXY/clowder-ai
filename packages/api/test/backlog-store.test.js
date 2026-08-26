@@ -568,6 +568,7 @@ describe('BacklogStore markDone', () => {
       priority: 'p2',
       tags: [],
       createdBy: 'user',
+      projectId: 'project-traqen',
     });
     store.suggestClaim(item.id, { catId: 'claude-opus', why: 'w', plan: 'p', requestedPhase: 'coding' });
     store.decideClaim(item.id, { decision: 'approve', decidedBy: 'u1', note: 'ok' });
@@ -595,6 +596,97 @@ describe('BacklogStore markDone', () => {
     store.markDone(item.id, { doneBy: 'u1' });
     const again = store.markDone(item.id, { doneBy: 'u1' });
     assert.strictEqual(again.status, 'done');
+  });
+
+  test('reopen transitions done → open, clears doneAt, and records the correction reason', () => {
+    const item = createAndDispatch();
+    now += 5000;
+    store.markDone(item.id, { doneBy: 'u1' });
+
+    const reopened = store.reopen(item.id, {
+      userId: 'u1',
+      projectId: 'project-traqen',
+      expectedStatus: 'done',
+      reason: 'Correct cross-project import status collision',
+    });
+
+    assert.strictEqual(reopened.status, 'open');
+    assert.strictEqual(reopened.doneAt, undefined);
+    assert.strictEqual(reopened.audit.at(-1).action, 'reopened');
+    assert.deepStrictEqual(reopened.audit.at(-1).actor, { kind: 'user', id: 'u1' });
+    assert.strictEqual(reopened.audit.at(-1).detail, 'Correct cross-project import status collision');
+  });
+
+  test('reopen fails closed unless owner, project, and expected done status all match', () => {
+    const item = createAndDispatch();
+    store.markDone(item.id, { doneBy: 'u1' });
+
+    assert.strictEqual(
+      store.reopen(item.id, {
+        userId: 'another-user',
+        projectId: 'project-traqen',
+        expectedStatus: 'done',
+        reason: 'wrong owner must not reopen',
+      }),
+      null,
+    );
+    assert.strictEqual(
+      store.reopen(item.id, {
+        userId: 'u1',
+        projectId: 'other-project',
+        expectedStatus: 'done',
+        reason: 'wrong project must not reopen',
+      }),
+      null,
+    );
+
+    const reopened = store.reopen(item.id, {
+      userId: 'u1',
+      projectId: 'project-traqen',
+      expectedStatus: 'done',
+      reason: 'correct historical import status',
+    });
+    assert.strictEqual(reopened.status, 'open');
+    assert.throws(
+      () =>
+        store.reopen(item.id, {
+          userId: 'u1',
+          projectId: 'project-traqen',
+          expectedStatus: 'done',
+          reason: 'stale correction must fail',
+        }),
+      /only done items can be reopened/,
+    );
+    assert.strictEqual(store.get(item.id).audit.filter((entry) => entry.action === 'reopened').length, 1);
+  });
+
+  test('reopen preserves lifecycle bindings and every prior audit entry', () => {
+    const item = createAndDispatch();
+    store.acquireLease(item.id, { catId: 'claude-opus', ttlMs: 60_000, actorId: 'u1' });
+    now += 5_000;
+    const done = store.markDone(item.id, { doneBy: 'u1' });
+    const before = structuredClone(done);
+
+    now += 5_000;
+    const reopened = store.reopen(item.id, {
+      userId: 'u1',
+      projectId: 'project-traqen',
+      expectedStatus: 'done',
+      reason: 'correct historical import status',
+    });
+
+    assert.deepStrictEqual(reopened.suggestion, before.suggestion);
+    assert.deepStrictEqual(reopened.lease, before.lease);
+    assert.strictEqual(reopened.dispatchedThreadId, before.dispatchedThreadId);
+    assert.strictEqual(reopened.dispatchedThreadPhase, before.dispatchedThreadPhase);
+    assert.strictEqual(reopened.dispatchAttemptId, before.dispatchAttemptId);
+    assert.strictEqual(reopened.pendingThreadId, before.pendingThreadId);
+    assert.strictEqual(reopened.kickoffMessageId, before.kickoffMessageId);
+    assert.deepStrictEqual(reopened.audit.slice(0, -1), before.audit);
+    assert.strictEqual(reopened.audit.at(-1).action, 'reopened');
+    assert.strictEqual(reopened.status, 'open');
+    assert.strictEqual(reopened.doneAt, undefined);
+    assert.ok(reopened.updatedAt > before.updatedAt);
   });
 
   test('transitions open → done (disappeared feature)', () => {

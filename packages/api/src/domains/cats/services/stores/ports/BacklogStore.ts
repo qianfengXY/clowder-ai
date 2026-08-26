@@ -13,6 +13,7 @@ import type {
   ReclaimBacklogLeaseInput,
   RefreshBacklogItemInput,
   ReleaseBacklogLeaseInput,
+  ReopenBacklogItemInput,
   SuggestBacklogClaimInput,
   UpdateBacklogDispatchProgressInput,
 } from '@cat-cafe/shared';
@@ -105,6 +106,7 @@ export interface IBacklogStore {
   ): BacklogItem | null | Promise<BacklogItem | null>;
   markDispatched(itemId: string, input: DispatchBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   markDone(itemId: string, input: MarkDoneInput): BacklogItem | null | Promise<BacklogItem | null>;
+  reopen(itemId: string, input: ReopenBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   acquireLease(itemId: string, input: AcquireBacklogLeaseInput): BacklogItem | null | Promise<BacklogItem | null>;
   heartbeatLease(itemId: string, input: HeartbeatBacklogLeaseInput): BacklogItem | null | Promise<BacklogItem | null>;
   releaseLease(itemId: string, input: ReleaseBacklogLeaseInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -594,6 +596,35 @@ export class BacklogStore implements IBacklogStore {
           action: 'done',
           actor: makeUserActor(input.doneBy),
           timestamp: now,
+        },
+      ],
+    };
+    this.items.set(itemId, updated);
+    return updated;
+  }
+
+  reopen(itemId: string, input: ReopenBacklogItemInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (!existing) return null;
+    if (existing.userId !== input.userId || existing.projectId !== input.projectId) return null;
+    if (existing.status !== input.expectedStatus) {
+      throw new BacklogTransitionError('Invalid backlog transition: only done items can be reopened');
+    }
+
+    const { doneAt: _doneAt, ...withoutDoneAt } = existing;
+    const now = Date.now();
+    const updated: BacklogItem = {
+      ...withoutDoneAt,
+      status: 'open',
+      updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'reopened',
+          actor: makeUserActor(input.userId),
+          timestamp: now,
+          detail: input.reason,
         },
       ],
     };

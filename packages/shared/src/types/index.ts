@@ -160,6 +160,7 @@ export type {
   ReclaimBacklogLeaseInput,
   RefreshBacklogItemInput,
   ReleaseBacklogLeaseInput,
+  ReopenBacklogItemInput,
   SuggestBacklogClaimInput,
   ThreadPhase,
   UpdateBacklogDispatchProgressInput,

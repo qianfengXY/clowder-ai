@@ -38,6 +38,7 @@ export type BacklogAuditAction =
   | 'rejected'
   | 'dispatched'
   | 'done'
+  | 'reopened'
   | 'lease_acquired'
   | 'lease_heartbeat'
   | 'lease_released'
@@ -156,6 +157,17 @@ export interface ReclaimBacklogLeaseInput {
 
 export interface MarkDoneInput {
   readonly doneBy: string;
+}
+
+/** An explicit, audited correction of an incorrectly completed backlog item. */
+export interface ReopenBacklogItemInput {
+  /** Owner scope that must match the persisted item. */
+  readonly userId: string;
+  /** Exact external project scope. Home backlog items cannot be reopened through this correction path. */
+  readonly projectId: string;
+  /** Compare-and-set precondition; stale callers must fail closed. */
+  readonly expectedStatus: 'done';
+  readonly reason: string;
 }
 
 export interface BacklogDependencies {

@@ -1,5 +1,12 @@
 import { dirname, join } from 'node:path';
-import type { BacklogDependencies, BacklogItem, CatId, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
+import type {
+  BacklogDependencies,
+  BacklogItem,
+  CatId,
+  MissionHubSelfClaimScope,
+  ReopenBacklogItemInput,
+  ThreadPhase,
+} from '@cat-cafe/shared';
 import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -83,6 +90,12 @@ const leaseReleaseSchema = z.object({
   catId: catIdSchema().optional(),
 });
 
+const reopenBacklogItemSchema = z.object({
+  projectId: z.string().trim().min(1).max(200),
+  expectedStatus: z.literal('done'),
+  reason: z.string().trim().min(1).max(1000),
+});
+
 function buildKickoffMessage(item: BacklogItem, phase: ThreadPhase): string {
   const suggestion = item.suggestion;
   const escapeXml = (raw: string) =>
@@ -120,6 +133,25 @@ function isTransitionError(err: unknown): boolean {
   return (
     err instanceof BacklogTransitionError || (err instanceof Error && /invalid backlog transition/i.test(err.message))
   );
+}
+
+async function reopenBacklogItem(
+  backlogStore: IBacklogStore,
+  itemId: string,
+  input: ReopenBacklogItemInput,
+): Promise<{ statusCode: 200 | 404 | 409; payload: { item: BacklogItem } | { error: string } }> {
+  try {
+    const reopened = await backlogStore.reopen(itemId, input);
+    if (!reopened) {
+      return { statusCode: 404, payload: { error: 'Backlog item not found' } };
+    }
+    return { statusCode: 200, payload: { item: reopened } };
+  } catch (err) {
+    if (isTransitionError(err)) {
+      return { statusCode: 409, payload: { error: err instanceof Error ? err.message : 'Invalid transition' } };
+    }
+    throw err;
+  }
 }
 
 function sameTags(left: readonly string[], right: readonly string[]): boolean {
@@ -950,5 +982,28 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       }
       throw err;
     }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/backlog/items/:id/reopen', async (request, reply) => {
+    const parsed = reopenBacklogItemSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const result = await reopenBacklogItem(backlogStore, request.params.id, {
+      userId,
+      projectId: parsed.data.projectId,
+      expectedStatus: parsed.data.expectedStatus,
+      reason: parsed.data.reason,
+    });
+    reply.status(result.statusCode);
+    return result.payload;
   });
 };
