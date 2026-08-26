@@ -1,5 +1,12 @@
 import { dirname, join } from 'node:path';
-import type { BacklogDependencies, BacklogItem, CatId, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
+import type {
+  BacklogDependencies,
+  BacklogItem,
+  CatId,
+  MissionHubSelfClaimScope,
+  ReopenBacklogItemInput,
+  ThreadPhase,
+} from '@cat-cafe/shared';
 import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -84,6 +91,8 @@ const leaseReleaseSchema = z.object({
 });
 
 const reopenBacklogItemSchema = z.object({
+  projectId: z.string().trim().min(1).max(200),
+  expectedStatus: z.literal('done'),
   reason: z.string().trim().min(1).max(1000),
 });
 
@@ -129,16 +138,10 @@ function isTransitionError(err: unknown): boolean {
 async function reopenBacklogItem(
   backlogStore: IBacklogStore,
   itemId: string,
-  userId: string,
-  reason: string,
+  input: ReopenBacklogItemInput,
 ): Promise<{ statusCode: 200 | 404 | 409; payload: { item: BacklogItem } | { error: string } }> {
-  const existing = await backlogStore.get(itemId, userId);
-  if (!existing) {
-    return { statusCode: 404, payload: { error: 'Backlog item not found' } };
-  }
-
   try {
-    const reopened = await backlogStore.reopen(itemId, { reopenedBy: userId, reason });
+    const reopened = await backlogStore.reopen(itemId, input);
     if (!reopened) {
       return { statusCode: 404, payload: { error: 'Backlog item not found' } };
     }
@@ -994,7 +997,12 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       return { error: 'Identity required' };
     }
 
-    const result = await reopenBacklogItem(backlogStore, request.params.id, userId, parsed.data.reason);
+    const result = await reopenBacklogItem(backlogStore, request.params.id, {
+      userId,
+      projectId: parsed.data.projectId,
+      expectedStatus: parsed.data.expectedStatus,
+      reason: parsed.data.reason,
+    });
     reply.status(result.statusCode);
     return result.payload;
   });

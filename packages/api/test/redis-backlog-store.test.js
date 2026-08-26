@@ -138,7 +138,9 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await store.markDone(created.id, { doneBy: 'default-user' });
 
     const reopened = await store.reopen(created.id, {
-      reopenedBy: 'default-user',
+      userId: 'default-user',
+      projectId: 'project-traqen',
+      expectedStatus: 'done',
       reason: 'Correct cross-project import status collision',
     });
 
@@ -146,6 +148,67 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(reopened?.doneAt, undefined);
     assert.equal(reopened?.audit.at(-1)?.action, 'reopened');
     assert.equal(reopened?.audit.at(-1)?.detail, 'Correct cross-project import status collision');
+  });
+
+  it('reopen is an atomic project-scoped CAS that clears persisted doneAt and retains all lifecycle bindings', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: 'Imported F001',
+      summary: 'must retain its current workflow binding',
+      priority: 'p0',
+      tags: ['feature:f001'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+    await store.suggestClaim(created.id, {
+      catId: 'codex',
+      why: 'preserve suggestion',
+      plan: 'reopen historical correction',
+      requestedPhase: 'coding',
+    });
+    await store.decideClaim(created.id, { decision: 'approve', decidedBy: 'default-user' });
+    await store.updateDispatchProgress(created.id, {
+      updatedBy: 'default-user',
+      dispatchAttemptId: 'attempt-1',
+      pendingThreadId: 'thread-pending',
+      kickoffMessageId: 'message-kickoff',
+    });
+    await store.markDispatched(created.id, {
+      threadId: 'thread-dispatched',
+      threadPhase: 'coding',
+      dispatchedBy: 'default-user',
+    });
+    await store.acquireLease(created.id, { catId: 'codex', ttlMs: 60_000, actorId: 'default-user' });
+    await store.markDone(created.id, { doneBy: 'default-user' });
+    const before = await store.get(created.id);
+    assert.ok(before?.doneAt, 'markDone must persist doneAt before reopen');
+    assert.equal(await redis.hget(`backlog:item:${created.id}`, 'doneAt'), String(before?.doneAt));
+
+    const correction = {
+      userId: 'default-user',
+      projectId: 'project-traqen',
+      expectedStatus: 'done',
+      reason: 'Correct cross-project import status collision',
+    };
+    const results = await Promise.allSettled([store.reopen(created.id, correction), store.reopen(created.id, correction)]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+
+    const reloaded = await store.get(created.id);
+    assert.equal(reloaded?.status, 'open');
+    assert.equal(reloaded?.doneAt, undefined);
+    assert.equal(await redis.hget(`backlog:item:${created.id}`, 'doneAt'), null);
+    assert.deepEqual(reloaded?.suggestion, before?.suggestion);
+    assert.deepEqual(reloaded?.lease, before?.lease);
+    assert.equal(reloaded?.dispatchedThreadId, before?.dispatchedThreadId);
+    assert.equal(reloaded?.dispatchedThreadPhase, before?.dispatchedThreadPhase);
+    assert.equal(reloaded?.dispatchAttemptId, before?.dispatchAttemptId);
+    assert.equal(reloaded?.pendingThreadId, before?.pendingThreadId);
+    assert.equal(reloaded?.kickoffMessageId, before?.kickoffMessageId);
+    assert.deepEqual(reloaded?.audit.slice(0, -1), before?.audit);
+    assert.equal(reloaded?.audit.at(-1)?.action, 'reopened');
+    assert.equal(reloaded?.audit.filter((entry) => entry.action === 'reopened').length, 1);
   });
 
   it('concurrent acquire by different cats: only one succeeds', async () => {

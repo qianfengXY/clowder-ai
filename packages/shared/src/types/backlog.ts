@@ -161,7 +161,12 @@ export interface MarkDoneInput {
 
 /** An explicit, audited correction of an incorrectly completed backlog item. */
 export interface ReopenBacklogItemInput {
-  readonly reopenedBy: string;
+  /** Owner scope that must match the persisted item. */
+  readonly userId: string;
+  /** Exact external project scope. Home backlog items cannot be reopened through this correction path. */
+  readonly projectId: string;
+  /** Compare-and-set precondition; stale callers must fail closed. */
+  readonly expectedStatus: 'done';
   readonly reason: string;
 }
 

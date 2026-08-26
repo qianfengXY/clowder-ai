@@ -1661,20 +1661,26 @@ describe('Backlog mark-done route', () => {
 
   test('POST reopen restores a done item to open and preserves a correction audit reason', async () => {
     const app = await createApp();
-    const createRes = await app.inject({
-      method: 'POST',
-      url: '/api/backlog/items',
-      headers: H,
-      payload: { title: 'Imported F001', summary: 'must remain active', priority: 'p0', tags: ['feature:f001'] },
+    const item = backlogStore.create({
+      userId: 'default-user',
+      projectId: 'ep-traqen',
+      title: 'Imported F001',
+      summary: 'must remain active',
+      priority: 'p0',
+      tags: ['feature:f001'],
+      createdBy: 'user',
     });
-    const itemId = createRes.json().id;
-    await backlogStore.markDone(itemId, { doneBy: 'default-user' });
+    await backlogStore.markDone(item.id, { doneBy: 'default-user' });
 
     const res = await app.inject({
       method: 'POST',
-      url: `/api/backlog/items/${itemId}/reopen`,
+      url: `/api/backlog/items/${item.id}/reopen`,
       headers: H,
-      payload: { reason: 'Correct cross-project import status collision' },
+      payload: {
+        projectId: 'ep-traqen',
+        expectedStatus: 'done',
+        reason: 'Correct cross-project import status collision',
+      },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1682,6 +1688,69 @@ describe('Backlog mark-done route', () => {
     assert.strictEqual(res.json().item.doneAt, undefined);
     assert.strictEqual(res.json().item.audit.at(-1).action, 'reopened');
     assert.strictEqual(res.json().item.audit.at(-1).detail, 'Correct cross-project import status collision');
+  });
+
+  test('POST reopen refuses home backlog items and mismatched project scopes', async () => {
+    const app = await createApp();
+    const home = backlogStore.create({
+      userId: 'default-user',
+      title: 'Home item',
+      summary: 'historical correction must never target home scope',
+      priority: 'p1',
+      tags: [],
+      createdBy: 'user',
+    });
+    const project = backlogStore.create({
+      userId: 'default-user',
+      projectId: 'ep-traqen',
+      title: 'Traqen item',
+      summary: 'historical correction must require its exact project',
+      priority: 'p1',
+      tags: [],
+      createdBy: 'user',
+    });
+    await backlogStore.markDone(home.id, { doneBy: 'default-user' });
+    await backlogStore.markDone(project.id, { doneBy: 'default-user' });
+
+    const homeRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${home.id}/reopen`,
+      headers: H,
+      payload: { projectId: 'ep-traqen', expectedStatus: 'done', reason: 'must not reopen home' },
+    });
+    assert.strictEqual(homeRes.statusCode, 404);
+    assert.strictEqual((await backlogStore.get(home.id)).status, 'done');
+
+    const scopeRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${project.id}/reopen`,
+      headers: H,
+      payload: { projectId: 'ep-other', expectedStatus: 'done', reason: 'must not cross project scope' },
+    });
+    assert.strictEqual(scopeRes.statusCode, 404);
+    assert.strictEqual((await backlogStore.get(project.id)).status, 'done');
+  });
+
+  test('POST reopen returns conflict for a stale expected status without adding a second audit', async () => {
+    const app = await createApp();
+    const item = backlogStore.create({
+      userId: 'default-user',
+      projectId: 'ep-traqen',
+      title: 'Traqen item',
+      summary: 'stale correction callers must fail closed',
+      priority: 'p1',
+      tags: [],
+      createdBy: 'user',
+    });
+    await backlogStore.markDone(item.id, { doneBy: 'default-user' });
+    const payload = { projectId: 'ep-traqen', expectedStatus: 'done', reason: 'correct historical import status' };
+
+    const first = await app.inject({ method: 'POST', url: `/api/backlog/items/${item.id}/reopen`, headers: H, payload });
+    const stale = await app.inject({ method: 'POST', url: `/api/backlog/items/${item.id}/reopen`, headers: H, payload });
+
+    assert.strictEqual(first.statusCode, 200);
+    assert.strictEqual(stale.statusCode, 409);
+    assert.strictEqual((await backlogStore.get(item.id)).audit.filter((entry) => entry.action === 'reopened').length, 1);
   });
 
   test('POST reopen requires a non-empty audit reason', async () => {
@@ -1698,7 +1767,7 @@ describe('Backlog mark-done route', () => {
       method: 'POST',
       url: `/api/backlog/items/${createRes.json().id}/reopen`,
       headers: H,
-      payload: { reason: ' ' },
+      payload: { projectId: 'ep-traqen', expectedStatus: 'done', reason: ' ' },
     });
 
     assert.strictEqual(res.statusCode, 400);
@@ -1720,7 +1789,7 @@ describe('Backlog mark-done route', () => {
       method: 'POST',
       url: `/api/backlog/items/${itemId}/reopen`,
       headers: H,
-      payload: { reason: 'must not be accepted' },
+      payload: { projectId: 'ep-traqen', expectedStatus: 'done', reason: 'must not be accepted' },
     });
 
     assert.strictEqual(res.statusCode, 404);

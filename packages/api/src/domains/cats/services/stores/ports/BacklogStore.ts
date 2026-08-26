@@ -606,8 +606,8 @@ export class BacklogStore implements IBacklogStore {
   reopen(itemId: string, input: ReopenBacklogItemInput): BacklogItem | null {
     const existing = this.items.get(itemId);
     if (!existing) return null;
-    if (existing.status === 'open') return existing;
-    if (existing.status !== 'done') {
+    if (existing.userId !== input.userId || existing.projectId !== input.projectId) return null;
+    if (existing.status !== input.expectedStatus) {
       throw new BacklogTransitionError('Invalid backlog transition: only done items can be reopened');
     }
 
@@ -622,7 +622,7 @@ export class BacklogStore implements IBacklogStore {
         {
           id: generateSortableId(now + 1),
           action: 'reopened',
-          actor: makeUserActor(input.reopenedBy),
+          actor: makeUserActor(input.userId),
           timestamp: now,
           detail: input.reason,
         },

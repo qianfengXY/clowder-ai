@@ -47,6 +47,65 @@ return 1
 
 /**
  * KEYS[1] = backlog:item:{id}
+ * ARGV[1] = expected userId
+ * ARGV[2] = expected projectId
+ * ARGV[3] = expected status
+ * ARGV[4] = now
+ * ARGV[5] = auditEntry(json)
+ *
+ * return: 1 reopened, -1 missing, -2 owner/project mismatch,
+ *         -3 expected status mismatch, -4 invalid persisted audit
+ */
+const REOPEN_LUA = `
+local key = KEYS[1]
+local userId = ARGV[1]
+local projectId = ARGV[2]
+local expectedStatus = ARGV[3]
+local now = ARGV[4]
+local auditEntryRaw = ARGV[5]
+
+if redis.call('HGET', key, 'id') == false then
+  return -1
+end
+
+if redis.call('HGET', key, 'userId') ~= userId then
+  return -2
+end
+
+if redis.call('HGET', key, 'projectId') ~= projectId then
+  return -2
+end
+
+if redis.call('HGET', key, 'status') ~= expectedStatus then
+  return -3
+end
+
+local auditRaw = redis.call('HGET', key, 'audit')
+if not auditRaw or auditRaw == '' then
+  return -4
+end
+local okAudit, audit = pcall(cjson.decode, auditRaw)
+if not okAudit or type(audit) ~= 'table' then
+  return -4
+end
+
+local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
+if not okEntry or type(auditEntry) ~= 'table' then
+  return -4
+end
+table.insert(audit, auditEntry)
+
+redis.call('HSET', key,
+  'status', 'open',
+  'updatedAt', now,
+  'audit', cjson.encode(audit)
+)
+redis.call('HDEL', key, 'doneAt')
+return 1
+`;
+
+/**
+ * KEYS[1] = backlog:item:{id}
  * ARGV[1] = now
  * ARGV[2] = catId
  * ARGV[3] = expiresAt
@@ -723,32 +782,35 @@ export class RedisBacklogStore implements IBacklogStore {
   }
 
   async reopen(itemId: string, input: ReopenBacklogItemInput): Promise<BacklogItem | null> {
-    const existing = await this.get(itemId);
-    if (!existing) return null;
-    if (existing.status === 'open') return existing;
-    if (existing.status !== 'done') {
+    const now = Date.now();
+    const auditEntry = JSON.stringify({
+      id: generateSortableId(now + 1),
+      action: 'reopened',
+      actor: makeUserActor(input.userId),
+      timestamp: now,
+      detail: input.reason,
+    });
+    const result = Number(
+      await this.redis.eval(
+        REOPEN_LUA,
+        1,
+        BacklogKeys.detail(itemId),
+        input.userId,
+        input.projectId,
+        input.expectedStatus,
+        String(now),
+        auditEntry,
+      ),
+    );
+
+    if (result === -1 || result === -2) return null;
+    if (result === -3) {
       throw new BacklogTransitionError('Invalid backlog transition: only done items can be reopened');
     }
-
-    const { doneAt: _doneAt, ...withoutDoneAt } = existing;
-    const now = Date.now();
-    const updated: BacklogItem = {
-      ...withoutDoneAt,
-      status: 'open',
-      updatedAt: now,
-      audit: [
-        ...existing.audit,
-        {
-          id: generateSortableId(now + 1),
-          action: 'reopened',
-          actor: makeUserActor(input.reopenedBy),
-          timestamp: now,
-          detail: input.reason,
-        },
-      ],
-    };
-    await this.writeItem(updated);
-    return updated;
+    if (result !== 1) {
+      throw new BacklogTransitionError('Invalid backlog transition: reopen rejected due to invalid persisted state');
+    }
+    return this.get(itemId);
   }
 
   async atomicDispatch(itemId: string, input: AtomicDispatchInput): Promise<BacklogItem | null> {
@@ -969,6 +1031,7 @@ export class RedisBacklogStore implements IBacklogStore {
     if (item.lease) result.lease = JSON.stringify(item.lease);
     if (item.approvedAt) result.approvedAt = String(item.approvedAt);
     if (item.dispatchedAt) result.dispatchedAt = String(item.dispatchedAt);
+    if (item.doneAt) result.doneAt = String(item.doneAt);
     if (item.dispatchedThreadId) result.dispatchedThreadId = item.dispatchedThreadId;
     if (item.dispatchedThreadPhase) result.dispatchedThreadPhase = item.dispatchedThreadPhase;
     if (item.dispatchAttemptId) result.dispatchAttemptId = item.dispatchAttemptId;
@@ -985,6 +1048,7 @@ export class RedisBacklogStore implements IBacklogStore {
     const lease = data.lease ? this.parseJson(data.lease, null as BacklogLease | null) : null;
     const approvedAt = data.approvedAt ? Number.parseInt(data.approvedAt, 10) : null;
     const dispatchedAt = data.dispatchedAt ? Number.parseInt(data.dispatchedAt, 10) : null;
+    const doneAt = data.doneAt ? Number.parseInt(data.doneAt, 10) : null;
     return {
       id: data.id ?? '',
       userId: data.userId ?? '',
@@ -1007,6 +1071,7 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(data.projectId ? { projectId: data.projectId } : {}),
       ...(approvedAt ? { approvedAt } : {}),
       ...(dispatchedAt ? { dispatchedAt } : {}),
+      ...(doneAt ? { doneAt } : {}),
     };
   }
 
