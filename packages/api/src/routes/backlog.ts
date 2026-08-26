@@ -361,7 +361,7 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       };
     }
 
-    let existingItems = await backlogStore.listByUser(userId);
+    let existingItems = (await backlogStore.listByUser(userId)).filter((item) => !item.projectId);
     let migratedLegacyItemIds: readonly string[] = [];
     try {
       const migration = await migrateLegacyExtensionItems({

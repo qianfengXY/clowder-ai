@@ -65,6 +65,8 @@ export interface ApiFetchOptions {
    * caller to one bounded trailing generation instead of the possibly stale one.
    */
   afterCurrentGet?: boolean;
+  /** Override the default bound for one explicitly long-running mutation. */
+  mutationTimeoutMs?: number;
 }
 
 interface GetGeneration {
@@ -186,7 +188,7 @@ function withoutCallerSignal(init?: RequestInit): RequestInit | undefined {
   return physicalInit;
 }
 
-async function performApiFetch(path: string, init?: RequestInit): Promise<Response> {
+async function performApiFetch(path: string, init?: RequestInit, options?: ApiFetchOptions): Promise<Response> {
   const initialSessionGate = ensureSession();
   await waitForPromiseWithSignal(initialSessionGate, init?.signal);
   const normalized = ensureBodyForMutation(init);
@@ -199,7 +201,7 @@ async function performApiFetch(path: string, init?: RequestInit): Promise<Respon
         ...normalized,
         credentials: 'include',
       },
-      isReadRequest ? READ_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS,
+      isReadRequest ? READ_REQUEST_TIMEOUT_MS : (options?.mutationTimeoutMs ?? API_REQUEST_TIMEOUT_MS),
     );
   let res: Response;
   try {
@@ -292,5 +294,5 @@ export async function apiFetch(path: string, init?: RequestInit, options?: ApiFe
   if (requestMethod(init) === 'GET') {
     return coordinatedGet(path, init, options?.afterCurrentGet === true);
   }
-  return performApiFetch(path, init);
+  return performApiFetch(path, init, options);
 }

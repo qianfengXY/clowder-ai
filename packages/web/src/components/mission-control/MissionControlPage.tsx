@@ -488,9 +488,13 @@ export function MissionControlPage() {
   const handleImportFromDocs = useCallback(
     async () =>
       withActiveProjectSubmitGuard(async () => {
-        const response = await apiFetch(getProjectBacklogImportPath(activeProject), {
-          method: 'POST',
-        });
+        const response = await apiFetch(
+          getProjectBacklogImportPath(activeProject),
+          {
+            method: 'POST',
+          },
+          { mutationTimeoutMs: 120_000 },
+        );
         if (!response.ok) throw new Error(await parseError(response));
         await reloadItems();
       }),
