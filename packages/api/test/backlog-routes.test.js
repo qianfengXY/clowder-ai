@@ -1067,6 +1067,64 @@ describe('Backlog Routes', () => {
     }
   });
 
+  test('home backlog import never mutates project-bound items', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-home-import-scope-'));
+    const backlogDocPath = join(tempDir, 'ROADMAP.md');
+    const featuresDir = join(tempDir, 'features');
+    await mkdir(featuresDir, { recursive: true });
+    await writeFile(
+      backlogDocPath,
+      `# Clowder AI Feature Roadmap
+
+| ID | 名称 | Status | Owner | Link |
+|----|------|--------|-------|------|
+| F010 | Cat Café F010 | in-progress | 三猫 | [F010](features/F010-mobile-cat.md) |
+`,
+    );
+
+    const matchingExternal = await backlogStore.create({
+      userId: 'default-user',
+      projectId: 'ep-traqen',
+      title: '[F010] Traqen F010',
+      summary: 'Traqen metadata must remain authoritative',
+      priority: 'p3',
+      tags: ['source:external-project', 'feature:f010', 'status:spec'],
+      createdBy: 'user',
+    });
+    const missingExternal = await backlogStore.create({
+      userId: 'default-user',
+      projectId: 'ep-traqen',
+      title: '[F007] Traqen relaunch',
+      summary: 'Traqen-only feature must remain open',
+      priority: 'p1',
+      tags: ['source:external-project', 'feature:f007', 'status:spec'],
+      createdBy: 'user',
+    });
+    const matchingBefore = structuredClone(matchingExternal);
+    const missingBefore = structuredClone(missingExternal);
+
+    try {
+      const app = await createApp({ backlogDocPath, featuresDir });
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/backlog/import-active-features',
+        headers: USER_HEADER,
+      });
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().imported, 1, 'home import must create its own F010 item');
+      assert.deepEqual(await backlogStore.get(matchingExternal.id, 'default-user'), matchingBefore);
+      assert.deepEqual(await backlogStore.get(missingExternal.id, 'default-user'), missingBefore);
+
+      const homeItems = (await backlogStore.listByUser('default-user')).filter((item) => !item.projectId);
+      assert.equal(homeItems.length, 1);
+      assert.equal(homeItems[0].title, '[F010] Cat Café F010');
+      assert.equal(homeItems[0].tags.includes('feature:f010'), true);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test('imports extension overlay and separates legacy Desktop F289 from upstream F289', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-extension-import-'));
     const backlogDocPath = join(tempDir, 'ROADMAP.md');

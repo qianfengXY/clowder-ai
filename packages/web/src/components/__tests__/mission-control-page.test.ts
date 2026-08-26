@@ -174,6 +174,7 @@ describe('MissionControlPage', () => {
     expect(mockApiFetch).toHaveBeenCalledWith(
       '/api/backlog/import-active-features',
       expect.objectContaining({ method: 'POST' }),
+      { mutationTimeoutMs: 120_000 },
     );
     expect(container.textContent).toContain('F010 手机端猫猫');
   });
@@ -1349,6 +1350,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     expect(mockApiFetch).toHaveBeenCalledWith(
       '/api/external-projects/project-traqen/import-backlog',
       expect.objectContaining({ method: 'POST' }),
+      { mutationTimeoutMs: 120_000 },
     );
   });
 

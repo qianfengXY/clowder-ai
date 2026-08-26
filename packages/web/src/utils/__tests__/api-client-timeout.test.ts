@@ -96,6 +96,26 @@ describe('apiFetch bounded completion', () => {
     });
   });
 
+  it('honors an explicit timeout for a long-running mutation', async () => {
+    const mutation = deferred<Response>();
+    const mockFetch = vi.fn((url: string) => {
+      if (url.includes('/api/session')) return Promise.resolve(new Response('{}', { status: 200 }));
+      return mutation.promise;
+    });
+    globalThis.fetch = mockFetch as typeof fetch;
+    const apiFetch = await loadApiFetch();
+
+    const request = apiFetch('/api/backlog/import-active-features', { method: 'POST' }, { mutationTimeoutMs: 120_000 });
+    const observed = observe(request);
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await vi.advanceTimersByTimeAsync(30_001);
+
+    expect(await settledOutcome(observed)).toEqual({ kind: 'pending' });
+
+    mutation.resolve(new Response('{}', { status: 200 }));
+    await expect(request).resolves.toMatchObject({ status: 200 });
+  });
+
   it('lets one caller abort while concurrent callers keep sharing the same session bootstrap', async () => {
     const session = deferred<Response>();
     const mockFetch = vi.fn((url: string) => {
