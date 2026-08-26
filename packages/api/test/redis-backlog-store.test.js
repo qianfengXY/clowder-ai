@@ -191,7 +191,10 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       expectedStatus: 'done',
       reason: 'Correct cross-project import status collision',
     };
-    const results = await Promise.allSettled([store.reopen(created.id, correction), store.reopen(created.id, correction)]);
+    const results = await Promise.allSettled([
+      store.reopen(created.id, correction),
+      store.reopen(created.id, correction),
+    ]);
     assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
 

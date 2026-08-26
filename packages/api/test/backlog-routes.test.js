@@ -1745,12 +1745,25 @@ describe('Backlog mark-done route', () => {
     await backlogStore.markDone(item.id, { doneBy: 'default-user' });
     const payload = { projectId: 'ep-traqen', expectedStatus: 'done', reason: 'correct historical import status' };
 
-    const first = await app.inject({ method: 'POST', url: `/api/backlog/items/${item.id}/reopen`, headers: H, payload });
-    const stale = await app.inject({ method: 'POST', url: `/api/backlog/items/${item.id}/reopen`, headers: H, payload });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${item.id}/reopen`,
+      headers: H,
+      payload,
+    });
+    const stale = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${item.id}/reopen`,
+      headers: H,
+      payload,
+    });
 
     assert.strictEqual(first.statusCode, 200);
     assert.strictEqual(stale.statusCode, 409);
-    assert.strictEqual((await backlogStore.get(item.id)).audit.filter((entry) => entry.action === 'reopened').length, 1);
+    assert.strictEqual(
+      (await backlogStore.get(item.id)).audit.filter((entry) => entry.action === 'reopened').length,
+      1,
+    );
   });
 
   test('POST reopen requires a non-empty audit reason', async () => {

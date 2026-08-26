@@ -18,23 +18,13 @@
     {
       "step": "project-first-navigation",
       "result": "pass",
-      "projects": [
-        "Cat Café",
-        "Traqen"
-      ]
+      "projects": ["Cat Café", "Traqen"]
     },
     {
       "step": "external-common-workflow",
       "result": "pass",
-      "views": [
-        "features",
-        "dependencies"
-      ],
-      "rightWorkflow": [
-        "suggestion",
-        "sop",
-        "threads"
-      ]
+      "views": ["features", "dependencies"],
+      "rightWorkflow": ["suggestion", "sop", "threads"]
     },
     {
       "step": "rapid-project-round-trip",
