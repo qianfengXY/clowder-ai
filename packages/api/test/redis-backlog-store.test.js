@@ -150,6 +150,34 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(reopened?.audit.at(-1)?.detail, 'Correct cross-project import status collision');
   });
 
+  it('correctDispatchedPhase atomically preserves the dispatched thread and rejects stale targets', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const itemId = await createDispatchedItem('dispatch phase correction');
+    const before = await store.get(itemId);
+    assert.ok(before?.dispatchedThreadId);
+
+    const corrected = await store.correctDispatchedPhase(itemId, {
+      userId: 'default-user',
+      expectedThreadId: before.dispatchedThreadId,
+      threadPhase: 'research',
+      reason: 'Correct initial dispatch phase',
+    });
+    assert.equal(corrected?.dispatchedThreadId, before.dispatchedThreadId);
+    assert.equal(corrected?.dispatchedThreadPhase, 'research');
+    assert.equal(corrected?.audit.at(-1)?.action, 'dispatch_phase_corrected');
+
+    await assert.rejects(
+      store.correctDispatchedPhase(itemId, {
+        userId: 'default-user',
+        expectedThreadId: 'thread-stale',
+        threadPhase: 'brainstorm',
+        reason: 'A stale correction must not retarget the item',
+      }),
+      /dispatched thread mismatch/i,
+    );
+    assert.equal((await store.get(itemId))?.dispatchedThreadPhase, 'research');
+  });
+
   it('reopen is an atomic project-scoped CAS that clears persisted doneAt and retains all lifecycle bindings', async (t) => {
     if (!connected) return t.skip('Redis not connected');
     const created = await store.create({

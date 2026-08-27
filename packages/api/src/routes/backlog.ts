@@ -99,6 +99,12 @@ const reopenBacklogItemSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
 });
 
+const correctDispatchPhaseSchema = z.object({
+  expectedThreadId: z.string().trim().min(1).max(500),
+  threadPhase: z.enum(['coding', 'research', 'brainstorm']),
+  reason: z.string().trim().min(1).max(1000),
+});
+
 function buildKickoffMessage(item: BacklogItem, phase: ThreadPhase): string {
   const suggestion = item.suggestion;
   const escapeXml = (raw: string) =>
@@ -152,6 +158,63 @@ async function reopenBacklogItem(
   } catch (err) {
     if (isTransitionError(err)) {
       return { statusCode: 409, payload: { error: err instanceof Error ? err.message : 'Invalid transition' } };
+    }
+    throw err;
+  }
+}
+
+async function correctDispatchedPhase(
+  backlogStore: IBacklogStore,
+  threadStore: IThreadStore,
+  itemId: string,
+  userId: string,
+  input: z.infer<typeof correctDispatchPhaseSchema>,
+) {
+  const existing = await backlogStore.get(itemId, userId);
+  if (!existing) {
+    return { statusCode: 404 as const, payload: { error: 'Backlog item not found' } };
+  }
+  if (existing.dispatchedThreadId !== input.expectedThreadId) {
+    return {
+      statusCode: 409 as const,
+      payload: { error: 'Invalid backlog transition: dispatched thread mismatch' },
+    };
+  }
+
+  const rawThread = await threadStore.get(input.expectedThreadId);
+  if (!rawThread || rawThread.deletedAt) {
+    return {
+      statusCode: 409 as const,
+      payload: { error: 'Invalid backlog transition: dispatched thread is unavailable' },
+    };
+  }
+
+  try {
+    const item = await backlogStore.correctDispatchedPhase(itemId, {
+      userId,
+      expectedThreadId: input.expectedThreadId,
+      threadPhase: input.threadPhase,
+      reason: input.reason,
+    });
+    if (!item) {
+      return { statusCode: 404 as const, payload: { error: 'Backlog item not found' } };
+    }
+
+    await threadStore.updatePhase(input.expectedThreadId, input.threadPhase);
+    const thread = await threadStore.get(input.expectedThreadId);
+    return {
+      statusCode: 200 as const,
+      payload: {
+        item,
+        thread: thread ? sanitizeThreadForResponse(thread, userId) : null,
+      },
+    };
+  } catch (err) {
+    if (isTransitionError(err)) {
+      return {
+        statusCode: 409 as const,
+        payload: { error: err instanceof Error ? err.message : 'Invalid transition' },
+      };
     }
     throw err;
   }
@@ -584,6 +647,22 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     }
 
     return { scopes };
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/backlog/items/:id/dispatch-phase', async (request, reply) => {
+    const parsed = correctDispatchPhaseSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+    const result = await correctDispatchedPhase(backlogStore, threadStore, request.params.id, userId, parsed.data);
+    reply.status(result.statusCode);
+    return result.payload;
   });
 
   app.post<{ Params: { id: string } }>('/api/backlog/items/:id/self-claim', async (request, reply) => {

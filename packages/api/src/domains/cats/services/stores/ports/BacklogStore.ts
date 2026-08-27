@@ -5,6 +5,7 @@ import type {
   BacklogItem,
   BacklogLease,
   BacklogStatus,
+  CorrectDispatchedPhaseInput,
   CreateBacklogItemInput,
   DecideBacklogClaimInput,
   DispatchBacklogItemInput,
@@ -105,6 +106,10 @@ export interface IBacklogStore {
     input: UpdateBacklogDispatchProgressInput,
   ): BacklogItem | null | Promise<BacklogItem | null>;
   markDispatched(itemId: string, input: DispatchBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
+  correctDispatchedPhase(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+  ): BacklogItem | null | Promise<BacklogItem | null>;
   markDone(itemId: string, input: MarkDoneInput): BacklogItem | null | Promise<BacklogItem | null>;
   reopen(itemId: string, input: ReopenBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   acquireLease(itemId: string, input: AcquireBacklogLeaseInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -409,6 +414,37 @@ export class BacklogStore implements IBacklogStore {
           actor: makeUserActor(input.dispatchedBy),
           timestamp: now,
           detail: `${input.threadId}:${input.threadPhase}`,
+        },
+      ],
+    };
+    this.items.set(itemId, updated);
+    return updated;
+  }
+
+  correctDispatchedPhase(itemId: string, input: CorrectDispatchedPhaseInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (!existing || existing.userId !== input.userId) return null;
+    if (existing.status !== 'dispatched') {
+      throw new BacklogTransitionError('Invalid backlog transition: only dispatched items can correct dispatch phase');
+    }
+    if (existing.dispatchedThreadId !== input.expectedThreadId) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread mismatch');
+    }
+    if (existing.dispatchedThreadPhase === input.threadPhase) return existing;
+
+    const now = Date.now();
+    const updated: BacklogItem = {
+      ...existing,
+      dispatchedThreadPhase: input.threadPhase,
+      updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'dispatch_phase_corrected',
+          actor: makeUserActor(input.userId),
+          timestamp: now,
+          detail: `${input.expectedThreadId}:${existing.dispatchedThreadPhase ?? 'unknown'}→${input.threadPhase}; ${input.reason}`,
         },
       ],
     };

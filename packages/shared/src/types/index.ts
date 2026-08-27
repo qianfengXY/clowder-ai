@@ -148,6 +148,7 @@ export type {
   BacklogPriority,
   BacklogStatus,
   BacklogSuggestionStatus,
+  CorrectDispatchedPhaseInput,
   CreateBacklogItemInput,
   DecideBacklogClaimInput,
   DispatchBacklogItemInput,

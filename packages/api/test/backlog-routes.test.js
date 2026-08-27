@@ -162,6 +162,70 @@ describe('Backlog Routes', () => {
     assert.equal(thread?.projectPath, project.sourcePath);
   });
 
+  test('corrects a dispatched phase only for its original thread and audits the correction', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: USER_HEADER,
+      payload: {
+        title: 'F006 phase correction',
+        summary: 'an operator needs to correct an initial dispatch phase',
+        priority: 'p2',
+        tags: ['feature:f006'],
+      },
+    });
+    const itemId = createRes.json().id;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/suggest-claim`,
+      headers: USER_HEADER,
+      payload: {
+        catId: 'codex',
+        why: 'owns the phase correction test',
+        plan: 'dispatch then correct the lifecycle metadata',
+        requestedPhase: 'coding',
+      },
+    });
+    const dispatchedRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/decide-claim`,
+      headers: USER_HEADER,
+      payload: { decision: 'approve', threadPhase: 'coding' },
+    });
+    const dispatched = dispatchedRes.json();
+
+    const correctionRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/backlog/items/${itemId}/dispatch-phase`,
+      headers: USER_HEADER,
+      payload: {
+        expectedThreadId: dispatched.thread.id,
+        threadPhase: 'research',
+        reason: 'The feature is in research, not coding',
+      },
+    });
+
+    assert.equal(correctionRes.statusCode, 200);
+    assert.equal(correctionRes.json().item.dispatchedThreadPhase, 'research');
+    assert.equal((await threadStore.get(dispatched.thread.id))?.phase, 'research');
+    assert.equal((await backlogStore.get(itemId))?.audit.at(-1)?.action, 'dispatch_phase_corrected');
+
+    const staleRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/backlog/items/${itemId}/dispatch-phase`,
+      headers: USER_HEADER,
+      payload: {
+        expectedThreadId: 'thread-not-the-dispatched-thread',
+        threadPhase: 'brainstorm',
+        reason: 'A stale correction must not retarget this item',
+      },
+    });
+    assert.equal(staleRes.statusCode, 409);
+    assert.equal((await backlogStore.get(itemId))?.dispatchedThreadPhase, 'research');
+  });
+
   test('does not create a cat dispatch for work reserved by ChatGPT Desktop', async () => {
     const app = await createApp({
       workflowSopStore: {

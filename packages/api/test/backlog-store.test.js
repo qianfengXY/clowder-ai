@@ -177,6 +177,50 @@ describe('BacklogStore', () => {
     assert.equal(dispatched?.dispatchedThreadPhase, 'coding');
   });
 
+  test('correctDispatchedPhase preserves the original thread and appends an audit entry', () => {
+    const created = store.create({
+      userId: 'default-user',
+      title: 'Correct a dispatch phase',
+      summary: 'retain the original thread while changing only its phase',
+      priority: 'p2',
+      tags: ['dispatch'],
+      createdBy: 'user',
+    });
+    store.suggestClaim(created.id, {
+      catId: 'codex',
+      why: 'owns the backlog lifecycle',
+      plan: 'dispatch then correct the phase',
+      requestedPhase: 'coding',
+    });
+    store.decideClaim(created.id, { decision: 'approve', decidedBy: 'default-user' });
+    store.markDispatched(created.id, {
+      threadId: 'thread-dispatch-phase',
+      threadPhase: 'coding',
+      dispatchedBy: 'default-user',
+    });
+
+    const corrected = store.correctDispatchedPhase(created.id, {
+      userId: 'default-user',
+      expectedThreadId: 'thread-dispatch-phase',
+      threadPhase: 'research',
+      reason: 'Correct initial phase',
+    });
+
+    assert.equal(corrected?.dispatchedThreadId, 'thread-dispatch-phase');
+    assert.equal(corrected?.dispatchedThreadPhase, 'research');
+    assert.equal(corrected?.audit.at(-1)?.action, 'dispatch_phase_corrected');
+    assert.throws(
+      () =>
+        store.correctDispatchedPhase(created.id, {
+          userId: 'default-user',
+          expectedThreadId: 'thread-stale',
+          threadPhase: 'brainstorm',
+          reason: 'Must fail closed',
+        }),
+      /dispatched thread mismatch/i,
+    );
+  });
+
   test('reject returns item to open state', () => {
     const created = store.create({
       userId: 'default-user',

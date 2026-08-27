@@ -4,6 +4,7 @@ import type {
   BacklogDependencies,
   BacklogItem,
   BacklogLease,
+  CorrectDispatchedPhaseInput,
   CreateBacklogItemInput,
   DecideBacklogClaimInput,
   DispatchBacklogItemInput,
@@ -436,6 +437,71 @@ redis.call('HSET', key,
 return 1
 `;
 
+/**
+ * Atomically correct a dispatched item's phase without changing its dispatched thread.
+ *
+ * KEYS[1] = backlog:item:{id}
+ * ARGV[1] = expected userId
+ * ARGV[2] = expected dispatched threadId
+ * ARGV[3] = replacement threadPhase
+ * ARGV[4] = now
+ * ARGV[5] = auditEntry(json)
+ *
+ * return: 1 corrected, 2 idempotent, -1 missing, -2 owner mismatch,
+ *         -3 status mismatch, -4 thread mismatch, -5 invalid audit
+ */
+const CORRECT_DISPATCH_PHASE_LUA = `
+local key = KEYS[1]
+local userId = ARGV[1]
+local expectedThreadId = ARGV[2]
+local threadPhase = ARGV[3]
+local now = ARGV[4]
+local auditEntryRaw = ARGV[5]
+
+if redis.call('HGET', key, 'id') == false then
+  return -1
+end
+
+if redis.call('HGET', key, 'userId') ~= userId then
+  return -2
+end
+
+if redis.call('HGET', key, 'status') ~= 'dispatched' then
+  return -3
+end
+
+if (redis.call('HGET', key, 'dispatchedThreadId') or '') ~= expectedThreadId then
+  return -4
+end
+
+if (redis.call('HGET', key, 'dispatchedThreadPhase') or '') == threadPhase then
+  return 2
+end
+
+local auditRaw = redis.call('HGET', key, 'audit')
+if not auditRaw or auditRaw == '' then
+  return -5
+end
+local okAudit, audit = pcall(cjson.decode, auditRaw)
+if not okAudit or type(audit) ~= 'table' then
+  return -5
+end
+
+local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
+if not okEntry or type(auditEntry) ~= 'table' then
+  return -5
+end
+table.insert(audit, auditEntry)
+
+redis.call('HSET', key,
+  'dispatchedThreadPhase', threadPhase,
+  'updatedAt', now,
+  'audit', cjson.encode(audit)
+)
+
+return 1
+`;
+
 export class RedisBacklogStore implements IBacklogStore {
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
@@ -754,6 +820,42 @@ export class RedisBacklogStore implements IBacklogStore {
     };
     await this.writeItem(updated);
     return updated;
+  }
+
+  async correctDispatchedPhase(itemId: string, input: CorrectDispatchedPhaseInput): Promise<BacklogItem | null> {
+    const now = Date.now();
+    const existing = await this.get(itemId, input.userId);
+    const auditEntry = JSON.stringify({
+      id: generateSortableId(now + 1),
+      action: 'dispatch_phase_corrected',
+      actor: makeUserActor(input.userId),
+      timestamp: now,
+      detail: `${input.expectedThreadId}:${existing?.dispatchedThreadPhase ?? 'unknown'}→${input.threadPhase}; ${input.reason}`,
+    });
+    const code = Number(
+      await this.redis.eval(
+        CORRECT_DISPATCH_PHASE_LUA,
+        1,
+        BacklogKeys.detail(itemId),
+        input.userId,
+        input.expectedThreadId,
+        input.threadPhase,
+        String(now),
+        auditEntry,
+      ),
+    );
+
+    if (code === -1 || code === -2) return null;
+    if (code === -3) {
+      throw new BacklogTransitionError('Invalid backlog transition: only dispatched items can correct dispatch phase');
+    }
+    if (code === -4) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread mismatch');
+    }
+    if (code !== 1 && code !== 2) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatch phase correction rejected');
+    }
+    return this.get(itemId, input.userId);
   }
 
   async markDone(itemId: string, input: MarkDoneInput): Promise<BacklogItem | null> {
