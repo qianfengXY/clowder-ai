@@ -4738,12 +4738,6 @@ async function main(): Promise<void> {
   });
   // F168 Phase F: per-repo routing config CRUD endpoints
   await app.register(communityRepoConfigRoutes, { repoConfigStore: communityRepoConfigStore });
-  await app.register(backlogRoutes, {
-    backlogStore,
-    threadStore,
-    messageStore,
-    ...(workflowSopStore ? { workflowSopStore } : {}),
-  });
 
   // F233 Phase C C2b: feat trajectory query routes (Hub UI + 轨迹下钻)
   // Store: Redis-backed in production; InMemory fallback if Redis unavailable (preserves
@@ -4868,6 +4862,16 @@ async function main(): Promise<void> {
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
+
+  // F006 fix: backlog dispatch needs externalProjectStore to bind threads to project sourcePath
+  await app.register(backlogRoutes, {
+    backlogStore,
+    threadStore,
+    messageStore,
+    externalProjectStore,
+    ...(workflowSopStore ? { workflowSopStore } : {}),
+  });
+
   const { ProjectReviewHubService } = await import('./domains/projects/project-review-hub-service.js');
   let reviewRoundStore: import('./domains/review-coordination/ReviewRoundStore.js').IReviewRoundStore | undefined;
   let managedWorkConsumerPort:

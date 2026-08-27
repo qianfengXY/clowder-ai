@@ -16,6 +16,7 @@ import { BacklogTransitionError } from '../domains/cats/services/stores/ports/Ba
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
+import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   type BacklogFeatureRow,
@@ -43,6 +44,8 @@ export interface BacklogRoutesOptions {
   /** F058 Phase G: override path to docs/features/ directory for done-feature import */
   featuresDir?: string;
   resolveSelfClaimScope?: (catId: CatId) => MissionHubSelfClaimScope;
+  /** F076: project store used to bind dispatched threads to the correct project path */
+  externalProjectStore?: ExternalProjectStore;
 }
 
 const suggestClaimSchema = z.object({
@@ -267,7 +270,14 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       }
     }
     if (!threadId) {
-      const thread = await threadStore.create(userId, `[Backlog] ${item.title}`, 'default');
+      let projectPath = 'default';
+      if (opts.externalProjectStore && item.projectId) {
+        const project = await opts.externalProjectStore.getById(item.projectId);
+        if (project?.sourcePath) {
+          projectPath = project.sourcePath;
+        }
+      }
+      const thread = await threadStore.create(userId, `[Backlog] ${item.title}`, projectPath);
       threadId = thread.id;
       const updated = await backlogStore.updateDispatchProgress(item.id, {
         updatedBy: userId,

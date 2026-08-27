@@ -112,6 +112,56 @@ describe('Backlog Routes', () => {
     assert.match(kickoffMessages[0].content, /F049 dispatch flow/);
   });
 
+  test('dispatch binds thread to project sourcePath when externalProjectStore is provided', async () => {
+    const { ExternalProjectStore } = await import('../dist/domains/projects/external-project-store.js');
+    const externalProjectStore = new ExternalProjectStore();
+    const project = await externalProjectStore.create('default-user', {
+      name: 'Traqen',
+      sourcePath: '/Volumes/WorkSSD/projects/Traqen',
+    });
+
+    const item = await backlogStore.create({
+      userId: 'default-user',
+      title: 'F006 project-bound dispatch',
+      summary: 'thread should inherit project sourcePath',
+      priority: 'p0',
+      tags: ['f006', 'dispatch'],
+      createdBy: 'user',
+      projectId: project.id,
+    });
+
+    const app = await createApp({ externalProjectStore });
+
+    const suggestRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${item.id}/suggest-claim`,
+      headers: USER_HEADER,
+      payload: {
+        catId: 'codex',
+        why: 'project-bound dispatch test',
+        plan: 'verify projectPath',
+        requestedPhase: 'coding',
+      },
+    });
+    assert.equal(suggestRes.statusCode, 200);
+
+    const approveRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${item.id}/decide-claim`,
+      headers: USER_HEADER,
+      payload: { decision: 'approve', threadPhase: 'coding' },
+    });
+    assert.equal(approveRes.statusCode, 200);
+
+    const approved = approveRes.json();
+    assert.equal(approved.item.status, 'dispatched');
+    assert.equal(approved.item.projectId, project.id);
+
+    const thread = await threadStore.get(approved.thread.id);
+    assert.ok(thread);
+    assert.equal(thread?.projectPath, project.sourcePath);
+  });
+
   test('does not create a cat dispatch for work reserved by ChatGPT Desktop', async () => {
     const app = await createApp({
       workflowSopStore: {
