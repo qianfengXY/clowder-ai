@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 describe('BacklogStore', () => {
   /** @type {import('../dist/domains/cats/services/stores/ports/BacklogStore.js').BacklogStore} */
   let store;
+  let threadStore;
   let originalDateNow;
   let now;
 
   beforeEach(async () => {
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     store = new BacklogStore();
+    threadStore = new ThreadStore();
     originalDateNow = Date.now;
     now = 1_700_000_000_000;
     Date.now = () => {
@@ -177,7 +180,7 @@ describe('BacklogStore', () => {
     assert.equal(dispatched?.dispatchedThreadPhase, 'coding');
   });
 
-  test('correctDispatchedPhase preserves the original thread and appends an audit entry', () => {
+  test('correctDispatchedPhase preserves the original thread and appends an audit entry', async () => {
     const created = store.create({
       userId: 'default-user',
       title: 'Correct a dispatch phase',
@@ -193,30 +196,39 @@ describe('BacklogStore', () => {
       requestedPhase: 'coding',
     });
     store.decideClaim(created.id, { decision: 'approve', decidedBy: 'default-user' });
+    const thread = threadStore.create('default-user', 'Correct a dispatch phase');
     store.markDispatched(created.id, {
-      threadId: 'thread-dispatch-phase',
+      threadId: thread.id,
       threadPhase: 'coding',
       dispatchedBy: 'default-user',
     });
 
-    const corrected = store.correctDispatchedPhase(created.id, {
-      userId: 'default-user',
-      expectedThreadId: 'thread-dispatch-phase',
-      threadPhase: 'research',
-      reason: 'Correct initial phase',
-    });
+    const corrected = await store.correctDispatchedPhase(
+      created.id,
+      {
+        userId: 'default-user',
+        expectedThreadId: thread.id,
+        threadPhase: 'research',
+        reason: 'Correct initial phase',
+      },
+      threadStore,
+    );
 
-    assert.equal(corrected?.dispatchedThreadId, 'thread-dispatch-phase');
+    assert.equal(corrected?.dispatchedThreadId, thread.id);
     assert.equal(corrected?.dispatchedThreadPhase, 'research');
+    assert.equal(threadStore.get(thread.id)?.phase, 'research');
     assert.equal(corrected?.audit.at(-1)?.action, 'dispatch_phase_corrected');
-    assert.throws(
-      () =>
-        store.correctDispatchedPhase(created.id, {
+    await assert.rejects(
+      store.correctDispatchedPhase(
+        created.id,
+        {
           userId: 'default-user',
           expectedThreadId: 'thread-stale',
           threadPhase: 'brainstorm',
           reason: 'Must fail closed',
-        }),
+        },
+        threadStore,
+      ),
       /dispatched thread mismatch/i,
     );
   });

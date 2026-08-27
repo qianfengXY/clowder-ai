@@ -23,6 +23,7 @@ import type { EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/B
 import { BacklogTransitionError, buildTaskBackedBacklogItem, isMatchingTaskBackedItem } from '../ports/BacklogStore.js';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
+import { ThreadKeys } from '../redis-keys/thread-keys.js';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -441,22 +442,27 @@ return 1
  * Atomically correct a dispatched item's phase without changing its dispatched thread.
  *
  * KEYS[1] = backlog:item:{id}
+ * KEYS[2] = thread:{id}
  * ARGV[1] = expected userId
  * ARGV[2] = expected dispatched threadId
  * ARGV[3] = replacement threadPhase
  * ARGV[4] = now
- * ARGV[5] = auditEntry(json)
+ * ARGV[5] = audit entry id
+ * ARGV[6] = correction reason
  *
  * return: 1 corrected, 2 idempotent, -1 missing, -2 owner mismatch,
- *         -3 status mismatch, -4 thread mismatch, -5 invalid audit
+ *         -3 status mismatch, -4 thread mismatch, -5 thread unavailable,
+ *         -6 invalid persisted audit
  */
 const CORRECT_DISPATCH_PHASE_LUA = `
 local key = KEYS[1]
+local threadKey = KEYS[2]
 local userId = ARGV[1]
 local expectedThreadId = ARGV[2]
 local threadPhase = ARGV[3]
 local now = ARGV[4]
-local auditEntryRaw = ARGV[5]
+local auditEntryId = ARGV[5]
+local reason = ARGV[6]
 
 if redis.call('HGET', key, 'id') == false then
   return -1
@@ -474,23 +480,35 @@ if (redis.call('HGET', key, 'dispatchedThreadId') or '') ~= expectedThreadId the
   return -4
 end
 
-if (redis.call('HGET', key, 'dispatchedThreadPhase') or '') == threadPhase then
-  return 2
+if redis.call('HGET', threadKey, 'id') == false then
+  return -5
+end
+
+if tonumber(redis.call('HGET', threadKey, 'deletedAt') or '0') > 0 then
+  return -5
 end
 
 local auditRaw = redis.call('HGET', key, 'audit')
 if not auditRaw or auditRaw == '' then
-  return -5
+  return -6
 end
 local okAudit, audit = pcall(cjson.decode, auditRaw)
 if not okAudit or type(audit) ~= 'table' then
-  return -5
+  return -6
 end
 
-local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
-if not okEntry or type(auditEntry) ~= 'table' then
-  return -5
+local previousPhase = redis.call('HGET', key, 'dispatchedThreadPhase') or 'unknown'
+if previousPhase == threadPhase then
+  redis.call('HSET', threadKey, 'phase', threadPhase)
+  return 2
 end
+local auditEntry = {
+  id = auditEntryId,
+  action = 'dispatch_phase_corrected',
+  actor = { kind = 'user', id = userId },
+  timestamp = tonumber(now),
+  detail = expectedThreadId .. ':' .. previousPhase .. '→' .. threadPhase .. '; ' .. reason
+}
 table.insert(audit, auditEntry)
 
 redis.call('HSET', key,
@@ -498,6 +516,7 @@ redis.call('HSET', key,
   'updatedAt', now,
   'audit', cjson.encode(audit)
 )
+redis.call('HSET', threadKey, 'phase', threadPhase)
 
 return 1
 `;
@@ -822,26 +841,24 @@ export class RedisBacklogStore implements IBacklogStore {
     return updated;
   }
 
-  async correctDispatchedPhase(itemId: string, input: CorrectDispatchedPhaseInput): Promise<BacklogItem | null> {
+  async correctDispatchedPhase(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+    _threadStore: Parameters<IBacklogStore['correctDispatchedPhase']>[2],
+  ): Promise<BacklogItem | null> {
     const now = Date.now();
-    const existing = await this.get(itemId, input.userId);
-    const auditEntry = JSON.stringify({
-      id: generateSortableId(now + 1),
-      action: 'dispatch_phase_corrected',
-      actor: makeUserActor(input.userId),
-      timestamp: now,
-      detail: `${input.expectedThreadId}:${existing?.dispatchedThreadPhase ?? 'unknown'}→${input.threadPhase}; ${input.reason}`,
-    });
     const code = Number(
       await this.redis.eval(
         CORRECT_DISPATCH_PHASE_LUA,
-        1,
+        2,
         BacklogKeys.detail(itemId),
+        ThreadKeys.detail(input.expectedThreadId),
         input.userId,
         input.expectedThreadId,
         input.threadPhase,
         String(now),
-        auditEntry,
+        generateSortableId(now + 1),
+        input.reason,
       ),
     );
 
@@ -851,6 +868,9 @@ export class RedisBacklogStore implements IBacklogStore {
     }
     if (code === -4) {
       throw new BacklogTransitionError('Invalid backlog transition: dispatched thread mismatch');
+    }
+    if (code === -5) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread is unavailable');
     }
     if (code !== 1 && code !== 2) {
       throw new BacklogTransitionError('Invalid backlog transition: dispatch phase correction rejected');

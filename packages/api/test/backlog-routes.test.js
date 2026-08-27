@@ -35,6 +35,40 @@ describe('Backlog Routes', () => {
     return app;
   }
 
+  async function createDispatchedPhaseCorrectionTarget(app) {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: USER_HEADER,
+      payload: {
+        title: 'F006 phase correction',
+        summary: 'an operator needs to correct an initial dispatch phase',
+        priority: 'p2',
+        tags: ['feature:f006'],
+      },
+    });
+    const itemId = createRes.json().id;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/suggest-claim`,
+      headers: USER_HEADER,
+      payload: {
+        catId: 'codex',
+        why: 'owns the phase correction test',
+        plan: 'dispatch then correct the lifecycle metadata',
+        requestedPhase: 'coding',
+      },
+    });
+    const dispatchedRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/decide-claim`,
+      headers: USER_HEADER,
+      payload: { decision: 'approve', threadPhase: 'coding' },
+    });
+    return { itemId, dispatched: dispatchedRes.json() };
+  }
+
   test('POST /api/backlog/items creates item', async () => {
     const app = await createApp();
     const response = await app.inject({
@@ -164,37 +198,7 @@ describe('Backlog Routes', () => {
 
   test('corrects a dispatched phase only for its original thread and audits the correction', async () => {
     const app = await createApp();
-    const createRes = await app.inject({
-      method: 'POST',
-      url: '/api/backlog/items',
-      headers: USER_HEADER,
-      payload: {
-        title: 'F006 phase correction',
-        summary: 'an operator needs to correct an initial dispatch phase',
-        priority: 'p2',
-        tags: ['feature:f006'],
-      },
-    });
-    const itemId = createRes.json().id;
-
-    await app.inject({
-      method: 'POST',
-      url: `/api/backlog/items/${itemId}/suggest-claim`,
-      headers: USER_HEADER,
-      payload: {
-        catId: 'codex',
-        why: 'owns the phase correction test',
-        plan: 'dispatch then correct the lifecycle metadata',
-        requestedPhase: 'coding',
-      },
-    });
-    const dispatchedRes = await app.inject({
-      method: 'POST',
-      url: `/api/backlog/items/${itemId}/decide-claim`,
-      headers: USER_HEADER,
-      payload: { decision: 'approve', threadPhase: 'coding' },
-    });
-    const dispatched = dispatchedRes.json();
+    const { itemId, dispatched } = await createDispatchedPhaseCorrectionTarget(app);
 
     const correctionRes = await app.inject({
       method: 'PATCH',
@@ -224,6 +228,93 @@ describe('Backlog Routes', () => {
     });
     assert.equal(staleRes.statusCode, 409);
     assert.equal((await backlogStore.get(itemId))?.dispatchedThreadPhase, 'research');
+  });
+
+  test('leaves both records unchanged when thread phase persistence fails', async () => {
+    const app = await createApp();
+    const { itemId, dispatched } = await createDispatchedPhaseCorrectionTarget(app);
+    threadStore.updatePhase = () => {
+      throw new Error('injected thread write failure');
+    };
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/backlog/items/${itemId}/dispatch-phase`,
+      headers: USER_HEADER,
+      payload: {
+        expectedThreadId: dispatched.thread.id,
+        threadPhase: 'research',
+        reason: 'The write must be all-or-nothing',
+      },
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.equal((await backlogStore.get(itemId))?.dispatchedThreadPhase, 'coding');
+    assert.equal((await threadStore.get(dispatched.thread.id))?.phase, 'coding');
+    assert.equal((await backlogStore.get(itemId))?.audit.at(-1)?.action, 'dispatched');
+  });
+
+  test('serializes concurrent phase corrections so backlog and thread always converge', async () => {
+    const app = await createApp();
+    const { itemId, dispatched } = await createDispatchedPhaseCorrectionTarget(app);
+    let signalResearchStarted;
+    const researchStarted = new Promise((resolve) => {
+      signalResearchStarted = resolve;
+    });
+    let releaseResearchGate;
+    const researchGate = new Promise((resolve) => {
+      releaseResearchGate = resolve;
+      threadStore.updatePhase = async (threadId, phase) => {
+        if (phase === 'research') {
+          signalResearchStarted();
+          await researchGate;
+        }
+        const thread = threadStore.get(threadId);
+        if (thread) thread.phase = phase;
+      };
+    });
+    const originalCorrectDispatchedPhase = backlogStore.correctDispatchedPhase.bind(backlogStore);
+    let signalBrainstormEntered;
+    const brainstormEntered = new Promise((resolve) => {
+      signalBrainstormEntered = resolve;
+    });
+    backlogStore.correctDispatchedPhase = async (...args) => {
+      if (args[1].threadPhase === 'brainstorm') signalBrainstormEntered();
+      return originalCorrectDispatchedPhase(...args);
+    };
+
+    const researchRequest = app.inject({
+      method: 'PATCH',
+      url: `/api/backlog/items/${itemId}/dispatch-phase`,
+      headers: USER_HEADER,
+      payload: {
+        expectedThreadId: dispatched.thread.id,
+        threadPhase: 'research',
+        reason: 'First concurrent correction',
+      },
+    });
+    await researchStarted;
+    const brainstormRequest = app.inject({
+      method: 'PATCH',
+      url: `/api/backlog/items/${itemId}/dispatch-phase`,
+      headers: USER_HEADER,
+      payload: {
+        expectedThreadId: dispatched.thread.id,
+        threadPhase: 'brainstorm',
+        reason: 'Second concurrent correction',
+      },
+    });
+    await brainstormEntered;
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseResearchGate();
+    const [researchResponse, brainstormResponse] = await Promise.all([researchRequest, brainstormRequest]);
+
+    assert.equal(researchResponse.statusCode, 200);
+    assert.equal(brainstormResponse.statusCode, 200);
+    const item = await backlogStore.get(itemId);
+    const thread = await threadStore.get(dispatched.thread.id);
+    assert.equal(item?.dispatchedThreadPhase, thread?.phase);
   });
 
   test('does not create a cat dispatch for work reserved by ChatGPT Desktop', async () => {

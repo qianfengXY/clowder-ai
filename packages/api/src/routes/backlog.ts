@@ -181,26 +181,21 @@ async function correctDispatchedPhase(
     };
   }
 
-  const rawThread = await threadStore.get(input.expectedThreadId);
-  if (!rawThread || rawThread.deletedAt) {
-    return {
-      statusCode: 409 as const,
-      payload: { error: 'Invalid backlog transition: dispatched thread is unavailable' },
-    };
-  }
-
   try {
-    const item = await backlogStore.correctDispatchedPhase(itemId, {
-      userId,
-      expectedThreadId: input.expectedThreadId,
-      threadPhase: input.threadPhase,
-      reason: input.reason,
-    });
+    const item = await backlogStore.correctDispatchedPhase(
+      itemId,
+      {
+        userId,
+        expectedThreadId: input.expectedThreadId,
+        threadPhase: input.threadPhase,
+        reason: input.reason,
+      },
+      threadStore,
+    );
     if (!item) {
       return { statusCode: 404 as const, payload: { error: 'Backlog item not found' } };
     }
 
-    await threadStore.updatePhase(input.expectedThreadId, input.threadPhase);
     const thread = await threadStore.get(input.expectedThreadId);
     return {
       statusCode: 200 as const,
