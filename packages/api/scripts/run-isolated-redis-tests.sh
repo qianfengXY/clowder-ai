@@ -70,6 +70,22 @@ wait_for_pid_exit() {
   return 1
 }
 
+read_redis_pidfile() {
+  local pidfile="$1"
+  for _ in $(seq 1 50); do
+    if [[ -s "$pidfile" ]]; then
+      local pid
+      pid="$(cat "$pidfile" 2>/dev/null || true)"
+      if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s\n' "$pid"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 stop_instance() {
   local port="$1"
   local pid="${2:-}"
@@ -211,7 +227,11 @@ if [[ -z "$PORT" ]]; then
       --pidfile "$PIDFILE" \
       --logfile "$LOGFILE" >/dev/null 2>&1; then
       PORT="$CANDIDATE"
-      register_instance "$PORT" "$(cat "$PIDFILE" 2>/dev/null || true)" "$DATADIR"
+      if ! REDIS_PID="$(read_redis_pidfile "$PIDFILE")"; then
+        echo "[redis-test] Redis did not write a valid PID file" >&2
+        exit 1
+      fi
+      register_instance "$PORT" "$REDIS_PID" "$DATADIR"
       break
     fi
   done
@@ -227,7 +247,11 @@ else
     --daemonize yes \
     --pidfile "$PIDFILE" \
     --logfile "$LOGFILE"
-  register_instance "$PORT" "$(cat "$PIDFILE" 2>/dev/null || true)" "$DATADIR"
+  if ! REDIS_PID="$(read_redis_pidfile "$PIDFILE")"; then
+    echo "[redis-test] Redis did not write a valid PID file" >&2
+    exit 1
+  fi
+  register_instance "$PORT" "$REDIS_PID" "$DATADIR"
 fi
 
 if [[ -z "$PORT" ]]; then

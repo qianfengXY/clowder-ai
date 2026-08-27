@@ -43,14 +43,14 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, ['backlog:item:*', 'backlog:items:user:*']);
+      await cleanupPrefixedRedisKeys(redis, ['backlog:item:*', 'backlog:items:user:*', 'thread:*']);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, ['backlog:item:*', 'backlog:items:user:*']);
+    await cleanupPrefixedRedisKeys(redis, ['backlog:item:*', 'backlog:items:user:*', 'thread:*']);
     originalDateNow = Date.now;
   });
 
@@ -86,6 +86,19 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       dispatchedBy: 'default-user',
     });
     return created.id;
+  }
+
+  async function createThreadPhaseStore(threadId, phase = 'coding') {
+    await redis.hset(`thread:${threadId}`, 'id', threadId, 'phase', phase);
+    return {
+      get: async (id) => {
+        const data = await redis.hgetall(`thread:${id}`);
+        return data.id ? { id: data.id, phase: data.phase } : null;
+      },
+      updatePhase: async (id, nextPhase) => {
+        await redis.hset(`thread:${id}`, 'phase', nextPhase);
+      },
+    };
   }
 
   it('ensureTaskBackedItem atomically reuses one deterministic projection under concurrency', async (t) => {
@@ -148,6 +161,77 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(reopened?.doneAt, undefined);
     assert.equal(reopened?.audit.at(-1)?.action, 'reopened');
     assert.equal(reopened?.audit.at(-1)?.detail, 'Correct cross-project import status collision');
+  });
+
+  it('correctDispatchedPhase atomically preserves the dispatched thread and rejects stale targets', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const itemId = await createDispatchedItem('dispatch phase correction');
+    const before = await store.get(itemId);
+    assert.ok(before?.dispatchedThreadId);
+    const threadStore = await createThreadPhaseStore(before.dispatchedThreadId);
+
+    const corrected = await store.correctDispatchedPhase(
+      itemId,
+      {
+        userId: 'default-user',
+        expectedThreadId: before.dispatchedThreadId,
+        threadPhase: 'research',
+        reason: 'Correct initial dispatch phase',
+      },
+      threadStore,
+    );
+    assert.equal(corrected?.dispatchedThreadId, before.dispatchedThreadId);
+    assert.equal(corrected?.dispatchedThreadPhase, 'research');
+    assert.equal((await threadStore.get(before.dispatchedThreadId))?.phase, 'research');
+    assert.equal(corrected?.audit.at(-1)?.action, 'dispatch_phase_corrected');
+
+    await assert.rejects(
+      store.correctDispatchedPhase(
+        itemId,
+        {
+          userId: 'default-user',
+          expectedThreadId: 'thread-stale',
+          threadPhase: 'brainstorm',
+          reason: 'A stale correction must not retarget the item',
+        },
+        threadStore,
+      ),
+      /dispatched thread mismatch/i,
+    );
+    assert.equal((await store.get(itemId))?.dispatchedThreadPhase, 'research');
+  });
+
+  it('keeps backlog, thread, and audit transitions consistent under concurrent corrections', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const itemId = await createDispatchedItem('concurrent dispatch phase correction');
+    const before = await store.get(itemId);
+    assert.ok(before?.dispatchedThreadId);
+    const threadStore = await createThreadPhaseStore(before.dispatchedThreadId);
+    const input = (threadPhase, reason) => ({
+      userId: 'default-user',
+      expectedThreadId: before.dispatchedThreadId,
+      threadPhase,
+      reason,
+    });
+
+    await Promise.all([
+      store.correctDispatchedPhase(itemId, input('research', 'First concurrent correction'), threadStore),
+      store.correctDispatchedPhase(itemId, input('brainstorm', 'Second concurrent correction'), threadStore),
+    ]);
+
+    const item = await store.get(itemId);
+    const thread = await threadStore.get(before.dispatchedThreadId);
+    assert.equal(item?.dispatchedThreadPhase, thread?.phase);
+    const corrections = item?.audit.filter((entry) => entry.action === 'dispatch_phase_corrected') ?? [];
+    assert.equal(corrections.length, 2);
+    let previousPhase = 'coding';
+    for (const correction of corrections) {
+      const transition = correction.detail.slice(correction.detail.lastIndexOf(':') + 1).split(';')[0];
+      const [from, to] = transition.split('→');
+      assert.equal(from, previousPhase);
+      previousPhase = to;
+    }
+    assert.equal(previousPhase, item?.dispatchedThreadPhase);
   });
 
   it('reopen is an atomic project-scoped CAS that clears persisted doneAt and retains all lifecycle bindings', async (t) => {

@@ -4,6 +4,7 @@ import type {
   BacklogDependencies,
   BacklogItem,
   BacklogLease,
+  CorrectDispatchedPhaseInput,
   CreateBacklogItemInput,
   DecideBacklogClaimInput,
   DispatchBacklogItemInput,
@@ -22,6 +23,7 @@ import type { EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/B
 import { BacklogTransitionError, buildTaskBackedBacklogItem, isMatchingTaskBackedItem } from '../ports/BacklogStore.js';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
+import { ThreadKeys } from '../redis-keys/thread-keys.js';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -436,6 +438,89 @@ redis.call('HSET', key,
 return 1
 `;
 
+/**
+ * Atomically correct a dispatched item's phase without changing its dispatched thread.
+ *
+ * KEYS[1] = backlog:item:{id}
+ * KEYS[2] = thread:{id}
+ * ARGV[1] = expected userId
+ * ARGV[2] = expected dispatched threadId
+ * ARGV[3] = replacement threadPhase
+ * ARGV[4] = now
+ * ARGV[5] = audit entry id
+ * ARGV[6] = correction reason
+ *
+ * return: 1 corrected, 2 idempotent, -1 missing, -2 owner mismatch,
+ *         -3 status mismatch, -4 thread mismatch, -5 thread unavailable,
+ *         -6 invalid persisted audit
+ */
+const CORRECT_DISPATCH_PHASE_LUA = `
+local key = KEYS[1]
+local threadKey = KEYS[2]
+local userId = ARGV[1]
+local expectedThreadId = ARGV[2]
+local threadPhase = ARGV[3]
+local now = ARGV[4]
+local auditEntryId = ARGV[5]
+local reason = ARGV[6]
+
+if redis.call('HGET', key, 'id') == false then
+  return -1
+end
+
+if redis.call('HGET', key, 'userId') ~= userId then
+  return -2
+end
+
+if redis.call('HGET', key, 'status') ~= 'dispatched' then
+  return -3
+end
+
+if (redis.call('HGET', key, 'dispatchedThreadId') or '') ~= expectedThreadId then
+  return -4
+end
+
+if redis.call('HGET', threadKey, 'id') == false then
+  return -5
+end
+
+if tonumber(redis.call('HGET', threadKey, 'deletedAt') or '0') > 0 then
+  return -5
+end
+
+local auditRaw = redis.call('HGET', key, 'audit')
+if not auditRaw or auditRaw == '' then
+  return -6
+end
+local okAudit, audit = pcall(cjson.decode, auditRaw)
+if not okAudit or type(audit) ~= 'table' then
+  return -6
+end
+
+local previousPhase = redis.call('HGET', key, 'dispatchedThreadPhase') or 'unknown'
+if previousPhase == threadPhase then
+  redis.call('HSET', threadKey, 'phase', threadPhase)
+  return 2
+end
+local auditEntry = {
+  id = auditEntryId,
+  action = 'dispatch_phase_corrected',
+  actor = { kind = 'user', id = userId },
+  timestamp = tonumber(now),
+  detail = expectedThreadId .. ':' .. previousPhase .. '→' .. threadPhase .. '; ' .. reason
+}
+table.insert(audit, auditEntry)
+
+redis.call('HSET', key,
+  'dispatchedThreadPhase', threadPhase,
+  'updatedAt', now,
+  'audit', cjson.encode(audit)
+)
+redis.call('HSET', threadKey, 'phase', threadPhase)
+
+return 1
+`;
+
 export class RedisBacklogStore implements IBacklogStore {
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
@@ -754,6 +839,43 @@ export class RedisBacklogStore implements IBacklogStore {
     };
     await this.writeItem(updated);
     return updated;
+  }
+
+  async correctDispatchedPhase(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+    _threadStore: Parameters<IBacklogStore['correctDispatchedPhase']>[2],
+  ): Promise<BacklogItem | null> {
+    const now = Date.now();
+    const code = Number(
+      await this.redis.eval(
+        CORRECT_DISPATCH_PHASE_LUA,
+        2,
+        BacklogKeys.detail(itemId),
+        ThreadKeys.detail(input.expectedThreadId),
+        input.userId,
+        input.expectedThreadId,
+        input.threadPhase,
+        String(now),
+        generateSortableId(now + 1),
+        input.reason,
+      ),
+    );
+
+    if (code === -1 || code === -2) return null;
+    if (code === -3) {
+      throw new BacklogTransitionError('Invalid backlog transition: only dispatched items can correct dispatch phase');
+    }
+    if (code === -4) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread mismatch');
+    }
+    if (code === -5) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread is unavailable');
+    }
+    if (code !== 1 && code !== 2) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatch phase correction rejected');
+    }
+    return this.get(itemId, input.userId);
   }
 
   async markDone(itemId: string, input: MarkDoneInput): Promise<BacklogItem | null> {

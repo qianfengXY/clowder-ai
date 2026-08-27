@@ -37,6 +37,7 @@ export type BacklogAuditAction =
   | 'approved'
   | 'rejected'
   | 'dispatched'
+  | 'dispatch_phase_corrected'
   | 'done'
   | 'reopened'
   | 'lease_acquired'
@@ -125,6 +126,16 @@ export interface DispatchBacklogItemInput {
   readonly threadId: string;
   readonly threadPhase: ThreadPhase;
   readonly dispatchedBy: string;
+}
+
+/** An explicit, audited correction of a dispatched item's initial phase. */
+export interface CorrectDispatchedPhaseInput {
+  /** Owner scope that must match the persisted item. */
+  readonly userId: string;
+  /** Compare-and-set precondition; a correction cannot retarget a dispatched item. */
+  readonly expectedThreadId: string;
+  readonly threadPhase: ThreadPhase;
+  readonly reason: string;
 }
 
 export interface UpdateBacklogDispatchProgressInput {

@@ -5,6 +5,7 @@ import type {
   BacklogItem,
   BacklogLease,
   BacklogStatus,
+  CorrectDispatchedPhaseInput,
   CreateBacklogItemInput,
   DecideBacklogClaimInput,
   DispatchBacklogItemInput,
@@ -19,6 +20,7 @@ import type {
 } from '@cat-cafe/shared';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
 import { generateSortableId } from './MessageStore.js';
+import type { IThreadStore } from './ThreadStore.js';
 
 const MAX_BACKLOG_ITEMS = 1000;
 
@@ -105,6 +107,11 @@ export interface IBacklogStore {
     input: UpdateBacklogDispatchProgressInput,
   ): BacklogItem | null | Promise<BacklogItem | null>;
   markDispatched(itemId: string, input: DispatchBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
+  correctDispatchedPhase(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+    threadStore: Pick<IThreadStore, 'get' | 'updatePhase'>,
+  ): BacklogItem | null | Promise<BacklogItem | null>;
   markDone(itemId: string, input: MarkDoneInput): BacklogItem | null | Promise<BacklogItem | null>;
   reopen(itemId: string, input: ReopenBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   acquireLease(itemId: string, input: AcquireBacklogLeaseInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -124,6 +131,7 @@ export interface IBacklogStore {
 
 export class BacklogStore implements IBacklogStore {
   private readonly items: Map<string, BacklogItem> = new Map();
+  private readonly dispatchedPhaseCorrectionTails = new Map<string, Promise<void>>();
   private readonly maxItems: number;
 
   constructor(options?: { maxItems?: number }) {
@@ -414,6 +422,110 @@ export class BacklogStore implements IBacklogStore {
     };
     this.items.set(itemId, updated);
     return updated;
+  }
+
+  async correctDispatchedPhase(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+    threadStore: Pick<IThreadStore, 'get' | 'updatePhase'>,
+  ): Promise<BacklogItem | null> {
+    return this.withDispatchedPhaseCorrectionLock(itemId, () =>
+      this.correctDispatchedPhaseLocked(itemId, input, threadStore),
+    );
+  }
+
+  private async correctDispatchedPhaseLocked(
+    itemId: string,
+    input: CorrectDispatchedPhaseInput,
+    threadStore: Pick<IThreadStore, 'get' | 'updatePhase'>,
+  ): Promise<BacklogItem | null> {
+    const existing = this.getCorrectableDispatchedItem(itemId, input);
+    if (!existing) return null;
+
+    const thread = await this.getLiveThread(threadStore, input.expectedThreadId);
+    if (existing.dispatchedThreadPhase === input.threadPhase && thread.phase === input.threadPhase) {
+      return existing;
+    }
+
+    const updated = this.buildDispatchedPhaseCorrection(existing, input);
+    await threadStore.updatePhase(input.expectedThreadId, input.threadPhase);
+    await this.assertThreadPhase(threadStore, input.expectedThreadId, input.threadPhase);
+    if (updated) this.items.set(itemId, updated);
+    return updated ?? existing;
+  }
+
+  private getCorrectableDispatchedItem(itemId: string, input: CorrectDispatchedPhaseInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (!existing || existing.userId !== input.userId) return null;
+    if (existing.status !== 'dispatched') {
+      throw new BacklogTransitionError('Invalid backlog transition: only dispatched items can correct dispatch phase');
+    }
+    if (existing.dispatchedThreadId !== input.expectedThreadId) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread mismatch');
+    }
+    return existing;
+  }
+
+  private async getLiveThread(threadStore: Pick<IThreadStore, 'get'>, threadId: string) {
+    const thread = await threadStore.get(threadId);
+    if (!thread || thread.deletedAt) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread is unavailable');
+    }
+    return thread;
+  }
+
+  private buildDispatchedPhaseCorrection(
+    existing: BacklogItem,
+    input: CorrectDispatchedPhaseInput,
+  ): BacklogItem | null {
+    if (existing.dispatchedThreadPhase === input.threadPhase) return null;
+
+    const now = Date.now();
+    return {
+      ...existing,
+      dispatchedThreadPhase: input.threadPhase,
+      updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'dispatch_phase_corrected',
+          actor: makeUserActor(input.userId),
+          timestamp: now,
+          detail: `${input.expectedThreadId}:${existing.dispatchedThreadPhase ?? 'unknown'}→${input.threadPhase}; ${input.reason}`,
+        },
+      ],
+    };
+  }
+
+  private async assertThreadPhase(
+    threadStore: Pick<IThreadStore, 'get'>,
+    threadId: string,
+    expectedPhase: CorrectDispatchedPhaseInput['threadPhase'],
+  ): Promise<void> {
+    const synchronizedThread = await this.getLiveThread(threadStore, threadId);
+    if (synchronizedThread.phase !== expectedPhase) {
+      throw new BacklogTransitionError('Invalid backlog transition: dispatched thread phase update failed');
+    }
+  }
+
+  private async withDispatchedPhaseCorrectionLock<T>(itemId: string, callback: () => Promise<T>): Promise<T> {
+    const previous = this.dispatchedPhaseCorrectionTails.get(itemId) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+    this.dispatchedPhaseCorrectionTails.set(itemId, tail);
+    await previous;
+    try {
+      return await callback();
+    } finally {
+      release?.();
+      if (this.dispatchedPhaseCorrectionTails.get(itemId) === tail) {
+        this.dispatchedPhaseCorrectionTails.delete(itemId);
+      }
+    }
   }
 
   acquireLease(itemId: string, input: AcquireBacklogLeaseInput): BacklogItem | null {
