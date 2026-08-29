@@ -38,49 +38,58 @@ export function mapCodexAppServerTokenUsage(tokenUsageValue: unknown): CodexAppS
   return Object.keys(usage).length > 0 ? usage : null;
 }
 
-export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppServerJsonObject | null {
-  const envelope = asCodexAppServerRecord(envelopeValue);
-  const params = asCodexAppServerRecord(envelope?.params);
-  if (!envelope || typeof envelope.method !== 'string') return null;
-  switch (envelope.method) {
-    case 'item/agentMessage/delta': {
-      const threadId = params?.threadId;
-      const turnId = params?.turnId;
-      const itemId = params?.itemId;
-      const delta = params?.delta;
-      if (
-        typeof threadId !== 'string' ||
-        typeof turnId !== 'string' ||
-        typeof itemId !== 'string' ||
-        typeof delta !== 'string' ||
-        delta.length === 0
-      ) {
-        return null;
-      }
-      return {
-        type: 'item.agent_message.delta',
-        thread_id: threadId,
-        turn_id: turnId,
-        item_id: itemId,
-        delta,
-      };
-    }
-    case 'item/started':
-    case 'item/completed': {
-      const item = mapItem(params?.item);
-      return item ? { type: envelope.method.replace('/', '.'), item } : null;
-    }
-    case 'turn/started':
-      return { type: 'turn.started' };
-    case 'turn/plan/updated': {
+export function isCodexAppServerTokenUsageNotification(envelopeValue: unknown): boolean {
+  return asCodexAppServerRecord(envelopeValue)?.method === 'thread/tokenUsage/updated';
+}
+
+type CodexAppServerNotificationMapper = (
+  method: string,
+  params: CodexAppServerJsonObject | null,
+) => CodexAppServerJsonObject | null;
+
+const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (method, params) => {
+  const item = mapItem(params?.item);
+  return item ? { type: method.replace('/', '.'), item } : null;
+};
+
+const mapCodexAppServerAgentMessageDelta: CodexAppServerNotificationMapper = (_method, params) => {
+  const threadId = params?.threadId;
+  const turnId = params?.turnId;
+  const itemId = params?.itemId;
+  const delta = params?.delta;
+  if (
+    typeof threadId !== 'string' ||
+    typeof turnId !== 'string' ||
+    typeof itemId !== 'string' ||
+    typeof delta !== 'string' ||
+    delta.length === 0
+  ) {
+    return null;
+  }
+  return {
+    type: 'item.agent_message.delta',
+    thread_id: threadId,
+    turn_id: turnId,
+    item_id: itemId,
+    delta,
+  };
+};
+
+const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppServerNotificationMapper>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, CodexAppServerNotificationMapper>, {
+    'item/agentMessage/delta': mapCodexAppServerAgentMessageDelta,
+    'item/started': mapCodexAppServerItemNotification,
+    'item/completed': mapCodexAppServerItemNotification,
+    'turn/started': () => ({ type: 'turn.started' }),
+    'turn/plan/updated': (_method, params) => {
       const plan = Array.isArray(params?.plan) ? params.plan : [];
       return {
         type: 'turn.plan.updated',
         ...(typeof params?.explanation === 'string' ? { explanation: params.explanation } : {}),
         plan,
       };
-    }
-    case 'turn/completed': {
+    },
+    'turn/completed': (_method, params) => {
       const turn = asCodexAppServerRecord(params?.turn);
       const status = turn?.status;
       if (status === 'failed') {
@@ -91,12 +100,33 @@ export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppS
         };
       }
       return { type: 'turn.completed', ...(typeof status === 'string' ? { status } : {}) };
-    }
-    case 'error':
-      return { type: 'error', message: codexAppServerErrorMessage(params?.error ?? params) };
-    default:
-      return null;
+    },
+    error: (_method, params) => ({
+      type: 'error',
+      message: codexAppServerErrorMessage(params?.error ?? params),
+    }),
+  } satisfies Record<string, CodexAppServerNotificationMapper>),
+);
+
+export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppServerJsonObject | null {
+  const envelope = asCodexAppServerRecord(envelopeValue);
+  const params = asCodexAppServerRecord(envelope?.params);
+  if (!envelope || typeof envelope.method !== 'string') return null;
+  const mapper = CODEX_APP_SERVER_NOTIFICATION_MAPPERS[envelope.method];
+  return mapper ? mapper(envelope.method, params) : null;
+}
+
+export function boundedUnsupportedCodexAppServerNotificationMethod(envelopeValue: unknown): string | null {
+  const envelope = asCodexAppServerRecord(envelopeValue);
+  const method = envelope?.method;
+  if (
+    typeof method !== 'string' ||
+    Object.hasOwn(CODEX_APP_SERVER_NOTIFICATION_MAPPERS, method) ||
+    isCodexAppServerTokenUsageNotification(envelope)
+  ) {
+    return null;
   }
+  return method.slice(0, 64);
 }
 
 export function respondToCodexAppServerRequest(request: CodexAppServerJsonObject): CodexAppServerJsonObject | null {

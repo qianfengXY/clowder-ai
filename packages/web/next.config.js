@@ -2,6 +2,18 @@ const withPWA = require('@ducanh2912/next-pwa').default;
 const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
+const testDistDir = process.env.CAT_CAFE_WEB_TEST_DIST_DIR;
+const testTsconfigPath = process.env.CAT_CAFE_WEB_TEST_TSCONFIG;
+
+if (testDistDir && !/^\.next-test-[A-Za-z0-9_-]+$/.test(testDistDir)) {
+  throw new Error('CAT_CAFE_WEB_TEST_DIST_DIR must name an isolated .next-test-* directory');
+}
+if (testTsconfigPath && !/^tsconfig\.next-test-[A-Za-z0-9_-]+\.json$/.test(testTsconfigPath)) {
+  throw new Error('CAT_CAFE_WEB_TEST_TSCONFIG must name an isolated tsconfig.next-test-*.json file');
+}
+if (Boolean(testDistDir) !== Boolean(testTsconfigPath)) {
+  throw new Error('CAT_CAFE_WEB_TEST_DIST_DIR and CAT_CAFE_WEB_TEST_TSCONFIG must be provided together');
+}
 
 // Resolved through the shared helper so the revision embedded in the browser
 // bundle and the one scripts/write-build-stamp.cjs records on disk can never
@@ -51,6 +63,8 @@ const nextConfig = {
   // Socket.IO's Engine.IO endpoint is `/socket.io/`. Redirecting it to the
   // slashless form breaks WebSocket upgrades before the rewrite can proxy it.
   skipTrailingSlashRedirect: true,
+  ...(testDistDir ? { distDir: testDistDir } : {}),
+  ...(testTsconfigPath ? { typescript: { tsconfigPath: testTsconfigPath } } : {}),
   experimental: { proxyTimeout: 120_000 },
   // Explicitly expose the configured public API URL to browser bundles.
   // Reading process.env through Next's browser shim leaves this value undefined

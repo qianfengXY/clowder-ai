@@ -82,6 +82,25 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handlePostMessage forwards the exact F247 source binding fields', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handlePostMessage({
+      content: 'source-bound cloud return',
+      replyTo: 'source-message-7',
+      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.replyTo, 'source-message-7');
+    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+  });
+
   test('handlePostMessage rejects an invalid action subjectRef before sending or queueing a callback', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     let attempts = 0;
@@ -240,6 +259,7 @@ describe('MCP Callback Tools', () => {
         subjectRef: 'pr:owner/repo#3515',
       },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
     });
 
     assert.equal(result.isError, undefined);
@@ -249,6 +269,7 @@ describe('MCP Callback Tools', () => {
       subjectRef: 'pr:owner/repo#3515',
     });
     assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+    assert.equal(JSON.parse(capturedOptions.body).reviewedHeadSha, 'a'.repeat(40));
   });
 
   test('handlePostMessage rejects a typed local verdict without invocation credentials', async () => {
@@ -268,10 +289,29 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-local-review-agent-key',
       coordination: { phase: 'terminal' },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'b'.repeat(40),
     });
 
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /localReviewVerdict.*invocation-token/i);
+    assert.equal(attempts, 0);
+  });
+
+  test('handlePostMessage rejects reviewedHeadSha without a typed local verdict before transport', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handlePostMessage({
+      content: 'HEAD alone is not a review fact.',
+      reviewedHeadSha: 'c'.repeat(40),
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /reviewedHeadSha requires localReviewVerdict/);
     assert.equal(attempts, 0);
   });
 
@@ -601,6 +641,31 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('after=4'));
   });
 
+  test('handleGetThreadContext forwards an opaque continuation cursor', async () => {
+    const { handleGetThreadContext } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ messages: [], hasMore: false }),
+      };
+    };
+
+    const result = await handleGetThreadContext({
+      limit: 100,
+      keyword: 'budget needle',
+      responseMode: 'full',
+      cursor: 'opaque-page-token',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('cursor=opaque-page-token'));
+    assert.ok(capturedUrl.includes('keyword=budget+needle'));
+    assert.ok(capturedUrl.includes('responseMode=full'));
+  });
+
   test('handleListThreads forwards limit/activeSince filters', async () => {
     const { handleListThreads } = await import('../dist/tools/callback-tools.js');
 
@@ -654,6 +719,28 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.content, 'hello from another thread');
   });
 
+  test('handleCrossPostMessage forwards the exact F247 source binding fields', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handleCrossPostMessage({
+      threadId: 'thread-source-bound',
+      content: '@codex-sol source-bound cloud return',
+      targetCats: ['codex-sol'],
+      replyTo: 'source-message-8',
+      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.threadId, 'thread-source-bound');
+    assert.equal(body.replyTo, 'source-message-8');
+    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+  });
+
   test('handleCrossPostMessage forwards a typed local verdict with its terminal delivery', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     let capturedOptions;
@@ -669,10 +756,12 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-cross-thread-local-review',
       coordination: { phase: 'terminal' },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'b'.repeat(40),
     });
 
     assert.equal(result.isError, undefined);
     assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+    assert.equal(JSON.parse(capturedOptions.body).reviewedHeadSha, 'b'.repeat(40));
   });
 
   test('handleCrossPostMessage forwards action identity with the caller idempotency key', async () => {
@@ -1251,110 +1340,6 @@ describe('MCP Callback Tools', () => {
     assert.ok(!posted.includes('queued-3'), 'third entry should wait for next flush batch');
     assert.ok(posted.includes('current-message'));
     assert.equal(readdirSync(outboxDir).length, 1, 'one queued entry should remain after bounded flush');
-  });
-
-  test('handleRequestPermission posts action+reason to request-permission endpoint', async () => {
-    const { handleRequestPermission } = await import('../dist/tools/callback-tools.js');
-
-    let capturedUrl, capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({ status: 'granted' }),
-      };
-    };
-
-    const result = await handleRequestPermission({
-      action: 'git_commit',
-      reason: 'Committing bug fix',
-      context: 'Fix for issue #42',
-    });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.includes('/api/callbacks/request-permission'));
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.action, 'git_commit');
-    assert.equal(body.reason, 'Committing bug fix');
-    assert.equal(body.context, 'Fix for issue #42');
-    // F174 Phase F (AC-F2): creds headers-only.
-    assert.equal(body.invocationId, undefined);
-    assert.equal(body.callbackToken, undefined);
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-    assert.ok(result.content[0].text.includes('granted'));
-  });
-
-  test('handleRequestPermission omits context when not provided', async () => {
-    const { handleRequestPermission } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({ status: 'pending', requestId: 'req-123' }),
-      };
-    };
-
-    const result = await handleRequestPermission({
-      action: 'file_delete',
-      reason: 'Cleaning temp files',
-    });
-
-    assert.equal(result.isError, undefined);
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.action, 'file_delete');
-    assert.equal(body.context, undefined);
-    assert.ok(result.content[0].text.includes('pending'));
-  });
-
-  test('handleCheckPermissionStatus queries permission-status endpoint', async () => {
-    const { handleCheckPermissionStatus } = await import('../dist/tools/callback-tools.js');
-
-    let capturedUrl, capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({
-          requestId: 'req-123',
-          status: 'granted',
-          action: 'git_commit',
-          createdAt: 1234567890,
-        }),
-      };
-    };
-
-    const result = await handleCheckPermissionStatus({ requestId: 'req-123' });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.includes('/api/callbacks/permission-status'));
-    assert.ok(capturedUrl.includes('requestId=req-123'));
-    // F174 Phase F (AC-F2): creds headers-only.
-    assert.ok(!capturedUrl.includes('invocationId='));
-    assert.ok(!capturedUrl.includes('callbackToken='));
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-    assert.ok(result.content[0].text.includes('granted'));
-  });
-
-  test('handleRequestPermission returns error when env vars missing', async () => {
-    const { handleRequestPermission } = await import('../dist/tools/callback-tools.js');
-
-    delete process.env.CAT_CAFE_API_URL;
-    delete process.env.CAT_CAFE_INVOCATION_ID;
-    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
-
-    const result = await handleRequestPermission({
-      action: 'git_commit',
-      reason: 'test',
-    });
-
-    assert.equal(result.isError, true);
-    assert.ok(result.content[0].text.includes('not configured'));
   });
 
   test('drops retryable outbox entry when attempts reached max threshold', async () => {

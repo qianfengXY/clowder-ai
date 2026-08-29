@@ -27,6 +27,7 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_cross_post_message',
   'cat_cafe_create_rich_block',
   'cat_cafe_get_thread_context',
+  'cat_cafe_get_workflow_sop',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_list_tasks',
@@ -112,6 +113,7 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
       'cat_cafe_get_message',
       'cat_cafe_list_threads',
       'cat_cafe_list_schedule_templates',
@@ -166,7 +168,7 @@ describe('applyReadonlyFilter — env modes', () => {
     assert.equal(outNames.has('cat_cafe_workspace_navigate'), false, 'workspace_navigate must not leak via AGENT_KEY');
     assert.equal(outNames.has('cat_cafe_teleport'), false, 'teleport must not leak via AGENT_KEY');
     assert.equal(outNames.has('cat_cafe_create_rich_block'), false, 'create_rich_block must not leak via AGENT_KEY');
-    // 11 项白名单全在
+    // Core desktop allowlist entries are present.
     assert.equal(outNames.has('cat_cafe_post_message'), true);
     assert.equal(outNames.has('cat_cafe_search_evidence'), true);
     assert.equal(outNames.has('cat_cafe_read_profile'), true);
@@ -200,16 +202,17 @@ describe('applyReadonlyFilter — env modes', () => {
 });
 
 describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 + F231 profile continuity', () => {
-  it('contains exactly 11 tools', () => {
-    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 11, 'F231 profile continuity adds one read-only tool');
+  it('contains exactly 12 tools', () => {
+    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 12, 'F236 adds the workflow-SOP progressive drill');
   });
 
-  it('contains 5 collab message tools + 5 memory cold-start tools + 1 profile tool', () => {
+  it('contains 6 collab read/message tools + 5 memory cold-start tools + 1 profile tool', () => {
     const expected = [
       // collab
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
       'cat_cafe_list_threads',
       'cat_cafe_get_message',
       // memory
@@ -325,7 +328,7 @@ describe('buildLimbTools — F178 Phase D cloud-review P1 (limb defense-in-depth
 });
 
 describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex §4)', () => {
-  it('Desktop mode collab: 5 message tools + authenticated profile reader registered', () => {
+  it('Desktop mode collab: 6 read/message tools + authenticated profile reader registered', () => {
     const env: ToolsetEnv = { desktopMode: 'fable-phase0' };
     const out = buildCollabTools(env);
     const outNames = new Set(out.map((t) => t.name));
@@ -333,6 +336,7 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
       'cat_cafe_list_threads',
       'cat_cafe_get_message',
     ];
@@ -403,22 +407,22 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
 // =====================================================================
 
 describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
-  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 11 tools', () => {
+  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 12 tools', () => {
     assert.equal(
       DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.size,
-      11,
-      'cloud-pro-phase0 locked at 11 tools (fable-phase0 同套)',
+      12,
+      'cloud-pro-phase0 includes the F236 drill and otherwise matches fable-phase0',
     );
   });
 
-  it('contains the same 11 tools as fable-phase0 through independent profile projections', () => {
+  it('contains the same 12 tools as fable-phase0 through independent profile projections', () => {
     assert.deepEqual(
       [...DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS].sort(),
       [...DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS].sort(),
     );
   });
 
-  it('applyReadonlyFilter(cloud-pro-phase0) → only 11 whitelist tools', () => {
+  it('applyReadonlyFilter(cloud-pro-phase0) → only 12 whitelist tools', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
     const outNames = new Set(out.map((t) => t.name));
@@ -474,7 +478,7 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
   });
 
-  it('cloud-pro-phase0 collab build: 5 message tools + authenticated profile reader registered', () => {
+  it('cloud-pro-phase0 collab build: 6 read/message tools + authenticated profile reader registered', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = buildCollabTools(env);
     const outNames = new Set(out.map((t) => t.name));
@@ -482,6 +486,7 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
       'cat_cafe_list_threads',
       'cat_cafe_get_message',
     ];

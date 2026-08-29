@@ -142,10 +142,14 @@ function parseAgentKeyFileMap(raw: string | undefined): Record<string, string> {
 
 function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
   const requestedCatId = options?.agentKeyCatId?.trim();
+  const boundCatId = process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID?.trim();
   const variantMapRaw = process.env.CAT_CAFE_AGENT_KEY_FILES?.trim();
-  if (requestedCatId) {
+  if (requestedCatId && boundCatId && requestedCatId !== boundCatId) return undefined;
+
+  const effectiveCatId = requestedCatId || boundCatId;
+  if (effectiveCatId) {
     const variantFiles = parseAgentKeyFileMap(variantMapRaw);
-    return readAgentKeyFile(variantFiles[requestedCatId]);
+    return readAgentKeyFile(variantFiles[effectiveCatId]);
   }
 
   if (variantMapRaw) return undefined;
@@ -311,10 +315,6 @@ const agentKeyCatIdSchema = z
 type AgentKeySelectable = { agentKeyCatId?: string | undefined };
 type WithAgentKey<T> = T & AgentKeySelectable;
 
-const agentKeyInputShape = {
-  agentKeyCatId: agentKeyCatIdSchema,
-};
-
 function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | undefined } {
   return { agentKeyCatId: input.agentKeyCatId };
 }
@@ -341,6 +341,14 @@ export const postMessageInputSchema = {
       'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
+  cloudReturnBinding: z
+    .string()
+    .min(1)
+    .max(800)
+    .optional()
+    .describe(
+      'Opaque F247 runtime-delta capability. Required with replyTo for gpt-pro agent-key returns; copy exactly.',
+    ),
   clientMessageId: z
     .string()
     .min(1)
@@ -384,7 +392,14 @@ export const postMessageInputSchema = {
     .enum(['approved', 'changes_requested', 'commented'])
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal post. Requires invocation-token review custody, coordination.phase="terminal", and clientMessageId. The server derives lease, generation, subject, exact HEAD, holder, route, and tenant; public prose is presentation only.',
+      'Typed local-review decision carried by the same terminal post. Requires invocation-token credentials, coordination.phase="terminal", and clientMessageId. The carrier fast path derives the lease fields; carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject. Public prose is presentation only.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only when the current invocation no longer carries the review lease; it fences identity resolution but grants no authority.',
     ),
   action: executableActionSuccessorMetadataSchema
     .optional()
@@ -420,7 +435,11 @@ export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unc
  */
 export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
   const { threadId: _threadId, ...invocationCommon } = postMessageInputSchema;
-  const { localReviewVerdict: _localReviewVerdict, ...agentKeyCommon } = invocationCommon;
+  const {
+    localReviewVerdict: _localReviewVerdict,
+    reviewedHeadSha: _reviewedHeadSha,
+    ...agentKeyCommon
+  } = invocationCommon;
   if (principal === 'invocation') return invocationCommon;
   if (principal === 'agent-key') {
     return {
@@ -465,6 +484,12 @@ export const getThreadContextInputSchema = {
     .optional()
     .default(100)
     .describe('Number of recent messages to retrieve (default: 100, max: 200)'),
+  cursor: z
+    .string()
+    .min(1)
+    .max(4096)
+    .optional()
+    .describe('Opaque nextCursor from the immediately preceding read with the same thread, filters, and mode.'),
   threadId: z
     .string()
     .min(1)
@@ -502,10 +527,20 @@ export const getThreadContextInputSchema = {
     .optional()
     .describe(
       'Response projection mode. "anchor" (DEFAULT — omit for normal browsing): token-lean previews with drillDown pointers to full content. ' +
-        '"full": returns complete message bodies (no truncation, no drillDown). ' +
-        'Use "full" for bulk/export AND whenever a freshness catch asks you to consume the contiguous unread set: only full exposes same-target queued bodies and advances queued-read evidence. ' +
+        '"full": returns complete message bodies inside a bounded aggregate page; use nextCursor when hasMore=true. A persisted message larger than the page is returned as an honest anchor with a precise drill pointer; a transient queued body without a persisted message anchor remains unseen and says to retry after persistence. ' +
+        'An oversized workflow SOP is likewise returned as an honest anchor that points to cat_cafe_get_workflow_sop instead of overflowing the aggregate envelope. ' +
+        'Use "full" whenever a freshness catch asks you to consume the contiguous unread set: current-thread reads prefer the unread delta, and only complete bodies advance queued-read evidence. ' +
         'GOTCHA: anchor previews are not a freshness closure and cannot prove queued messages were handled.',
     ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const getWorkflowSopInputSchema = {
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Thread whose linked canonical workflow SOP should be read. Omit for the current invocation thread.'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -663,6 +698,12 @@ export const crossPostMessageInputSchema = {
         'F193 KD-1 boundary: this is the routing list, NOT relay metadata. Agent-key callers do not inherit F052 sourceThreadId semantics.',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
+  cloudReturnBinding: z
+    .string()
+    .min(1)
+    .max(800)
+    .optional()
+    .describe('Opaque F247 runtime-delta capability required for a gpt-pro source-bound cross-thread return.'),
   clientMessageId: z
     .string()
     .min(1)
@@ -707,7 +748,14 @@ export const crossPostMessageInputSchema = {
     .enum(['approved', 'changes_requested', 'commented'])
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal cross-post. Invocation-token review custody, coordination.phase="terminal", and clientMessageId are required; public prose is never parsed for settlement.',
+      'Typed local-review decision carried by the same terminal cross-post. Invocation-token credentials, coordination.phase="terminal", and clientMessageId are required. Carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject; public prose is never parsed.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only for carrier-free local-review settlement; it is checked against the frozen canonical lease predicate.',
     ),
   action: executableActionSuccessorMetadataSchema
     .optional()
@@ -795,6 +843,7 @@ async function _executePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
+    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -804,6 +853,7 @@ async function _executePostMessage(
       | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     proposedAction?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -812,7 +862,7 @@ async function _executePostMessage(
 ): Promise<ToolResult> {
   if (input.localReviewVerdict) {
     if (!getInvocationAuthSignal().hasFullCredentials) {
-      return errorResult('post_message localReviewVerdict requires invocation-token review-carrier credentials.');
+      return errorResult('post_message localReviewVerdict requires invocation-token credentials.');
     }
     if (input.coordination?.phase !== 'terminal') {
       return errorResult('post_message localReviewVerdict requires coordination.phase="terminal".');
@@ -825,6 +875,11 @@ async function _executePostMessage(
     if (input.action || input.proposedAction) {
       return errorResult('post_message localReviewVerdict cannot be combined with a new action or proposedAction.');
     }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult(
+      'post_message reviewedHeadSha requires localReviewVerdict. Example: localReviewVerdict="approved", reviewedHeadSha="<exact lowercase Git OID>".',
+    );
   }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -840,11 +895,13 @@ async function _executePostMessage(
           streamDisposition: input.streamDisposition ?? 'independent',
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
           ...(input.effectClass ? { effectClass: input.effectClass } : {}),
           ...(input.coordination ? { coordination: input.coordination } : {}),
           ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+          ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
           ...(input.action ? { action: input.action } : {}),
           ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
           ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -956,6 +1013,7 @@ export async function handlePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
+    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -963,6 +1021,7 @@ export async function handlePostMessage(
       | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
     agentKeyCatId?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -1040,6 +1099,7 @@ export async function handleAckMentions(input: WithAgentKey<{ upToMessageId: str
 
 export async function handleGetThreadContext(input: {
   limit?: number | undefined;
+  cursor?: string | undefined;
   threadId?: string | undefined;
   messageId?: string | undefined;
   before?: number | undefined;
@@ -1053,6 +1113,7 @@ export async function handleGetThreadContext(input: {
     '/api/callbacks/thread-context',
     {
       ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.messageId ? { messageId: input.messageId } : {}),
       ...(input.before !== undefined ? { before: String(input.before) } : {}),
@@ -1062,6 +1123,19 @@ export async function handleGetThreadContext(input: {
       ...(input.responseMode ? { responseMode: input.responseMode } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleGetWorkflowSop(input: {
+  threadId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/get-workflow-sop',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+    agentKeyOptions(input),
   );
 }
 
@@ -1291,11 +1365,13 @@ export async function handleCrossPostMessage(input: {
   content: string;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
+  cloudReturnBinding?: string | undefined;
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
   coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
   localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+  reviewedHeadSha?: string | undefined;
   action?: ActionSuccessorRequestMetadata | undefined;
   proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
@@ -1371,12 +1447,14 @@ export async function handleCrossPostMessage(input: {
     threadId: input.threadId,
     content: input.content,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
     ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
     ...(input.effectClass ? { effectClass: input.effectClass } : {}),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+    ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
     ...(input.action ? { action: input.action } : {}),
     ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
     ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -1605,43 +1683,6 @@ export async function handleGenerateDocument(input: {
     agentKeyOptions(input),
   );
   return result;
-}
-
-export const requestPermissionInputSchema = {
-  action: z.string().min(1).describe('The action requiring permission (e.g. "git_commit", "file_delete")'),
-  reason: z.string().min(1).describe('Why you need this permission'),
-  context: z.string().max(5000).optional().describe('Optional additional context for the request'),
-};
-
-export const checkPermissionStatusInputSchema = {
-  requestId: z.string().min(1).describe('The requestId returned from a previous request_permission call'),
-};
-
-export async function handleRequestPermission(input: {
-  action: string;
-  reason: string;
-  context?: string | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost(
-    '/api/callbacks/request-permission',
-    {
-      action: input.action,
-      reason: input.reason,
-      ...(input.context ? { context: input.context } : {}),
-    },
-    agentKeyOptions(input),
-  );
-}
-
-export async function handleCheckPermissionStatus(input: WithAgentKey<{ requestId: string }>): Promise<ToolResult> {
-  return callbackGet(
-    '/api/callbacks/permission-status',
-    {
-      requestId: input.requestId,
-    },
-    agentKeyOptions(input),
-  );
 }
 
 const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
@@ -2997,9 +3038,10 @@ export const callbackTools = [
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'For a local review terminal, put localReviewVerdict on that same post; the server derives the exact lease/HEAD/route and never parses public prose. ' +
+      'For a local review terminal, put localReviewVerdict on that same post; the carrier fast path derives the exact lease/HEAD/route. If the invocation no longer carries the lease, also provide reviewedHeadSha: the server resolves only the inherited coordination subject + reviewer identity against the canonical active lease, and the HEAD fact grants no authority. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns must copy both replyTo=sourceMessageId and cloudReturnBinding from the runtime delta; missing or mismatched bindings fail closed. ' +
       'By default, a later provider final remains a separate durable message. Set streamDisposition="replace_final" only when this callback is the canonical replacement for that same final response. ' +
       'To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). ' +
       'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
@@ -3048,14 +3090,14 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
       'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or a freshness notice asks you to catch up. ' +
       'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
-      'Output: threadId plus ordered messages; anchor mode includes drillDown pointers to cat_cafe_get_message, responseMode="full" returns complete bodies and includes same-target queued bodies, and ranked keyword reads include scanCapped. ' +
-      'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters. Pass threadId only to read a different thread; omit it for the current thread.',
+      'Output: a bounded aggregate envelope with threadId, ordered messages, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers, while responseMode="full" returns complete bodies per ordinary item and includes same-target queued bodies. ' +
+      'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget falls back to an honest anchor; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters and follow nextCursor until hasMore=false. Pass threadId only to read a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
     governance: {
@@ -3065,6 +3107,30 @@ export const callbackTools = [
       authority: 'callback-thread',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_workflow_sop',
+    description:
+      'Read the complete canonical workflow SOP linked to an owner-visible thread. ' +
+      'Use when: cat_cafe_get_thread_context returns an oversized workflowSop anchor and you need the resume capsule or checks. ' +
+      'NOT for: updating workflow state (use cat_cafe_update_workflow), browsing messages, or guessing a backlog item from a feature ID. ' +
+      'Output: threadId, backlogItemId, and the persisted workflowSop including resumeCapsule, checks, version, and update provenance. ' +
+      'GOTCHA: thread ownership is resolved from callback or agent-key identity; agent-key callers must provide threadId and the matching agentKeyCatId.',
+    inputSchema: getWorkflowSopInputSchema,
+    handler: handleGetWorkflowSop,
+    governance: {
+      implementationExport: 'handleGetWorkflowSop',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'progressive-disclosure',
+        admissionRef: 'file:docs/features/F236-anchor-first-context-entry.md',
+      },
     },
   }),
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
@@ -3180,13 +3246,14 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'For a local review terminal, include localReviewVerdict on that same cross-post; the server settles the invocation-bound exact generation without a second verdict call or prose grammar. ' +
+      'For a local review terminal, include localReviewVerdict on that same cross-post; the carrier fast path settles the invocation-bound exact generation. If the invocation no longer carries the lease, also provide reviewedHeadSha so the server can resolve only the inherited coordination subject + reviewer identity against the canonical active lease; the HEAD fact grants no authority and prose is never parsed. ' +
       'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
       'GOTCHA: For a direct named external action, pass action + explicit clientMessageId + targetCats. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work instead; action and assign_work remain mutually exclusive. ' +
       'Output: direct action admission posts and queues one fenced carrier; assign_work publishes one pending approval card and posts nothing to the target until approval atomically acquires the fence. ' +
       'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
       'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns must carry the exact replyTo and cloudReturnBinding from the runtime delta. ' +
       'Fallback must use replace with the active leaseId/generation after server-recorded terminal evidence. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
@@ -3300,39 +3367,6 @@ export const callbackTools = [
       action: 'derive',
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_request_permission',
-    description:
-      'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). ' +
-      'Returns granted/denied immediately if a rule exists, or pending with a requestId if the user needs to approve. ' +
-      'WORKFLOW: request_permission → if pending → wait → check_permission_status with the returned requestId.',
-    inputSchema: requestPermissionInputSchema,
-    handler: handleRequestPermission,
-    governance: {
-      implementationExport: 'handleRequestPermission',
-      resourceFamily: 'permission',
-      action: 'command',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_check_permission_status',
-    description:
-      'Check the status of a previously submitted permission request. ' +
-      'Use the requestId returned from request_permission. Returns granted/denied/pending.',
-    inputSchema: checkPermissionStatusInputSchema,
-    handler: handleCheckPermissionStatus,
-    governance: {
-      implementationExport: 'handleCheckPermissionStatus',
-      resourceFamily: 'permission',
-      action: 'read',
-      authority: 'callback-owner',
-      risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full'],
     },
   }),

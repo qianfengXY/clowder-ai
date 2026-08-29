@@ -116,7 +116,6 @@ import {
 import { clearL0Cache, warmL0Cache } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { createPostCompactContextProjector } from './domains/cats/services/agents/routing/post-compact-context-projector.js';
-import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import { createFreshnessReinvokeCheck } from './domains/cats/services/freshness/createFreshnessReinvokeCheck.js';
 import { createProviderNativeFreshnessFactory } from './domains/cats/services/freshness/createProviderNativeFreshnessFactory.js';
 import { FreshnessAttentionEventLog } from './domains/cats/services/freshness/FreshnessAttentionEventLog.js';
@@ -153,6 +152,7 @@ import {
 } from './domains/cats/services/runtime-session/RuntimeSessionSealReaper.js';
 import { createRuntimeSessionStore } from './domains/cats/services/runtime-session/RuntimeSessionStoreFactory.js';
 import { ContextEpochOwner } from './domains/cats/services/session/ContextEpochOwner.js';
+import { isClaudeProjectHookCarrierReady } from './domains/cats/services/session/claude-project-hook-readiness.js';
 import {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
@@ -161,8 +161,6 @@ import type { HandoffConfig } from './domains/cats/services/session/SessionSeale
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
 import { TranscriptWriter } from './domains/cats/services/session/TranscriptWriter.js';
-import { createAuthorizationAuditStore } from './domains/cats/services/stores/factories/AuthorizationAuditStoreFactory.js';
-import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCommunityIssueDraftStore } from './domains/cats/services/stores/factories/CommunityIssueDraftStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
@@ -170,7 +168,6 @@ import { createFrustrationIssueStore } from './domains/cats/services/stores/fact
 import { createLabelStore } from './domains/cats/services/stores/factories/LabelStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
-import { createPendingRequestStore } from './domains/cats/services/stores/factories/PendingRequestStoreFactory.js';
 import { createProfileUpdateProposalStore } from './domains/cats/services/stores/factories/ProfileUpdateProposalStoreFactory.js';
 import { createProposalStore } from './domains/cats/services/stores/factories/ProposalStoreFactory.js';
 import { createPushSubscriptionStore } from './domains/cats/services/stores/factories/PushSubscriptionStoreFactory.js';
@@ -295,11 +292,9 @@ import {
   approvalHubRoutes,
   audioProxyRoutes,
   auditRoutes,
-  authorizationRoutes,
   backlogRoutes,
   bootcampRoutes,
   brakeRoutes,
-  callbackAuthRoutes,
   callbacksRoutes,
   capabilitiesRoutes,
   catsRoutes,
@@ -457,6 +452,7 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 async function main(): Promise<void> {
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
+  let sessionHookAuthenticationReady = (): boolean => false;
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
@@ -542,6 +538,7 @@ async function main(): Promise<void> {
         checks.sqlite = { ok: false, ms: Date.now() - t0, error: String(err) };
       }
     }
+    checks.sessionHooks = { ok: sessionHookAuthenticationReady(), ms: 0 };
     const allOk = Object.values(checks).every((c) => c.ok);
     return { status: allOk ? 'ready' : 'degraded', checks };
   }
@@ -674,6 +671,7 @@ async function main(): Promise<void> {
         });
   const turnExecutionStore = new CallbackAuthTurnExecutionLifecycle(canonicalTurnExecutionStore, registry);
   callbackAuthCapability = callbackAuthCapabilityForBackend(registryBackendKind);
+  sessionHookAuthenticationReady = () => registry.isStartupRecoveryComplete();
   app.log.info({ callbackAuth: callbackAuthCapability }, '[api] InvocationRegistry initialized');
 
   const { AgentKeyRegistry } = await import('./domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
@@ -740,6 +738,10 @@ async function main(): Promise<void> {
       appendListener?.(msg);
     },
   });
+  // Queue owners are initialized beside MessageStore so action-terminal
+  // convergence can retire their projections at the completion boundary.
+  const invocationQueue = new InvocationQueue();
+  const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
   const invocationRecordStore = createInvocationRecordStore(redis);
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
@@ -768,8 +770,6 @@ async function main(): Promise<void> {
   // F235: Community issue draft store + publisher for "Publish to Community" flow
   const communityIssueDraftStore = createCommunityIssueDraftStore(redis);
 
-  // F222: Create early so it's available for both AgentRouter (cancel burst detection) and AuthorizationManager
-  const authPendingStore = createPendingRequestStore(redis);
   // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
   const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
   const guideSessionStore = new InMemoryGuideSessionStore();
@@ -847,6 +847,7 @@ async function main(): Promise<void> {
       actionTruthMod,
       actionAdmissionMod,
       actionCompletionMod,
+      actionProjectionRetirementMod,
       taskActionLifecycleMod,
       localReviewBootstrapMod,
     ] = await Promise.all([
@@ -854,6 +855,7 @@ async function main(): Promise<void> {
       import('./domains/ball-custody/ActionSubjectTruthResolver.js'),
       import('./domains/ball-custody/ActionSuccessorAdmissionService.js'),
       import('./domains/ball-custody/ActionSuccessorCompletionService.js'),
+      import('./domains/ball-custody/ActionSuccessorProjectionRetirementService.js'),
       import('./domains/ball-custody/TaskActionSuccessorLifecycle.js'),
       import('./domains/ball-custody/LocalReviewCompletionBootstrap.js'),
     ]);
@@ -900,9 +902,29 @@ async function main(): Promise<void> {
       actionSuccessorLeaseStore,
       actionSubjectTruthResolver,
     );
+    const projectionRetirement = new actionProjectionRetirementMod.ActionSuccessorProjectionRetirementService({
+      queueCustodyCoordinator,
+      invocationQueue,
+      taskStore: {
+        getBySubject: (subjectKey) => taskStore.getBySubject(subjectKey),
+        replaceAutomationStateIfGeneration: (taskId, input) =>
+          taskStore.replaceAutomationStateIfGeneration(taskId, input),
+      },
+      publishQueue: ({ threadId, userId, receiptMessageIds }) =>
+        emitQueueUpdated(
+          socketManager!,
+          userId,
+          threadId,
+          invocationQueue.list(threadId, userId),
+          messageStore,
+          'action_successor_terminal',
+          { receiptMessageIds },
+        ),
+    });
     const completionService = new actionCompletionMod.ActionSuccessorCompletionService(
       actionSuccessorLeaseStore,
       actionSubjectTruthResolver,
+      projectionRetirement,
     );
     actionSuccessorCompletionService = completionService;
     localReviewVerdictService = localReviewCompletion.createVerdictService({
@@ -2125,6 +2147,12 @@ async function main(): Promise<void> {
     env: process.env,
     logger: bridgeLogger,
   });
+  const { CloudReturnBindingSigner, loadOrCreateCloudReturnBindingSigner } = await import(
+    './domains/cats/services/cloud-bridge/cloud-return-binding.js'
+  );
+  const cloudReturnBindingSigner = redis
+    ? await loadOrCreateCloudReturnBindingSigner(redis)
+    : new CloudReturnBindingSigner();
   const cloudInvokeBridge = new CloudInvokeBridge({
     hostAdapter: personalChromeHostAdapter,
     pinchTabAdapter,
@@ -2299,6 +2327,8 @@ async function main(): Promise<void> {
     ...(threadStore ? { threadStore } : {}),
     sessionChainStore,
     contextEpochOwner,
+    hookAuthenticationReady: sessionHookAuthenticationReady,
+    claudeProjectHookCarrierReady: isClaudeProjectHookCarrierReady,
     presentationLedger,
     runtimeSessionStore,
     transcriptWriter,
@@ -2326,10 +2356,10 @@ async function main(): Promise<void> {
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     turnCustodyProjectionService,
     frustrationIssueStore,
-    pendingRequestStore: authPendingStore,
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
+    cloudReturnBindingSigner,
     ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
     turnExecutionStore,
@@ -2343,13 +2373,12 @@ async function main(): Promise<void> {
       messageStore,
     ),
     memoryCuePromptService: memoryCueRuntime.promptService,
+    profileRepository,
     ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
     ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
 
   // F39: Message queue delivery
-  const invocationQueue = new InvocationQueue();
-  const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
   // P2-1 fix: wire lazy ref now that InvocationQueue exists
   invocationQueueRef = invocationQueue;
   const sessionContinuationCoordinator = new SessionContinuationCoordinator({
@@ -2514,7 +2543,7 @@ async function main(): Promise<void> {
     );
     return { outcome: 'enqueued', deliveredMessageId: storedMsg.id };
   };
-  if (actionSuccessorLeaseStore) {
+  if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
       leaseStore: actionSuccessorLeaseStore,
@@ -2565,6 +2594,7 @@ async function main(): Promise<void> {
       },
       dispatch: {
         leaseStore: actionSuccessorLeaseStore,
+        truthResolver: actionSubjectTruthResolver,
         loadProposal: (proposalId) => dispatchProposalStore.get(proposalId),
         loadOwnerAuthProvenance: (proposalId) => dispatchProposalStore.getApprovalOwnerAuthProvenance(proposalId),
         recordProposalDelivery: (proposalId, deliveredMessageId) =>
@@ -3098,6 +3128,64 @@ async function main(): Promise<void> {
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
     'eval:qc': createQcGeneratorAdapter(),
   };
+  let designGateEpisodeSourceProvider:
+    | import('./infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.js').DesignGateEpisodeSourceProviderImpl
+    | undefined;
+  {
+    const { createDesignGateGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/design-gate-generator-adapter.js'
+    );
+    const { DesignGateEpisodeSourceProviderImpl } = await import(
+      './infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.js'
+    );
+    const { GhDesignGatePullRequestReader, GitDesignGateTruth } = await import(
+      './infrastructure/harness-eval/design-gate/design-gate-gh-evidence-reader.js'
+    );
+    designGateEpisodeSourceProvider = new DesignGateEpisodeSourceProviderImpl({
+      repoRoot,
+      pullRequestReader: new GhDesignGatePullRequestReader(),
+      reviewMessageReader: messageStore,
+      gitTruth: new GitDesignGateTruth(repoRoot),
+    });
+    verdictGenerators['eval:design-gate'] = createDesignGateGeneratorAdapter(designGateEpisodeSourceProvider);
+  }
+  {
+    const [
+      { createTrajectoryInspectorGeneratorAdapter },
+      { TrajectoryInspectorSourceProviderImpl },
+      { GitTrajectoryInspectorArtifactTruth, RepoTrajectoryInspectorEvidenceSource },
+      { resolveCanonicalInvocationTrajectory },
+    ] = await Promise.all([
+      import('./infrastructure/harness-eval/trajectory-inspector/trajectory-inspector-generator-adapter.js'),
+      import('./infrastructure/harness-eval/trajectory-inspector/trajectory-inspector-source-provider.js'),
+      import('./infrastructure/harness-eval/trajectory-inspector/trajectory-inspector-repo-evidence-source.js'),
+      import('./domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js'),
+    ]);
+    const trajectoryInspectorProvider = new TrajectoryInspectorSourceProviderImpl({
+      threadStore,
+      sessionChainStore,
+      transcriptReader,
+      externalEvidenceSource: new RepoTrajectoryInspectorEvidenceSource({
+        harnessFeedbackRoot: evalHarnessFeedbackRoot,
+        artifactTruth: new GitTrajectoryInspectorArtifactTruth(repoRoot),
+      }),
+      canonicalResolver: (input) =>
+        resolveCanonicalInvocationTrajectory(input, {
+          invocationRecordStore,
+          turnExecutionStore,
+          sessionChainStore,
+          threadStore,
+          readInvocationEvents: async (session, invocationId) => {
+            if (session.userId !== input.userId) return [];
+            return (await transcriptReader.readAllEvents(session.id, session.threadId, session.catId)).filter(
+              (event) => event.invocationId === invocationId,
+            );
+          },
+        }),
+    });
+    verdictGenerators['eval:trajectory-inspector'] =
+      createTrajectoryInspectorGeneratorAdapter(trajectoryInspectorProvider);
+  }
   if (freshnessClosureStore) {
     const { createFreshnessGeneratorAdapter } = await import(
       './infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js'
@@ -3239,14 +3327,9 @@ async function main(): Promise<void> {
   const { buildProposalRejectSignal } = await import(
     './infrastructure/harness-eval/task-outcome/task-outcome-signal-builder.js'
   );
-  const { CancelBurstDetector } = await import('./infrastructure/harness-eval/task-outcome/cancel-burst-detector.js');
-  const cancelBurstDetector = new CancelBurstDetector({ threshold: 3, windowMs: 60_000 });
-  const {
-    appendPermissionCancelToEpisode,
-    appendMagicWordRefToEpisode,
-    appendPrLifecycleEvidenceToEpisode,
-    checkAndAppendCancelBurst,
-  } = await import('./infrastructure/harness-eval/task-outcome/task-outcome-signal-wiring.js');
+  const { appendMagicWordRefToEpisode, appendPrLifecycleEvidenceToEpisode } = await import(
+    './infrastructure/harness-eval/task-outcome/task-outcome-signal-wiring.js'
+  );
   const { taskOutcomeRoutes } = await import('./routes/task-outcome.js');
   await app.register(taskOutcomeRoutes, { store: taskOutcomeStore });
 
@@ -3954,9 +4037,12 @@ async function main(): Promise<void> {
         : {}),
     });
   }
+  const meetingArtifactReaderHolder: import('./routes/callback-meeting-artifact-routes.js').MeetingArtifactReaderHolder =
+    {};
   const callbackOpts = {
     registry,
     agentKeyRegistry,
+    cloudReturnBindingSigner,
     messageStore,
     socketManager,
     callbackAuthNotifier,
@@ -3968,6 +4054,7 @@ async function main(): Promise<void> {
     proposalStore,
     handoffProposalStore,
     profileUpdateProposalStore,
+    meetingArtifactReaderHolder,
     ...(personMemoryStore
       ? {
           personMemoryStore,
@@ -4059,73 +4146,6 @@ async function main(): Promise<void> {
   // D2b-1 adds POST /api/debug/callback-auth/hide-similar (24h opt-out) when notifier is wired.
   registerCallbackAuthDebugRoute(app, { notifier: callbackAuthNotifier });
 
-  // Authorization system — 猫猫动态权限 (Redis-backed when available)
-  const authRuleStore = createAuthorizationRuleStore(redis);
-  // authPendingStore created earlier (line ~480) for F222 cancel burst detection
-  const authAuditStore = createAuthorizationAuditStore(redis);
-  const authManager = new AuthorizationManager({
-    ruleStore: authRuleStore,
-    pendingStore: authPendingStore,
-    auditStore: authAuditStore,
-    io: socketManager.getIO(),
-  });
-  await app.register(callbackAuthRoutes, { authManager, registry });
-  await app.register(authorizationRoutes, {
-    authManager,
-    ruleStore: authRuleStore,
-    auditStore: authAuditStore,
-    socketManager,
-    onPermissionCancel: async (input) => {
-      try {
-        const invocation = await registry.getRecord(input.invocationId);
-        const managedWorkBinding = invocation?.managedWorkBinding;
-        // AC-G10/G11: permission cancel → episode a2 signal (production helper)
-        appendPermissionCancelToEpisode(taskOutcomeStore, {
-          toolName: input.toolName,
-          paramsSummary: input.paramsSummary,
-          cancelReason: input.cancelReason,
-          catId: input.catId,
-          threadId: input.threadId,
-          ...(managedWorkBinding ? { managedWorkBinding } : {}),
-        });
-
-        // AC-G13: Check for cancel burst (≥3 cancels in 1 minute)
-        checkAndAppendCancelBurst(
-          taskOutcomeStore,
-          cancelBurstDetector,
-          input.threadId,
-          Date.now(),
-          managedWorkBinding,
-        );
-
-        // F222 UX-3: "取消并反馈" — immediately trigger auto-issue (no threshold)
-        if (input.withFeedback && input.userId) {
-          void import('./domains/cats/services/frustration/FrustrationDetector.js')
-            .then(({ evaluate }) =>
-              evaluate(
-                {
-                  signal: {
-                    type: 'user_report',
-                    toolName: input.toolName,
-                    cancelReason: input.cancelReason,
-                  },
-                  threadId: input.threadId,
-                  userId: input.userId,
-                  catId: input.catId,
-                },
-                { frustrationIssueStore, messageStore, socketManager: socketManager ?? undefined },
-              ),
-            )
-            .catch(() => {
-              // Best-effort: swallow import/evaluate failures so the authorization
-              // response is never blocked by frustration detection issues.
-            });
-        }
-      } catch {
-        // Best-effort: don't break authorization flow
-      }
-    },
-  });
   const sidebarPresenceSource = createSidebarPresenceSource({
     buildSnapshot: (userId) => activeExecutionService.buildSnapshot(userId),
     resolveWorkingPresence: (threadId, userId, snapshot) =>
@@ -4237,6 +4257,7 @@ async function main(): Promise<void> {
   });
   const {
     LarkCliFeishuSourceResolver,
+    MeetingArtifactResourceService,
     MeetingIntakeActionService,
     MeetingIntakeService,
     MemoryMeetingIntakeStore,
@@ -4265,6 +4286,8 @@ async function main(): Promise<void> {
     projectRoot: resolveActiveProjectRoot(),
     routes: signalRouteStore,
     intakes: meetingIntakeStore,
+    messageStore,
+    ...(redis ? { redis } : {}),
   });
   const externalPluginRecovery = await externalPluginRuntime.recoverAfterRestart();
   app.log.info(
@@ -4283,6 +4306,7 @@ async function main(): Promise<void> {
   const { RefreshingOfficialPluginCatalog } = await import('./domains/plugin/official-catalog-provider.js');
   const { OfficialPluginPackageInstaller } = await import('./domains/plugin/official-package-installer.js');
   const { OfficialPluginHistoryImportService } = await import('./domains/plugin/official-plugin-history-import.js');
+  const { OfficialPluginMeetingIntakeService } = await import('./domains/plugin/official-plugin-meeting-intake.js');
   const { createLarkCliFeishuArtifactInspector, normalizeGeneratedArtifact, parseFeishuMinutesReference } =
     await import('@clowder-ai/feishu-meeting-intake');
   const { registerOfficialPluginRoutes } = await import('./routes/plugin-official-routes.js');
@@ -4315,6 +4339,7 @@ async function main(): Promise<void> {
       catalogProvider: officialPluginCatalog,
     }),
     historyImport: officialPluginHistoryImport,
+    meetingIntake: new OfficialPluginMeetingIntakeService({ homeDirectory: homedir() }),
   });
   const { registerPersonalChromePluginRoutes } = await import('./routes/personal-chrome-plugin-routes.js');
   const personalChromeInstallModule = (await import(
@@ -4353,7 +4378,7 @@ async function main(): Promise<void> {
   // F292 PR2: durable Host-owned MeetingIntake truth and recovery surface.
   if (redis) {
     const { registerMeetingIntakeRoutes } = await import('./routes/meeting-intake-routes.js');
-    const { supportsPreProviderContinuityCapability } = await import(
+    const { supportsWriteOpportunityPresentationCapability } = await import(
       './domains/cats/services/agents/invocation/context-continuity.js'
     );
     const destinations = new ThreadDestinationAuthority(threadStore);
@@ -4374,8 +4399,14 @@ async function main(): Promise<void> {
         messageStore,
         invocationQueue,
         queueProcessor,
-        supportsPresentationRetry: (catId) => supportsPreProviderContinuityCapability(router.contextCapability(catId)),
+        supportsPresentationRetry: (catId) =>
+          supportsWriteOpportunityPresentationCapability(router.contextCapability(catId)),
       }),
+    });
+    meetingArtifactReaderHolder.current = new MeetingArtifactResourceService({
+      intakes: meetingIntakeStore,
+      sources: sourceAccess,
+      messages: messageStore,
     });
     registerMeetingIntakeRoutes(app, {
       store: meetingIntakeStore,
@@ -5157,9 +5188,10 @@ async function main(): Promise<void> {
     transcriptWriter,
     messageStore,
     turnExecutionStore,
+    profileRepository,
+    memoryCueSourceReader: memoryCueRuntime.sourceReader,
   });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
-  const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
   await app.register(sessionHooksRoutes, {
     sessionChainStore,
     sessionSealer,
@@ -5167,7 +5199,7 @@ async function main(): Promise<void> {
     contextEpochOwner,
     resolveContextCapability: (catId) => router.contextCapability(catId),
     postCompactContextProjector: createPostCompactContextProjector(router.getStrategyDeps()),
-    ...(hookToken ? { hookToken } : {}),
+    callbackRegistry: registry,
   });
 
   // F33 Phase 3: Session strategy config (runtime overrides via Redis)
@@ -5555,6 +5587,11 @@ async function main(): Promise<void> {
       managedCommandWakeRecoveryTimer = null;
     }
   });
+
+  // F192 Phase I: the observer is created after listen alongside the scheduler
+  // delivery boundary, so register cleanup now and late-bind its handle below.
+  let designGateThresholdObserver: { close(): void } | null = null;
+  app.addHook('onClose', async () => designGateThresholdObserver?.close());
 
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
@@ -6349,7 +6386,6 @@ async function main(): Promise<void> {
         taskStore,
         threadStore,
         cicdRouter,
-        fetchPrStatus: (repo: string, pr: number) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
         conflictRouter,
         reviewFeedbackRouter,
         invokeTrigger,
@@ -6504,6 +6540,8 @@ async function main(): Promise<void> {
   // F253 Phase C: eval:qc provider is unconditionally wired (pure ctor, zero-baseline
   // metrics, no runtime deps). Phase C bootstrap → keep_observe verdicts.
   wiredPublishDomains.add('eval:qc');
+  wiredPublishDomains.add('eval:design-gate');
+  wiredPublishDomains.add('eval:trajectory-inspector');
   if (freshnessClosureStore) {
     wiredPublishDomains.add('eval:freshness');
   }
@@ -6553,11 +6591,50 @@ async function main(): Promise<void> {
     redis: redisClient ?? undefined,
     wiredPublishDomains,
     publishPrereqProbe,
+    triggerStore: redisClient
+      ? new (
+          await import('./infrastructure/harness-eval/domain/eval-domain-trigger-store.js')
+        ).RedisEvalDomainTriggerStore(redisClient)
+      : undefined,
   };
   taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
   taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));
   // F245 PR2: N-day cadence — eval:friction runs every-3d (not weekly)
   taskRunnerV2.register(createEvalDomainNDaySpec(evalScheduleOpts));
+
+  // F192 Phase I: replay the current F303 cumulative source map at startup and observe
+  // later durable YAML revisions through the same dispatcher/receipt plane as weekly cron.
+  // A missed/degraded watch is recovered by startup replay and the weekly time fallback.
+  const designGateTriggerProvider = designGateEpisodeSourceProvider;
+  const evalDomainTriggerStore = evalScheduleOpts.triggerStore;
+  if (designGateTriggerProvider && evalDomainTriggerStore) {
+    const { loadDesignGateThresholdDomain, observeDesignGateThresholdTrigger, startDesignGateThresholdObserver } =
+      await import('./infrastructure/harness-eval/design-gate/design-gate-threshold-trigger.js');
+    const designGateDomain = loadDesignGateThresholdDomain(evalScheduleOpts.harnessFeedbackRoot);
+    if (designGateDomain) {
+      designGateThresholdObserver = startDesignGateThresholdObserver({
+        sourceMapRoot: resolve(evalScheduleOpts.harnessFeedbackRoot, 'design-gate', 'source-maps'),
+        observe: () =>
+          observeDesignGateThresholdTrigger({
+            provider: designGateTriggerProvider,
+            domain: designGateDomain,
+            store: evalDomainTriggerStore,
+            deliver: schedulerDeliver,
+            invokeTrigger,
+            defaultUserId: evalScheduleOpts.defaultUserId,
+            wiredPublishDomains,
+            threadStore,
+            redis: redisClient ?? undefined,
+          }),
+        logger: {
+          info: (details, message) => app.log.info(details, message),
+          warn: (details, message) => app.log.warn(details, message),
+        },
+      });
+    } else {
+      app.log.info('[api] F192 Phase I: design-gate threshold observer disabled by domain registry');
+    }
+  }
 
   // F266: lifecycle reconciliation is Redis-gated. It only appends canonical
   // lifecycle facts; projections stay pure and no Git/GitHub mutation port is wired.

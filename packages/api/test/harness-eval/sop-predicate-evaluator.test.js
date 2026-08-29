@@ -677,8 +677,8 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 30 total rules in development.yaml (including ChatGPT Review governance)
-    assert.equal(results.length, 30, `expected 30 rules, got ${results.length}`);
+    // 31 total rules in development.yaml (including ChatGPT Review governance and F303 design-gate evidence)
+    assert.equal(results.length, 31, `expected 31 rules, got ${results.length}`);
 
     // 17 manual_only rules -> skipped (semantic governance requires external evidence)
     assert.equal(skipped.length, 17, `expected 17 skipped (manual_only), got ${skipped.length}`);
