@@ -5,7 +5,7 @@ topics: [quality, qc, merge-gate, review, ci, validation, telemetry, harness]
 doc_kind: spec
 created: 2026-06-25
 user_journey_exempt: "Pure internal quality tooling (pre-push hooks, CI classifier, eval domain) — no user-perceivable surface changes"
-tips_exempt: internal QC tooling — no user-visible capability change
+tips_exempt: renewed for synchronized exact-SHA QC coordination; no distinct user-visible capability or action
 ---
 
 # F253: Clowder AI QC Loop — 自动化质量门禁全链路

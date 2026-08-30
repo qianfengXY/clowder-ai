@@ -1,5 +1,4 @@
 ---
-feature_ids: [F306]
 related_features: [F049, F058, F076, F152, EXT-001]
 topics: [mission-hub, projects, backlog, workflow, external-projects, ui]
 doc_kind: spec
@@ -15,7 +14,9 @@ description_updated_at: 2026-08-25T08:30:00Z
 cvo_signoff: "2026-08-25 — sourceMessageId 0001787646630262-000070-97b500b9：备份当前 main 后开始改造；Mission Hub 直接看到 Cat Café 与 Traqen，功能一致，EXT 定制不在新一轮体现。"
 ---
 
-# F306: Mission Hub Project Workspaces — 项目工作区归一
+# EXT-002: Mission Hub Project Workspaces — 项目工作区归一
+
+> **Identity migration (2026-08-29):** 本功能于 2026-08-25 以本地 `F306` 完成交付；上游随后将 `F306` 分配给 Codex App Capability Parity。为保留两项功能且避免未来同步继续冲突，本地功能迁为 `EXT-002`。历史提交、PR、验收目录和消息中的 `F306` 坐标保持原样；extension catalog 的 `legacyIds` 只迁移标题精确匹配本功能的旧 Backlog/SOP 记录，不会别名化上游 F306。
 
 > **Status**: done | **Completed**: 2026-08-25 | **Owner**: 砚砚/CodeX (@cat-idwxwjba, GPT-5.6) | **Priority**: P0
 
@@ -23,7 +24,7 @@ Architecture cell: `mission-hub-projects`
 
 Map delta: implemented in `docs/architecture/ownership/cells/mission-hub-projects.md`
 
-Why: F049/F058 拥有 Feature 工作流，F076 首次登记外部项目但把它实现成与“功能列表/依赖全景”并列的特殊 Tab，EXT-001 又把 Desktop 定制入口叠在外部项目表面。F306 建立项目 registry 到统一工作区的投影边界；不接管 Feature 生命周期、Thread、Review、SOP 或 EXT-001 的业务真相。
+Why: F049/F058 拥有 Feature 工作流，F076 首次登记外部项目但把它实现成与“功能列表/依赖全景”并列的特殊 Tab，EXT-001 又把 Desktop 定制入口叠在外部项目表面。EXT-002 建立项目 registry 到统一工作区的投影边界；不接管 Feature 生命周期、Thread、Review、SOP 或 EXT-001 的业务真相。
 
 ## Why
 
@@ -57,7 +58,7 @@ Mission Hub
 
 EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是项目模型：
 
-- F306 默认项目工作区、项目导入表单和项目导航不展示 Desktop 开发闭环、EXT Feature 或 EXT 专属状态。
+- EXT-002 默认项目工作区、项目导入表单和项目导航不展示 Desktop 开发闭环、EXT Feature 或 EXT 专属状态。
 - 现有 EXT 源码、历史 backlog、Workflow SOP、Review 与 Desktop binding 均保留；本轮不删除、不迁移、不伪造完成。
 - EXT-001 可在未来以显式 opt-in 插件/适配器重新挂载，但不得重新定义项目、Feature 或工作流真相。
 
@@ -156,7 +157,7 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 新立 F306，而不是重开 F007 或扩 EXT-001 | F007 属于 Traqen，EXT-001 是定制 adapter；本次改变 Mission Hub 核心项目坐标 | 2026-08-25 |
+| KD-1 | 新立 EXT-002，而不是重开 F007 或扩 EXT-001 | F007 属于 Traqen，EXT-001 是定制 adapter；本次改变 Mission Hub 核心项目坐标 | 2026-08-25 |
 | KD-2 | Cat Café 作为内建项目显式呈现 | 让所有项目对等，同时保持现有无 `projectId` 数据兼容 | 2026-08-25 |
 | KD-3 | 默认工作区不渲染 EXT，底层历史保留 | 满足新一轮产品边界，同时遵守持久化与可恢复性 | 2026-08-25 |
 | KD-4 | 外部项目禁用无作用域 Feature-ID 猜测 | 安全和正确归因优先于不可靠的“功能看起来一样” | 2026-08-25 |
@@ -204,8 +205,8 @@ EXT-001 是这套实例曾经增加的 ChatGPT Desktop 定制适配器，不是�
 
 ```yaml
 close_gate_report:
-  feature_id: F306
-  spec_path: docs/features/F306-mission-hub-project-workspaces.md
+  feature_id: EXT-002
+  spec_path: docs/extensions/EXT-002-mission-hub-project-workspaces.md
   head_sha: "2ab1335c70f9bd29d1b3ee59b2c86cd280362418"
   report_date: 2026-08-25
   guardian: "搬砖工/GPT-5.6 Terra (cat-4v94tazw; non-author, non-reviewer)"
@@ -270,10 +271,10 @@ close_gate_report:
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| **Design Gate** | `docs/design/F306-mission-hub-project-workspaces.md` | 在地双层导航与关键状态 |
+| **Design Gate** | `docs/design/EXT-002-mission-hub-project-workspaces.md` | 在地双层导航与关键状态 |
 | **Plan** | `feature-specs/2026-08-25-mission-hub-project-workspaces.md` | TDD 实施计划 |
 | **Pre-change backup** | `/Volumes/WorkSSD/clowder-ai-history/2026-08-25-pre-mission-hub-project-workspaces/` | `bb9e8c4e` 的完整 bundle + 校验说明 |
 | **Reflection** | `project-reflections/2026-08-25-f306-mission-hub-project-workspaces-capsule.md` | 实施、验收与流程反思 |
-| **Harness feedback** | `docs/harness-feedback/reviews/F306-feature-close-trace.md` | remote 坐标与 review settlement trace anomaly |
+| **Harness feedback** | `docs/harness-feedback/reviews/F306-feature-close-trace.md` | 历史 F306 坐标与 review settlement trace anomaly |
 | **Acceptance — blocked** | `project-evidence/F306-acceptance-2026-08-25/` | 初次守护发现 P1/P2 的历史证据 |
 | **Acceptance — approved** | `project-evidence/F306-acceptance-2026-08-25-final/` | 修复后 exact-merge 隔离浏览器证据 |

@@ -1,5 +1,7 @@
 # F306 Feature-Close 独立愿景守护验收报告
 
+> **Historical identity:** 本验收针对 2026-08-25 当时的本地 F306；该功能于 2026-08-29 迁为 `EXT-002`。目录名、merge SHA 与证据内容保持历史原样。
+
 - **Verdict**: **BLOCKED（1 × P1）**
 - **守护猫**: 布偶猫/Claude (@fable-5, claude-fable-5) — 非作者（砚砚）、非 code reviewer（Kimi），独立性成立
 - **验收对象**: fork/main@`6e3c7e965271d93341f8629f0dde30beea621f46`（PR qianfengXY/clowder-ai#9 squash merge）

@@ -9,7 +9,7 @@ description_generated_by: cat-idwxwjba@gpt-5.6
 description_generated_at: "2026-08-25T01:45:00-07:00"
 doc_kind: architecture
 created: 2026-08-25
-canonical_features: [F049, F058, F076, F306]
+canonical_features: [F049, F058, F076, EXT-002]
 code_anchors:
   - packages/shared/src/types/external-project.ts
   - packages/shared/src/types/backlog.ts
@@ -24,12 +24,12 @@ doc_anchors:
   - docs/features/F049-mission-control-backlog-center.md
   - docs/features/F058-mission-control-enhancements.md
   - docs/features/F076-mission-hub-cross-project.md
-  - docs/features/F306-mission-hub-project-workspaces.md
-  - docs/design/F306-mission-hub-project-workspaces.md
+  - docs/extensions/EXT-002-mission-hub-project-workspaces.md
+  - docs/design/EXT-002-mission-hub-project-workspaces.md
   - feature-specs/2026-08-25-mission-hub-project-workspaces.md
 static_scan_hints: [ExternalProject, projectId, ProjectWorkspaceRef, MissionControlPage, ProjectWorkspaceNav, import-active-features, import-backlog]
 cited_by:
-  - {feature: F306, date: 2026-08-25, delta: "project becomes Mission Hub's first-class coordinate; ExternalProject registry leaves the Desktop adapter boundary"}
+  - {feature: EXT-002, date: 2026-08-25, delta: "project becomes Mission Hub's first-class coordinate; ExternalProject registry leaves the Desktop adapter boundary"}
 ---
 
 # Mission Hub Project Workspaces

@@ -12,8 +12,8 @@ export interface LegacyExtensionMigrationResult {
 
 /**
  * Rename only legacy records whose ID and exact imported title both identify an
- * extension catalog entry. This deliberately does not install a global F289
- * alias: upstream now owns F289 for Canonical Data Root.
+ * extension catalog entry. This deliberately does not install global aliases
+ * for legacy F IDs because upstream may own the same IDs for other features.
  */
 export async function migrateLegacyExtensionItems(input: {
   readonly items: readonly BacklogItem[];

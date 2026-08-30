@@ -1,4 +1,4 @@
-# F306 Mission Hub Project Workspaces — Implementation Plan
+# EXT-002 Mission Hub Project Workspaces — Implementation Plan
 
 > **For 砚砚/CodeX:** execute in `/Volumes/WorkSSD/cat-cafe-mission-hub-project-workspaces` using the worktree, TDD, console-dev, browser-preview, quality-gate, request-review and merge-gate workflows. Development data uses Redis 6398 only; never run unmerged code in `/Volumes/WorkSSD/cat-cafe-runtime` or against Redis 6399.
 
@@ -39,8 +39,8 @@ quick create → choose ownership-checked endpoint → reload same scope
 
 **Files**
 
-- Create `docs/features/F306-mission-hub-project-workspaces.md`
-- Create `docs/design/F306-mission-hub-project-workspaces.md`
+- Create `docs/extensions/EXT-002-mission-hub-project-workspaces.md`
+- Create `docs/design/EXT-002-mission-hub-project-workspaces.md`
 - Create `docs/architecture/ownership/cells/mission-hub-projects.md`
 - Modify `docs/architecture/ownership/cells/desktop-development-loop.md`
 - Modify `docs/features/F076-mission-hub-cross-project.md`
@@ -153,7 +153,7 @@ Commit and push this docs-only truth update on `main` before creating the code w
 
 - reduce modal state to canonical project registration fields;
 - remove `useCatData` and desktop form builder dependency from this entry point;
-- leave legacy `ExternalProjectTab`, `DesktopDevelopmentPanel` and API compatibility paths unmodified but unreachable from F306 navigation.
+- leave legacy `ExternalProjectTab`, `DesktopDevelopmentPanel` and API compatibility paths unmodified but unreachable from EXT-002 navigation.
 
 ## Task 5 — Focused verification and refactor
 
@@ -194,8 +194,8 @@ Capture screenshots/notes in the quality-gate evidence; do not mutate production
 
 ## Task 7 — Quality and independent review
 
-- Run `quality-gate` against every F306 AC.
+- Run `quality-gate` against every EXT-002 AC.
 - Run `fresh-context-review` if selected by risk routing.
 - Route exact HEAD to a non-author reviewer with emphasis on cross-project leakage, ownership validation, stale async state and EXT history preservation.
 - Resolve all P1/P2 findings through `receive-review`, rerun focused gates, then use `merge-gate`.
-- After merge, verify the merged revision in an isolated acceptance environment before updating F306 to done.
+- After merge, verify the merged revision in an isolated acceptance environment before updating EXT-002 to done.

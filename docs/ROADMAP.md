@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Clowder AI Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-08-25（F306 Mission Hub project workspaces completed）
+> 维护者：三猫 | 最后更新：2026-08-29（本地 F306 Mission Hub project workspaces 迁为 EXT-002；上游 F306 保持原号）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。

@@ -1,6 +1,6 @@
 ---
 name: receive-review
-tips_exempt: harness-internal review re-entry convention; no distinct end-user capability surface
+tips_exempt: renewed for synchronized internal review re-entry semantics; no distinct end-user capability or action
 description: >
   处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意），并按 engagement mode 收口。
   Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。

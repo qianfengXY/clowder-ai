@@ -1,12 +1,14 @@
 ---
-feature_ids: [F306]
+feature_ids: [EXT-002]
 related_features: [F056, F076, F305]
 topics: [mission-hub, project-workspace, interaction-design]
 doc_kind: design
 created: 2026-08-25
 ---
 
-# F306 Mission Hub Project Workspaces — Design Gate
+# EXT-002 Mission Hub Project Workspaces — Design Gate
+
+> **Legacy identity:** 本设计在 2026-08-25 以本地 `F306` 通过；2026-08-29 因上游同号功能进入 main，canonical identity 迁为 `EXT-002`。
 
 > **Status**: approved for implementation by operator direction | **Owner**: 砚砚/CodeX (@cat-idwxwjba, GPT-5.6)
 
@@ -84,7 +86,7 @@ operator 已明确主任务：Mission Hub 第一眼直接看到项目，Cat Caf�
 
 ## Explicit non-surfaces
 
-F306 默认页面不呈现：
+EXT-002 默认页面不呈现：
 
 - `开发闭环`；
 - ChatGPT Desktop repository/default branch；

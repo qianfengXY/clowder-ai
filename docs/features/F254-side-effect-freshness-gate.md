@@ -6,7 +6,7 @@ topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, sid
 doc_kind: spec
 created: 2026-06-27
 updated: 2026-08-12
-tips_exempt: true
+tips_exempt: renewed for synchronized internal side-effect freshness and custody gates; no user-operable capability
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截

@@ -5,7 +5,7 @@ topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
 updated: 2026-08-26
-tips_exempt: renewed for the Case E16 product-coordinate and authorization lesson; the typed MCP action schema remains the only operable surface and no user action changed
+tips_exempt: renewed for the combined local A2A quality and upstream Case E16 authorization contract; typed MCP actions remain the only operable surface
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"

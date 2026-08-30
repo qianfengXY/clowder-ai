@@ -141,15 +141,15 @@
     "id": "capability-mission-hub-project-workspaces",
     "kind": "capability",
     "sourceRef": {
-      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "path": "docs/extensions/EXT-002-mission-hub-project-workspaces.md",
       "anchor": "Primary — 在 Mission Hub 选择项目并推进 Feature"
     },
     "structureSource": {
-      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "path": "docs/extensions/EXT-002-mission-hub-project-workspaces.md",
       "anchor": "核心模型"
     },
     "bodySource": {
-      "path": "docs/features/F306-mission-hub-project-workspaces.md",
+      "path": "docs/extensions/EXT-002-mission-hub-project-workspaces.md",
       "anchor": "Supporting — 导入新项目"
     },
     "contexts": ["feature_dev", "long_running"],
