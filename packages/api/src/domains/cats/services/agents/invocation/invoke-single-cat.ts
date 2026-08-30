@@ -115,11 +115,11 @@ import {
   recordContextProjectionFinalGeneration,
   recordContextProjectionLedgerOutcome,
 } from '../../session/context-continuity-telemetry.js';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF,
   encodeMemoryCueSourceRef,
 } from '../../session/request-generation-source-policy.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';

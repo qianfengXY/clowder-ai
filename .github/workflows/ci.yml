@@ -61,7 +61,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
+          # The serial fallback intentionally skips pnpm install. Enabling the
+          # setup-node cache here makes its post-step fail when no store exists.
       - id: contract
         name: Detect exact public shard contract
         shell: bash
