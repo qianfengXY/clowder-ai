@@ -86,6 +86,37 @@ replacement verdict or reopen a stale provider invocation.
 This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
 
 The same repair boundary also owns two dispatch invariants exposed by the post-merge A→B→A dogfood (`[thread-id]#0001786350407910-000095-8739ed4a`): a successful same-thread `post_message` callback is the one carrier for that source/target and must be suppressed from the later route-serial line-start scan; releasing the invocation slot must have a bounded path to `notifyQueueCompletion` even if F194/F224 terminal bookkeeping stalls. The normal ordering remains terminal truth and continuation commit before queue drain; a 5-second idempotent watchdog is only the liveness fallback. Ordinary inline dispatches now receive their completion producer on the first child and fail typed without spawning a stale `routing_guard` child when the producer is omitted.
+
+#### Managed-command orphan carrier convergence (2026-08-29)
+
+The F006 live incident exposed one remaining cross-store terminal gap. A `wakeWhen` command had already
+finished and its exact holder invocation failed without an invocation-bound disposition. Its durable
+Queue target therefore remained `pending + failed`; later the single-slot hold lifecycle lost the
+producer `DynamicTaskDef`. Startup recovery saw only Queue custody and restored the carrier, while the
+managed-command recovery sweep saw only dynamic tasks and could no longer find an owner. The command
+must never be executed again merely to clean up that record.
+
+This remains a bounded F167 S.1-c repair across the existing `ball-custody` and `dispatch` cells. It
+adds no store, Queue, receipt ledger, or lifecycle owner. The producer task stays authoritative while
+it exists; MessageStore Queue custody stays authoritative for the carrier. Every producer-retirement
+path must terminalize the exact Queue carrier before removing or disabling the task. Startup may
+terminalize a historical carrier only when its source is an exact server-authored managed-hold wake,
+its producer task is absent, and restart reconciliation has already excluded a live child execution.
+
+Acceptance criteria:
+
+- **AC-MCO-1:** Bounded missing-disposition escalation terminalizes the exact failed Queue target before
+  disabling the producer task; if carrier retirement cannot commit, the task remains recoverable and
+  the sweep retries later.
+- **AC-MCO-2:** Single-slot hold replacement may remove an old producer only after its queued/failed
+  managed-command carrier is durably withdrawn. An in-flight carrier keeps its producer until the
+  current invocation settles; a retirement failure rolls back the newly registered replacement.
+- **AC-MCO-3:** Startup terminalizes an exact managed-hold Queue carrier whose producer task is absent,
+  and does not restore it into `InvocationQueue`. Ordinary connectors, malformed provenance, live
+  children, and managed holds whose task still exists remain unchanged.
+- **AC-MCO-4:** Terminalization is revision-fenced and idempotent, preserves the failed attempt as
+  receipt history, never reruns the completed command, and converges after crash windows without
+  mutating runtime configuration or production data directly.
 3. **Backward compatible**：不退化 4.6 等已正常工作模型的体验。
 4. **极简**：只加运行时刹车（压制坏直觉）和认知路径工程（对齐好直觉），不加认知脚手架（替模型思考）。
 
