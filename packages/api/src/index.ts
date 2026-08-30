@@ -5881,6 +5881,7 @@ async function main(): Promise<void> {
       invocationRecordStore,
       getInvokeTrigger: () => invokeTrigger,
       ...createManagedCommandWakeQueueAdapter({
+        now: Date.now,
         dynamicTaskStore,
         messageStore,
         invocationRecordStore,

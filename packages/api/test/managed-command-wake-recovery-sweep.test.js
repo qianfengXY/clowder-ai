@@ -764,7 +764,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     const h = makeHarness({ task, messages: [staleMessage] });
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
 
-    assert.equal(await sweep.retireCarrier([staleMessage.id], 'withdrawn'), 0);
+    assert.equal(await sweep.retireProducerTasksForMessages([staleMessage.id], 'withdrawn'), 0);
     assert.equal(h.tasks.get(task.id).enabled, true);
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'active');
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.messageId, 'message-current');
@@ -791,7 +791,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     h.tasks.set(foreign.id, foreign);
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
 
-    assert.deepEqual(await sweep.retireThread('thread-1', 'user-1', 'force_reset'), {
+    assert.deepEqual(await sweep.retireProducerTasksForThread('thread-1', 'user-1', 'force_reset'), {
       retired: 1,
       messageIds: ['message-owned'],
     });

@@ -102,6 +102,7 @@ test('managed wake adapter retries one exact failed disposition attempt under it
     },
   };
   const adapter = createManagedCommandWakeQueueAdapter({
+    now: () => startedAt + 4_000,
     dynamicTaskStore: { getById: (id) => (id === taskId ? task : null) },
     messageStore,
     invocationRecordStore: {
@@ -190,6 +191,8 @@ test('managed wake adapter retries one exact failed disposition attempt under it
   const retired = messageStore.getById(message.id);
   assert.equal(retired.deliveryStatus, 'delivered');
   assert.equal(retired.queueCustody.status, 'terminal');
+  assert.equal(retired.deliveredAt, startedAt + 4_000);
+  assert.equal(retired.queueCustody.updatedAt, startedAt + 4_000);
   assert.deepEqual(retired.queueCustody.pendingTargetCats, []);
   assert.deepEqual(retired.queueCustody.withdrawnByCatIds, [catId]);
   assert.deepEqual(

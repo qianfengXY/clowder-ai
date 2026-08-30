@@ -102,7 +102,10 @@ export class ManagedCommandWakeRecoverySweep {
     }
     return { scanned: candidates.length + retiredTaskIds.length, recovered, pending };
   }
-  async retireCarrier(messageIds: readonly string[], reason: ManagedCommandWakeCarrierTerminalReason): Promise<number> {
+  async retireProducerTasksForMessages(
+    messageIds: readonly string[],
+    reason: ManagedCommandWakeCarrierTerminalReason,
+  ): Promise<number> {
     const getById = this.deps.messageStore.getById?.bind(this.deps.messageStore);
     if (!getById) return 0;
     let retired = 0;
@@ -138,7 +141,7 @@ export class ManagedCommandWakeRecoverySweep {
     if (outcome !== 'retired') return outcome;
     return this.consume(parsed, undefined, 'withdrawn') === 'recovered' ? 'retired' : 'unavailable';
   }
-  async retireThread(
+  async retireProducerTasksForThread(
     threadId: string,
     userId: string,
     reason: ManagedCommandWakeCarrierTerminalReason,

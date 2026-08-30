@@ -443,6 +443,171 @@ describe('F254 Queue restart custody', () => {
     assert.equal(second.messagesTerminalized, 0);
   });
 
+  test('defers an exact taskless managed-command carrier while its child execution is still running', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        entryId: 'entry-live-managed',
+        ownerUserId: 'user-1',
+        ownerAuthProvenance: 'strict',
+        awakenedInvocationIdByCatId: { opus: 'invocation-live-managed' },
+        awakenedAtByCatId: { opus: 1_100 },
+        carrierStateByTargetCatId: { opus: { status: 'queued' } },
+      }),
+      {
+        userId: 'scheduler',
+        catId: null,
+        source: {
+          connector: 'hold-ball',
+          label: 'managed wake',
+          icon: '⏱️',
+          meta: {
+            wakeWhen: true,
+            taskId: 'hold-ball-missing-producer',
+            threadId: 'thread-1',
+            catId: 'opus',
+          },
+        },
+      },
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      dynamicTaskStore: { getById: () => null },
+      turnExecutions: [
+        turnExecution({
+          invocationId: 'invocation-live-managed',
+          status: 'running',
+          endedAt: undefined,
+          causal: { triggerMessageId: message.id, coveredMessageIds: [message.id] },
+        }),
+      ],
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 0);
+    assert.equal(result.messagesTerminalized, 0);
+    assert.equal(result.messagesFailed, 0);
+    assert.equal(messageStore.getById(message.id).deliveryStatus, 'queued');
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-live-managed'), null);
+  });
+
+  test('retires stale persisted processing state when no exact child execution is running', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        entryId: 'entry-stale-processing-managed',
+        status: 'processing',
+        ownerUserId: 'user-1',
+        ownerAuthProvenance: 'strict',
+        processingStartedAt: 1_100,
+        awakenedInvocationIdByCatId: { opus: 'invocation-stale-managed' },
+        awakenedAtByCatId: { opus: 1_100 },
+        carrierStateByTargetCatId: { opus: { status: 'processing', processingStartedAt: 1_100 } },
+      }),
+      {
+        userId: 'scheduler',
+        catId: null,
+        source: {
+          connector: 'hold-ball',
+          label: 'managed wake',
+          icon: '⏱️',
+          meta: {
+            wakeWhen: true,
+            taskId: 'hold-ball-missing-producer',
+            threadId: 'thread-1',
+            catId: 'opus',
+          },
+        },
+      },
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      dynamicTaskStore: { getById: () => null },
+      turnExecutions: [
+        turnExecution({
+          invocationId: 'invocation-stale-managed',
+          status: 'failed',
+          terminalReason: 'provider_failed',
+        }),
+      ],
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 0);
+    assert.equal(result.messagesTerminalized, 1);
+    const retired = messageStore.getById(message.id);
+    assert.equal(retired.deliveryStatus, 'delivered');
+    assert.equal(retired.queueCustody.status, 'terminal');
+    assert.deepEqual(retired.queueCustody.withdrawnByCatIds, ['opus']);
+    assert.deepEqual(retired.queueCustody.failedByCatIds, []);
+  });
+
+  test('defers taskless managed-command retirement when exact child truth is missing or unavailable', async () => {
+    const truthSources = [
+      undefined,
+      {
+        async get() {
+          throw new Error('turn execution store unavailable');
+        },
+      },
+    ];
+    for (const turnExecutionStore of truthSources) {
+      const messageStore = createMessageStore();
+      const message = appendQueued(
+        messageStore,
+        custody({
+          entryId: 'entry-unavailable-managed',
+          ownerUserId: 'user-1',
+          ownerAuthProvenance: 'strict',
+          awakenedInvocationIdByCatId: { opus: 'invocation-unavailable-managed' },
+          awakenedAtByCatId: { opus: 1_100 },
+          carrierStateByTargetCatId: { opus: { status: 'processing', processingStartedAt: 1_100 } },
+        }),
+        {
+          userId: 'scheduler',
+          catId: null,
+          source: {
+            connector: 'hold-ball',
+            label: 'managed wake',
+            icon: '⏱️',
+            meta: {
+              wakeWhen: true,
+              taskId: 'hold-ball-missing-producer',
+              threadId: 'thread-1',
+              catId: 'opus',
+            },
+          },
+        },
+      );
+      const invocationQueue = new InvocationQueue();
+      const reconciler = new QueuedMessageCustodyStartupReconciler({
+        messageStore,
+        invocationQueue,
+        invocationRecordStore: createRecordStore(),
+        ...(turnExecutionStore ? { turnExecutionStore } : {}),
+        dynamicTaskStore: { getById: () => null },
+        now: () => 2_000,
+        log: { info() {}, warn() {} },
+      });
+
+      const result = await reconciler.reconcile();
+
+      assert.equal(result.entriesRestored, 0);
+      assert.equal(result.messagesTerminalized, 0);
+      assert.equal(result.messagesFailed, 1);
+      assert.equal(messageStore.getById(message.id).deliveryStatus, 'queued');
+      assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-unavailable-managed'), null);
+    }
+  });
+
   test('does not classify a task-like ordinary connector as an orphan managed command', async () => {
     const messageStore = createMessageStore();
     const message = appendQueued(messageStore, custody({ ownerUserId: 'user-1' }), {

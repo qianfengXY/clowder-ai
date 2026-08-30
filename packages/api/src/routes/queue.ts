@@ -48,8 +48,8 @@ import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './ac
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
 interface ManagedCommandWakeRecoveryLike {
-  retireCarrier(messageIds: readonly string[], reason: 'withdrawn'): Promise<number>;
-  retireThread(
+  retireProducerTasksForMessages(messageIds: readonly string[], reason: 'withdrawn'): Promise<number>;
+  retireProducerTasksForThread(
     threadId: string,
     userId: string,
     reason: 'force_reset',
@@ -225,7 +225,7 @@ function queueEntryMessageIds(entry: Pick<QueueEntry, 'messageId' | 'mergedMessa
 async function retireWithdrawnManagedWake(opts: QueueRoutesOptions, entry: QueueEntry): Promise<void> {
   const recovery = opts.getManagedCommandWakeRecovery?.();
   if (!recovery) return;
-  await recovery.retireCarrier(queueEntryMessageIds(entry), 'withdrawn');
+  await recovery.retireProducerTasksForMessages(queueEntryMessageIds(entry), 'withdrawn');
 }
 
 const moveBodySchema = z.object({
@@ -1367,7 +1367,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
     const managedWakeRetirement = await opts
       .getManagedCommandWakeRecovery?.()
-      ?.retireThread(threadId, guard.userId, 'force_reset');
+      ?.retireProducerTasksForThread(threadId, guard.userId, 'force_reset');
     if (managedWakeRetirement && managedWakeRetirement.messageIds.length > 0) {
       const managedMessageIds = new Set(managedWakeRetirement.messageIds);
       const managedCarriers = invocationQueue

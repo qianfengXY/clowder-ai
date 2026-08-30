@@ -14,6 +14,7 @@ import {
 } from './managed-command-wake-lifecycle.js';
 
 interface ManagedCommandWakeQueueAdapterDeps {
+  readonly now: () => number;
   readonly dynamicTaskStore: Pick<DynamicTaskStore, 'getById'>;
   readonly messageStore: Pick<IMessageStore, 'getById' | 'transitionQueueCustody'>;
   readonly invocationRecordStore: Pick<IInvocationRecordStore, 'get'>;
@@ -138,7 +139,7 @@ export function createManagedCommandWakeQueueAdapter(
 
       let outcome: 'retired' | 'unavailable';
       try {
-        outcome = await retireManagedCommandWakeCarrierCustody(deps.messageStore, message, identity, Date.now());
+        outcome = await retireManagedCommandWakeCarrierCustody(deps.messageStore, message, identity, deps.now());
       } catch {
         deps.invocationQueue.restoreDurableEntry(entry);
         return 'unavailable';
