@@ -252,11 +252,11 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
   it('force-reset retires active managed producers and withdraws their exact Queue carriers', async () => {
     const events = [];
     const managedCommandWakeRecovery = {
-      async retireThread(threadId, userId, reason) {
+      async retireProducerTasksForThread(threadId, userId, reason) {
         events.push(`retire:${threadId}:${userId}:${reason}`);
         return { retired: 1, messageIds: ['message-managed-force-reset'] };
       },
-      async retireCarrier() {
+      async retireProducerTasksForMessages() {
         throw new Error('force-reset must use the thread-wide producer fence');
       },
     };

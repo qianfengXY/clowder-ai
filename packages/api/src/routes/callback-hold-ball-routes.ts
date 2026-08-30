@@ -24,6 +24,7 @@ import {
   createInitialManagedCommandWakeProjection,
   ManagedCommandWakeRecoverySweep,
   type RecordManagedCommandCompletionInput,
+  readManagedCommandWakeProjection,
 } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
 import {
   ManagedHoldDispositionError,
@@ -333,7 +334,12 @@ export interface HoldBallRouteDeps {
   taskStore?: CrossStoreTaskStore;
   invocationRecordStore: IInvocationRecordStore;
   managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recordCompletion'> &
-    Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion' | 'recordRetiredCompletion'>>;
+    Partial<
+      Pick<
+        ManagedCommandWakeRecoverySweep,
+        'recordCancelledCompletion' | 'recordRetiredCompletion' | 'retireReplacedTask'
+      >
+    >;
   /**
    * F167 Phase P: invocation trigger for wakeWhen command completion.
    * When provided, wakeWhen command results are delivered via invokeTrigger.
@@ -789,6 +795,49 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return { error: 'Failed to register hold wake with scheduler' };
     }
 
+    // A published managed-command message owns durable Queue custody. The old
+    // producer may be deleted only after that exact carrier is terminal, or it
+    // becomes unrecoverable and startup will resurrect it forever. A carrier
+    // already processing keeps its producer until the exact child settles.
+    const priorHoldsToRemove = [];
+    let retainedInFlightProducer = false;
+    for (const prior of pendingHolds) {
+      const command = readManagedCommandWakeProjection(prior);
+      if (!command?.messageId) {
+        priorHoldsToRemove.push(prior);
+        continue;
+      }
+      let retirement: 'retired' | 'in_flight' | 'unavailable' | 'missing' = 'unavailable';
+      try {
+        retirement = (await deps.managedCommandWakeRecovery?.retireReplacedTask?.(prior.id)) ?? 'unavailable';
+      } catch (err) {
+        log.warn(
+          { err, threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId },
+          'F167: managed-command carrier retirement failed before replacement',
+        );
+      }
+      if (retirement === 'retired' || retirement === 'missing') {
+        priorHoldsToRemove.push(prior);
+        continue;
+      }
+      if (retirement === 'in_flight') {
+        retainedInFlightProducer = true;
+        continue;
+      }
+
+      taskRunner.unregister(taskId);
+      dynamicTaskStore.remove(taskId);
+      log.warn(
+        { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId },
+        'F167: managed-command replacement rejected because exact carrier retirement is unavailable',
+      );
+      reply.status(503);
+      return {
+        error: 'Prior managed-command carrier could not be retired safely',
+        code: 'MANAGED_COMMAND_CARRIER_RETIREMENT_UNAVAILABLE',
+      };
+    }
+
     // F280: establish managed-command cancellation admission in the same
     // synchronous turn as scheduler registration. Any later await (including
     // visibility persistence) can now race only through this canonical slot.
@@ -818,11 +867,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     }
     // prepareWakeWhenRunner already replaces an active command synchronously;
     // timer-only replacements still need to cancel the prior managed command here.
-    if (pendingHolds.length > 0 && !preparedWakeRunner) {
+    if (priorHoldsToRemove.length > 0 && !preparedWakeRunner && !retainedInFlightProducer) {
       cancelWakeWhenRunner(threadId, catIdStr);
     }
     const cancelNow = Date.now();
-    for (const prior of pendingHolds) {
+    for (const prior of priorHoldsToRemove) {
       const priorFireAt = (prior.trigger as { fireAt?: number }).fireAt ?? cancelNow;
       let wakeBucket: string | undefined;
       try {

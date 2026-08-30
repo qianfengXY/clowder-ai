@@ -17,6 +17,7 @@ code_anchors:
   - packages/api/src/domains/cats/services/agents/invocation/queue-entry-settlement.ts
   - packages/api/src/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
+  - packages/api/src/domains/ball-custody/managed-command-wake-carrier-retirement.ts
   - packages/api/src/domains/ball-custody/ActionSuccessorRecoverySweep.ts
   - packages/api/src/domains/ball-custody/turn-custody-wake-provenance.ts
   - packages/api/src/domains/ball-custody/wait-continuation-carrier.ts
@@ -49,6 +50,7 @@ doc_anchors:
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F177-harness-update.md
   - docs/features/F167-a2a-chain-quality.md
+  - feature-specs/2026-08-29-f167-managed-command-orphan-carrier-recovery.md
   - feature-specs/2026-07-11-f167-phase-s-action-successor-single-flight.md
   - docs/features/F175-unified-message-queue.md
   - docs/features/F185-dispatch-busy-gate-unification.md
@@ -68,6 +70,7 @@ doc_anchors:
   - feature-specs/2026-08-12-1291-gate5-retry-revalidation.md
 static_scan_hints: [TurnExecutionRecord, TurnExecutionStore, RedisTurnExecutionStore, TurnExecutionStartupReconciler, executionKind, auxiliaryTurnExecutions, InvocationQueue, QueueProcessor, InvocationRecordStore, RedisInvocationRecordStore, WaitContinuationCarrierV1, waitContinuationCarrier, queuedAttemptIdByCatId, QueueTargetAttempt, targetAttempts, resolveQueueEntrySettlement, QueueCustodyReplacementProof, CollaborationContinuityCapsule, dispatch_handled_continuation, QueuedMessageCustody, QueueBodyExposure, QueueMessageReceipt, QueueMessageReceiptProjection, messageReceipts, QueueReceiptTarget, QueueReminderAttempt, QueuedMessageCustodyCoordinator, QueuedMessageCustodyStartupReconciler, projectQueueReceipt, transitionQueueCustody, restoreDurableEntry, InvocationTracker, ConnectorInvokeTrigger, resolveThreadAccess, actionSuccessorFence, actionLeaseId, actionGeneration, freshnessClosureId, freshnessRequiredFrontierMessageId, freshnessSupplementId, readOnlyToolPolicy, busy, priority, autoExecute]
 cited_by:
+  - {feature: F167-managed-command-orphan-carrier-recovery, date: 2026-08-29, delta: startup terminalizes only an exact scheduler-authored single-target managed wake whose task producer is absent; failed attempts remain append-only, ordinary connectors and processing carriers retain existing recovery, and nonterminal orphan custody is never restored as actionable Queue work}
   - {feature: F295-post-close-thread-admission, date: 2026-08-22, delta: active-execution read and exact-cancel reuse canonical owner/default/user-index/external-anchor thread admission before liveness lookup while retaining masked shared occupancy and execution-principal control fences}
   - {feature: F295, date: 2026-08-13, delta: one project-scoped read projection joins canonical live invocation truth with existing managed-command receipts; every displayed execution carries thread, kind, exact identity and an identity-fenced cancel target or an explicit non-cancelable reason}
   - {feature: issue-1291-gate6-batch-steer, date: 2026-08-13, delta: Batch Steer accepts only an exact allowlist of compatible ordinary-user entries for one cat; Queue reserves the complete set before one preempt and QueueProcessor creates one replacement invocation without F175 absorbing unselected neighbors}

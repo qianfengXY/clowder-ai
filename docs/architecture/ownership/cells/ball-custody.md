@@ -19,6 +19,7 @@ code_anchors:
   - packages/api/src/domains/ball-custody/ActionSuccessorRecoverySweep.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
   - packages/api/src/domains/ball-custody/managed-command-wake-lifecycle.ts
+  - packages/api/src/domains/ball-custody/managed-command-wake-carrier-retirement.ts
   - packages/api/src/domains/ball-custody/hold-ball-access-policy.ts
   - packages/api/src/routes/callback-hold-ball-cancel-routes.ts
   - packages/api/src/domains/ball-custody/TurnCustodyProjectionService.ts
@@ -62,6 +63,7 @@ doc_anchors:
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F167-a2a-chain-quality.md
   - feature-specs/2026-08-18-f167-hold-rescue-authorization.md
+  - feature-specs/2026-08-29-f167-managed-command-orphan-carrier-recovery.md
   - feature-specs/2026-07-11-f167-phase-s-action-successor-single-flight.md
   - feature-specs/2026-07-16-f167-s1-phase-t-custody-cutover.md
   - docs/features/F233-ball-custody-observability.md
@@ -78,6 +80,7 @@ doc_anchors:
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
 static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, HoldAccessRole, resolveHoldAccess, scheduleMutationAuditStore, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, WaitContinuationRetryPreflight, RetryAuthorityDecision, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, buildHandedEvent, ball.dispatch_dispositioned, dispatch_handled_continuation, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
 cited_by:
+  - {feature: F167-managed-command-orphan-carrier-recovery, date: 2026-08-29, delta: bounded missing-disposition escalation and same-slot replacement must durably retire the exact single-target Queue carrier before disabling or deleting its producer; in-flight and unavailable retirement preserve producer ownership, and no new ledger is introduced}
   - {feature: F167-hold-rescue-authorization, date: 2026-08-18, delta: verified trigger principal, exact-thread collaborator, and configured operator become distinct hold access roles; collaborators retain rescue cancel but receive only a safe lifecycle summary, while exact task deletion and actor/owner audit commit atomically through the existing scheduler store}
   - {feature: F295, date: 2026-08-13, delta: active managed-command receipts are projected as cancelable executions without becoming a new lifecycle ledger; DELETE is fenced by exact taskId so an old hold bubble cannot cancel its replacement}
   - {feature: F280-Gate-5, date: 2026-08-12, delta: explicit retry reads the stored wait carrier for UX preflight, then atomically compares the raw Task/action-lease witness and Message custody revisions in the same commit that appends the attempt; stale witnesses and legacy unattributed agent work fail closed}

@@ -51,6 +51,8 @@ function makeHarness(options = {}) {
   const triggerCalls = [];
   const retryEventCarrierCalls = [];
   const retryEventCarrierOutcomes = [...(options.retryEventCarrierOutcomes ?? ['retried'])];
+  const retireEventCarrierCalls = [];
+  const retireEventCarrierOutcomes = [...(options.retireEventCarrierOutcomes ?? ['retired'])];
   const invocationRecords = new Map();
   const unregistered = [];
   let eventCarrier = options.eventCarrier;
@@ -119,6 +121,10 @@ function makeHarness(options = {}) {
           },
         }
       : {}),
+    retireEventCarrier: async (input) => {
+      retireEventCarrierCalls.push(input);
+      return retireEventCarrierOutcomes.shift() ?? 'unavailable';
+    },
     now: () => now,
     dispatchedCarrierGraceMs: 1_000,
   };
@@ -129,6 +135,7 @@ function makeHarness(options = {}) {
     appended,
     triggerCalls,
     retryEventCarrierCalls,
+    retireEventCarrierCalls,
     invocationRecords,
     unregistered,
     setNow: (value) => {
@@ -492,6 +499,15 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(managed.dispositionEscalatedAt, 10_000);
     assert.deepEqual(h.unregistered, [task.id]);
     assert.equal(h.retryEventCarrierCalls.length, 1, 'exhaustion escalates instead of adding another attempt');
+    assert.deepEqual(h.retireEventCarrierCalls, [
+      {
+        taskId: task.id,
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'codex-sol',
+        messageId: 'message-managed',
+      },
+    ]);
   });
 
   test('uses durable Queue attempt sequence when restart loses the task-side retry audit', async () => {
@@ -521,6 +537,41 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
     assert.equal(h.retryEventCarrierCalls.length, 0, 'a durable successor attempt consumes the bounded retry');
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'escalated');
+  });
+
+  test('keeps the producer recoverable when bounded escalation cannot retire its exact Queue carrier', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      messageId: 'message-managed',
+    };
+    const h = makeHarness({
+      task,
+      eventCarrier: {
+        state: 'failed',
+        attemptId: 'entry-managed:codex-sol:2',
+        attemptSequence: 2,
+        invocationId: 'invocation-missing-2',
+        errorCode: 'managed_hold_disposition_missing',
+      },
+      retireEventCarrierOutcomes: ['unavailable', 'retired'],
+    });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.tasks.get(task.id).enabled, true);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'active');
+    assert.deepEqual(h.unregistered, []);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.tasks.get(task.id).enabled, false);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'escalated');
+    assert.equal(h.retireEventCarrierCalls.length, 2);
   });
 
   test('does not retry a failed managed carrier without the missing-disposition error code', async () => {
@@ -713,7 +764,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     const h = makeHarness({ task, messages: [staleMessage] });
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
 
-    assert.equal(await sweep.retireCarrier([staleMessage.id], 'withdrawn'), 0);
+    assert.equal(await sweep.retireProducerTasksForMessages([staleMessage.id], 'withdrawn'), 0);
     assert.equal(h.tasks.get(task.id).enabled, true);
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'active');
     assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.messageId, 'message-current');
@@ -740,7 +791,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     h.tasks.set(foreign.id, foreign);
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
 
-    assert.deepEqual(await sweep.retireThread('thread-1', 'user-1', 'force_reset'), {
+    assert.deepEqual(await sweep.retireProducerTasksForThread('thread-1', 'user-1', 'force_reset'), {
       retired: 1,
       messageIds: ['message-owned'],
     });

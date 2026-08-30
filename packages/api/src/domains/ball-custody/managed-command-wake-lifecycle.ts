@@ -142,6 +142,16 @@ export interface ManagedCommandWakeRecoveryDeps {
     messageId: string;
     attemptId: string;
   }) => 'retried' | 'not_retryable' | 'unavailable' | Promise<'retried' | 'not_retryable' | 'unavailable'>;
+  /** Terminalize one exact Queue carrier before its durable producer may be retired. */
+  readonly retireEventCarrier?: (input: {
+    taskId: string;
+    threadId: string;
+    userId: string;
+    catId: string;
+    messageId: string;
+  }) =>
+    | import('./managed-command-wake-carrier-retirement.js').ManagedCommandWakeCarrierRetirementResult
+    | Promise<import('./managed-command-wake-carrier-retirement.js').ManagedCommandWakeCarrierRetirementResult>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;

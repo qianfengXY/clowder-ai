@@ -1,5 +1,10 @@
 import type { CatId } from '@cat-cafe/shared';
 import {
+  type ManagedCommandWakeCarrierIdentity,
+  readManagedCommandWakeCarrierIdentity,
+  retireManagedCommandWakeCarrierCustody,
+} from '../../../../ball-custody/managed-command-wake-carrier-retirement.js';
+import {
   WaitContinuationCarrierError,
   waitContinuationCarrierFromStoredMessage,
 } from '../../../../ball-custody/wait-continuation-carrier.js';
@@ -11,6 +16,34 @@ import {
   uniqueCatIds,
 } from './QueuedMessageCustodyStartupProjectionHelpers.js';
 import type { ReconciledMessage, StartupCustodyDeps } from './QueuedMessageCustodyStartupTypes.js';
+
+async function hasLiveManagedCommandWakeExecution(
+  deps: StartupCustodyDeps,
+  message: StoredMessage,
+  identity: ManagedCommandWakeCarrierIdentity,
+): Promise<boolean> {
+  const custody = message.queueCustody;
+  if (!custody) throw new Error('managed-command carrier is missing Queue custody');
+  const turnExecutionStore = deps.turnExecutionStore;
+  if (!turnExecutionStore) throw new Error('managed-command carrier recovery requires TurnExecutionStore');
+  const invocationIds = new Set(
+    [custody.seenInvocationIdByCatId[identity.catId], custody.awakenedInvocationIdByCatId?.[identity.catId]].filter(
+      (invocationId): invocationId is string => typeof invocationId === 'string',
+    ),
+  );
+  for (const invocationId of invocationIds) {
+    const execution = await turnExecutionStore.get(invocationId);
+    if (
+      execution?.status === 'running' &&
+      execution.threadId === identity.threadId &&
+      execution.userId === identity.userId &&
+      execution.catId === identity.catId
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export async function initializeLegacyCustody(
   deps: StartupCustodyDeps,
@@ -59,6 +92,33 @@ export async function reconcileStartupCustodyMessage(
     if (!message || message.deliveryStatus !== 'queued' || !current) return null;
     if (current.status === 'terminal' && (current.withdrawnByCatIds?.length ?? 0) > 0) {
       return { message, terminalized: true, handledTargets: 0, failedTargets: 0 };
+    }
+    const managedCarrier = readManagedCommandWakeCarrierIdentity(message);
+    if (managedCarrier && deps.dynamicTaskStore && !deps.dynamicTaskStore.getById(managedCarrier.taskId)) {
+      // Persisted Queue state may lag either side of child admission. Only the
+      // exact TurnExecution ledger can prove that retirement would race a live
+      // provider; in that case quarantine the carrier instead of restoring it.
+      if (await hasLiveManagedCommandWakeExecution(deps, message, managedCarrier)) {
+        return {
+          message,
+          terminalized: false,
+          handledTargets: 0,
+          failedTargets: 0,
+          recoveryDeferred: true,
+        };
+      }
+      const retirement = await retireManagedCommandWakeCarrierCustody(
+        deps.messageStore,
+        message,
+        managedCarrier,
+        now(),
+      );
+      if (retirement === 'retired') {
+        const retired = await deps.messageStore.getById(messageId);
+        if (!retired) return null;
+        return { message: retired, terminalized: true, handledTargets: 0, failedTargets: 0 };
+      }
+      continue;
     }
     const built = await buildRestartProjection(deps, message, current, now());
     if (sameActiveProjection(current, built.next)) {

@@ -30,6 +30,17 @@ export async function recoverManagedCommandMissingDisposition(
   // Sequence > 1 proves a durable successor was already appended even when a
   // process exited before the task-side audit counters could be updated.
   if (retryCount >= MAX_MISSING_DISPOSITION_RETRIES || carrier.attemptSequence > 1) {
+    const messageId = parsed.command.messageId;
+    const retire = deps.retireEventCarrier;
+    if (!messageId || !retire) return 'pending';
+    const retirement = await retire({
+      taskId: parsed.task.id,
+      threadId: parsed.threadId,
+      userId: parsed.userId,
+      catId: parsed.catId,
+      messageId,
+    });
+    if (retirement !== 'retired') return 'pending';
     const escalatedAt = now();
     const updated = deps.dynamicTaskStore.updateParamsIfCurrent(parsed.task.id, parsed.task.params, {
       ...parsed.task.params,
