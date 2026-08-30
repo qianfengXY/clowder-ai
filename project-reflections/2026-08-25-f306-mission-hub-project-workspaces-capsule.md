@@ -1,10 +1,12 @@
 ---
 capsule_id: 2026-08-25-f306-mission-hub-project-workspaces
-feature_ids: [F306]
+feature_ids: [EXT-002]
 context: "Mission Hub 项目工作区归一从首次实现、独立验收阻断、修复到终态关闭"
 ---
 
-# F306 Mission Hub Project Workspaces — Reflection Capsule
+# EXT-002 Mission Hub Project Workspaces — Reflection Capsule (legacy F306 delivery)
+
+> **Identity note (2026-08-29):** 本胶囊记录的是 2026-08-25 以本地 `F306` 完成的历史交付；上游同号功能进入 main 后，canonical identity 迁为 `EXT-002`。历史验收目录继续保留旧名。
 
 ## Context
 
@@ -34,8 +36,8 @@ operator 要求 Mission Hub 直接把 Cat Café、Traqen 和未来项目作为�
 
 ## Doc Links
 
-- `docs/features/F306-mission-hub-project-workspaces.md`
-- `docs/design/F306-mission-hub-project-workspaces.md`
+- `docs/extensions/EXT-002-mission-hub-project-workspaces.md`
+- `docs/design/EXT-002-mission-hub-project-workspaces.md`
 - `docs/architecture/ownership/cells/mission-hub-projects.md`
 - `project-evidence/F306-acceptance-2026-08-25/`
 - `project-evidence/F306-acceptance-2026-08-25-final/`
@@ -46,4 +48,4 @@ operator 要求 Mission Hub 直接把 Cat Café、Traqen 和未来项目作为�
 - Merge gate/hotfix detector：接受显式 canonical remote/base，并在输出中展示最终 base SHA，避免 fork 仓库误扫上游历史。
 - Local review settlement：当 direct carrier 中存在 exact action lease 时，typed verdict 应由 lease 解析，而不是被后续 invocation 的 custody 投影拒绝；失败需返回可修复的 owner/lease 坐标。
 - Quality gate：项目级 import 必须运行 home↔external mutation symmetry test；长 mutation 必须包含越过默认 deadline 的真实或虚拟时钟用例。
-- Completion index：当前仓库没有 `docs/features/README.md`，且 Feature Truth 明确从文档 fresh-generate 临时 index；创建只含 F306 的“已完成索引”会造成新的不完整真相源，因此本次以 spec `done`、ROADMAP 移除和 `pnpm check:features` 通过作为仓库在地等价闭环。
+- Completion index：当前仓库没有 `docs/features/README.md`，且 Feature Truth 明确从文档 fresh-generate 临时 index；创建只含该功能的“已完成索引”会造成新的不完整真相源，因此本次以 EXT-002 catalog/spec `done`、ROADMAP 数字 F 队列移除和对应检查通过作为仓库在地等价闭环。

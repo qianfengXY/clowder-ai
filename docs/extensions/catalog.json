@@ -10,6 +10,16 @@
       "designPath": "docs/design/EXT-001-chatgpt-desktop-development-loop.md",
       "planPath": "feature-specs/2026-08-05-chatgpt-desktop-development-loop.md",
       "legacyIds": ["F289"]
+    },
+    {
+      "id": "EXT-002",
+      "name": "Mission Hub Project Workspaces",
+      "status": "done",
+      "owner": "CodeX (@cat-idwxwjba, GPT-5.6)",
+      "specPath": "docs/extensions/EXT-002-mission-hub-project-workspaces.md",
+      "designPath": "docs/design/EXT-002-mission-hub-project-workspaces.md",
+      "planPath": "feature-specs/2026-08-25-mission-hub-project-workspaces.md",
+      "legacyIds": ["F306"]
     }
   ]
 }

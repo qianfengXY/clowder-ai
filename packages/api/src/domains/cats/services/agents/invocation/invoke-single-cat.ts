@@ -20,6 +20,11 @@ import {
   type ContextHealth,
   catRegistry,
   type MessageContent,
+  memoryCueDrillFamilyForResolver,
+  type RequestGenerationEnvelopeV1,
+  type RequestGenerationPresentationV1,
+  type RequestGenerationRetryReason,
+  type RequestGenerationSourceRef,
   resolveCodexSpeed,
   type SealReason,
   type SessionPolicySnapshot,
@@ -38,7 +43,6 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { parseOpenCodeModel, resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import { shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
-import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -72,10 +76,7 @@ import { resolveActiveProjectRoot } from '../../../../../utils/active-project-ro
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
-import {
-  redirectRuntimeProjectPath,
-  resolvePersistentProjectPathDetailed,
-} from '../../../../../utils/persistent-project-path.js';
+import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persistent-project-path.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
@@ -93,7 +94,10 @@ import {
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
-import { buildCloudBridgeStatusContent } from '../../cloud-bridge/cloud-bridge-fallback.js';
+import {
+  buildCloudBridgeStatusContent,
+  type CloudBridgeAuditContext,
+} from '../../cloud-bridge/cloud-bridge-fallback.js';
 import type { BridgeDispatchOutcome } from '../../cloud-bridge/types.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 // L0-budget-defense PR-B-impl (ADR-038): staging layer prepend, wired here
@@ -101,6 +105,7 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import {
+  authenticatedCompactionSequenceForInvocation,
   authoritativeCompactionEventFromSession,
   resolveAuthoritativeCompactionSupport,
 } from '../../session/authoritative-compaction.js';
@@ -110,6 +115,10 @@ import {
   recordContextProjectionFinalGeneration,
   recordContextProjectionLedgerOutcome,
 } from '../../session/context-continuity-telemetry.js';
+import {
+  CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF,
+  encodeMemoryCueSourceRef,
+} from '../../session/request-generation-source-policy.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
@@ -149,6 +158,7 @@ import {
   prepareProviderPresentationAttempt,
   promptGenerationId,
 } from './provider-presentation-delivery.js';
+import { createRequestGenerationRecorder } from './request-generation-recorder.js';
 import { resolveManagedSessionPolicySnapshot } from './session-policy-snapshot.js';
 
 const log = createModuleLogger('invoke');
@@ -174,6 +184,112 @@ type InvocationPresentationReceipt =
   | { readonly domain: 'write_opportunity'; readonly receipt: AsrPersonMemoryPresentationEnvelope['receipt'] };
 
 type InvocationPresentationEnvelope = ProviderPromptPresentationEnvelope<InvocationPresentationReceipt>;
+
+export function requestGenerationPresentations(
+  attempt: ProviderPresentationAttempt<InvocationPresentationReceipt> | undefined,
+): RequestGenerationPresentationV1[] {
+  if (!attempt) return [];
+  const project = (
+    envelope: InvocationPresentationEnvelope,
+    decision: 'admitted' | 'omitted',
+  ): RequestGenerationPresentationV1 => {
+    const kind = envelope.receipt.domain === 'memory_cue' ? 'memory' : 'person_memory';
+    let sourceRefs: RequestGenerationSourceRef[];
+    if (envelope.receipt.domain === 'write_opportunity') {
+      const { source } = envelope.receipt.receipt;
+      sourceRefs = [{ owner: 'message', ref: `${source.threadId}:${source.sourceMessageId}` }];
+    } else {
+      const { event } = envelope.receipt.receipt;
+      const drillFamily = memoryCueDrillFamilyForResolver(event.resolverFamily);
+      sourceRefs = drillFamily
+        ? [
+            {
+              owner: 'memory',
+              ref: encodeMemoryCueSourceRef({
+                family: drillFamily,
+                anchor: event.sourceAnchor,
+                revision: event.sourceRevision,
+              }),
+            },
+          ]
+        : envelope.admission.sourceRefs.map((ref) => ({ owner: 'memory', ref }));
+    }
+    return {
+      owner: envelope.admission.producerOwner,
+      kind,
+      sourceRefs,
+      decision,
+      ...(decision === 'omitted' ? { reason: 'presentation_not_admitted' } : {}),
+    };
+  };
+  return [
+    ...attempt.admitted.map(({ envelope }) => project(envelope, 'admitted')),
+    ...attempt.omitted.map((envelope) => project(envelope, 'omitted')),
+  ];
+}
+
+export function requestGenerationMessageSourceRefs(input: {
+  readonly threadId: string;
+  readonly invocationId: string;
+  readonly promptMessageIds: readonly string[];
+  readonly presentations: readonly RequestGenerationPresentationV1[];
+  readonly injectSystemPrompt: boolean;
+  readonly hasContextHint: boolean;
+  readonly hasStagingPrepend: boolean;
+  readonly hasMissionPrefix: boolean;
+}): RequestGenerationSourceRef[] {
+  const refs: RequestGenerationSourceRef[] = [
+    ...input.promptMessageIds.map((messageId) => ({
+      owner: 'message' as const,
+      ref: `${input.threadId}:${messageId}`,
+    })),
+    ...input.presentations
+      .filter((presentation) => presentation.decision === 'admitted')
+      .flatMap((presentation) => presentation.sourceRefs),
+    ...(input.injectSystemPrompt ? [{ owner: 'system_prompt' as const, ref: CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF }] : []),
+    ...(input.hasContextHint
+      ? [{ owner: 'runtime_context' as const, ref: `context-management-hint:${input.invocationId}` }]
+      : []),
+    ...(input.hasStagingPrepend ? [{ owner: 'system_prompt' as const, ref: 'staging:adr-038' }] : []),
+    ...(input.hasMissionPrefix ? [{ owner: 'home_state' as const, ref: `thread-mission:${input.threadId}` }] : []),
+    { owner: 'runtime_context', ref: `transcript-path-hints:${input.threadId}` },
+  ];
+  const seen = new Set<string>();
+  return refs.filter((sourceRef) => {
+    const key = `${sourceRef.owner}\0${sourceRef.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function requestGenerationContinuity(
+  handshake: ContextContinuityHandshake | undefined,
+  epoch: Awaited<ReturnType<ContextEpochOwner['resolve']>> | undefined,
+  compactionRefs: readonly string[],
+): RequestGenerationEnvelopeV1['continuity'] {
+  const reason = handshake?.disposition.reason;
+  const capability = reason === 'carrier_unsupported' ? 'unsupported' : handshake ? 'exact' : 'unknown';
+  return {
+    ...(handshake
+      ? {
+          coordinate: {
+            provider: handshake.coordinate.providerCarrier.provider,
+            carrier: handshake.coordinate.providerCarrier.carrier,
+          },
+        }
+      : {}),
+    ...(epoch
+      ? {
+          contextEpoch: epoch.contextEpoch,
+          mode: epoch.contextMode,
+          transition: epoch.transition,
+        }
+      : {}),
+    capability,
+    compactionRefs: [...compactionRefs],
+  };
+}
 
 function resolveMemoryCueLegacyFallbacks(
   fallbacks: InvocationParams['memoryCueLegacyFallbacks'],
@@ -403,7 +519,10 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
-import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
+import {
+  type CodexNativeResumeReplacementProvenance,
+  isCodexSessionReplacementProvenance,
+} from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type {
   RuntimeSessionMetadata,
   RuntimeSessionUnexpectedRuntimeSessionSwitch,
@@ -431,6 +550,7 @@ import type {
   InvocationOrigin,
   ProviderCompactionObservation,
   ProviderContinuityPreflight,
+  ProviderRequestGenerationCommitV1,
   RouteTopology,
 } from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
@@ -675,6 +795,46 @@ function matchingCodexSessionReplacement(
   return replacement.previousNativeThreadId === previousNativeThreadId ? replacement : undefined;
 }
 
+type SessionRolloverFailureStage = 'seal_request' | 'seal_finalize' | 'replacement_create' | 'replacement_bind';
+
+class SessionRolloverCommitError extends Error {
+  constructor(
+    message: string,
+    readonly lifecycleMessages: readonly AgentMessage[],
+  ) {
+    super(message);
+    this.name = 'SessionRolloverCommitError';
+  }
+}
+
+function nativeResumeRolloverReason(
+  replacement: CodexNativeResumeReplacementProvenance,
+): 'oversized_retire' | 'resume_rejected' {
+  return replacement.rejection === 'max_payload_size_exceeded' ? 'oversized_retire' : 'resume_rejected';
+}
+
+function buildSessionRolloverLifecycleMessage(input: {
+  catId: CatId;
+  rolloverId: string;
+  status: 'pending' | 'succeeded' | 'failed';
+  reason: 'oversized_retire' | 'resume_rejected';
+  failureStage?: SessionRolloverFailureStage;
+}): AgentMessage {
+  return {
+    type: 'system_info',
+    catId: input.catId,
+    content: JSON.stringify({
+      type: 'session_rollover_lifecycle',
+      v: 1,
+      rolloverId: input.rolloverId,
+      status: input.status,
+      reason: input.reason,
+      ...(input.failureStage ? { failureStage: input.failureStage } : {}),
+    }),
+    timestamp: Date.now(),
+  };
+}
+
 function buildUnexpectedRuntimeSessionSwitch(input: {
   lifecycle: NonNullable<AgentMessage['sessionLifecycle']>;
   previousSessionId: string;
@@ -888,6 +1048,10 @@ async function syncAntigravityRuntimeMetadata(input: {
 export interface InvocationDeps {
   /** F296 B3b-1: single owner of context epoch and cold/hot mode for provider-bound invocations. */
   readonly contextEpochOwner?: Pick<ContextEpochOwner, 'resolve' | 'observeCompaction' | 'confirmColdConsumed'>;
+  /** Live project-hook auth readiness required before Claude can own a compaction sequence. */
+  readonly hookAuthenticationReady?: boolean | (() => boolean);
+  /** Active-workspace PreCompact carrier readiness; independent from callback registry recovery. */
+  readonly claudeProjectHookCarrierReady?: boolean | ((projectRoot: string) => boolean);
   /** F296 B3b-2: shared admission/delivery state machine for dynamic prompt projections. */
   readonly presentationLedger?: Pick<PresentationLedger, 'reserve' | 'commit' | 'release'>;
   /** F276 Wave 2 bridge: cross-invocation terminal truth consulted at opportunity admission. */
@@ -951,6 +1115,11 @@ export interface InvocationDeps {
    * silent no-op.
    */
   readonly cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge | null;
+  /** F247: server-owned signer for exact-source Remote MCP return capability. */
+  readonly cloudReturnBindingSigner?: Pick<
+    import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner,
+    'sign'
+  >;
   /** Server-owned exact A2A terminal producer used by the cloud transport. */
   readonly a2aDispatchDispositionService?: Pick<
     import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
@@ -995,6 +1164,8 @@ export interface InvocationDeps {
   } | null>;
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
+  /** F231 canonical owner used only to bind embedded L0 profile bytes to their source lifecycle. */
+  readonly profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
 }
 
 /**
@@ -1541,6 +1712,39 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   let presentationDelivery: { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } | undefined;
+  let currentPresentationAttempt: ProviderPresentationAttempt<InvocationPresentationReceipt> | undefined;
+  let requestGenerationRecorder: ReturnType<typeof createRequestGenerationRecorder> | undefined;
+  let currentRequestGenerationCommit: ProviderRequestGenerationCommitV1 | undefined;
+  const observeCurrentRequestGeneration = async (message: AgentMessage): Promise<void> => {
+    if (!requestGenerationRecorder || !currentRequestGenerationCommit) return;
+    const metadata = message.metadata as Record<string, unknown> | undefined;
+    try {
+      await requestGenerationRecorder.recordObserved(currentRequestGenerationCommit, {
+        evidenceRef: `provider_event:${invocationId}:${currentRequestGenerationCommit.generationOrdinal}:${message.type}:${message.timestamp}`,
+        ...(message.sessionId ? { runtimeSessionId: message.sessionId } : {}),
+        ...(typeof metadata?.model === 'string' ? { model: metadata.model } : {}),
+      });
+    } catch (error) {
+      log.error(
+        { invocationId, generationOrdinal: currentRequestGenerationCommit.generationOrdinal, error },
+        'Failed to persist request-generation observation',
+      );
+    }
+  };
+  const terminateCurrentRequestGeneration = async (
+    outcome: 'accepted' | 'replaced' | 'rejected' | 'error' | 'cancelled' | 'unknown',
+    reason?: string,
+  ): Promise<void> => {
+    if (!requestGenerationRecorder || !currentRequestGenerationCommit) return;
+    try {
+      await requestGenerationRecorder.recordTerminal(currentRequestGenerationCommit, outcome, reason);
+    } catch (error) {
+      log.error(
+        { invocationId, generationOrdinal: currentRequestGenerationCommit.generationOrdinal, outcome, error },
+        'Failed to persist request-generation terminal evidence',
+      );
+    }
+  };
   const closeActiveServiceIterator = async (): Promise<void> => {
     const iterator = activeServiceIterator;
     if (!iterator) return;
@@ -1668,7 +1872,24 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         'F247 KD-17: cloud-only cat — running bounded Host transport instead of provider CLI',
       );
       let outcome: BridgeDispatchOutcome;
-      if (deps.cloudInvokeBridge && params.mentionContent && params.mentioningCatId) {
+      const sourceSender =
+        sourceMessageId && params.mentioningCatId
+          ? params.a2aTriggerMessageId
+            ? {
+                kind: 'cat' as const,
+                id: params.mentioningCatId,
+                ...(params.parentInvocationId ? { invocationId: params.parentInvocationId } : {}),
+              }
+            : ({ kind: 'user' as const, id: userId } satisfies CloudBridgeAuditContext['sourceSender'])
+          : undefined;
+      if (
+        deps.cloudInvokeBridge &&
+        deps.cloudReturnBindingSigner &&
+        params.mentionContent &&
+        params.mentioningCatId &&
+        sourceMessageId &&
+        sourceSender
+      ) {
         let threadMetadata = null;
         if (threadStore) {
           try {
@@ -1691,13 +1912,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           })),
           calledBy: params.mentioningCatId,
           intent: params.mentionContent,
-          ...(sourceMessageId ? { idempotencyKey: sourceMessageId } : {}),
+          sourceMessageId,
+          cloudReturnBinding: deps.cloudReturnBindingSigner.sign({
+            threadId,
+            userId,
+            sourceMessageId,
+            dispatchInvocationId: invocationId,
+            targetCatId: String(catId),
+          }),
         });
       } else {
-        const detail = deps.cloudInvokeBridge
-          ? 'Cloud bridge invocation provenance was incomplete'
-          : 'No configured personal Chrome Host Adapter';
-        outcome = { kind: 'fallback', reason: 'no-adapter', detail };
+        const reason = !sourceMessageId
+          ? 'missing-source-message-id'
+          : deps.cloudInvokeBridge &&
+              (!deps.cloudReturnBindingSigner || !params.mentionContent || !params.mentioningCatId || !sourceSender)
+            ? 'incomplete-dispatch-provenance'
+            : 'no-adapter';
+        const detail = !sourceMessageId
+          ? 'Cloud bridge exact source message provenance was unavailable'
+          : deps.cloudInvokeBridge
+            ? 'Cloud bridge invocation provenance or return-binding signer was incomplete'
+            : 'No configured personal Chrome Host Adapter';
+        outcome = { kind: 'fallback', reason, detail };
         log.warn(
           {
             catId,
@@ -1730,7 +1966,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         type: 'system_info' as const,
         catId,
         invocationId,
-        content: buildCloudBridgeStatusContent({ catId, outcome }),
+        content: buildCloudBridgeStatusContent({
+          catId,
+          outcome,
+          ...(sourceMessageId && sourceSender
+            ? {
+                audit: {
+                  sourceMessageId,
+                  sourceSender,
+                  dispatchInvocationId: invocationId,
+                },
+              }
+            : {}),
+        }),
         timestamp: Date.now(),
       };
       turnExecutionCompletedSuccessfully = true;
@@ -2239,50 +2487,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // F070: Governance gate for external project dispatch
-    // Bootstrap is handled by Console's explicit init button (projects-setup.ts).
-    // invokeCat only gates — checkGovernancePreflight is the real guard.
-    if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
-      // Project setup writes the registry under the persistent workspace when
-      // the API runs from a disposable checkout. Read from that same root.
-      const catCafeRoot = await redirectRuntimeProjectPath(hostProjectRoot);
-      if (!catCafeRoot) throw new Error('Unable to resolve persistent Clowder AI root for governance preflight');
-      const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
-      const catEntry = catRegistry.tryGet(catId as string);
-      const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
-      if (!preflight.ready) {
-        const reasonKind = preflight.needsBootstrap
-          ? 'needs_bootstrap'
-          : preflight.needsConfirmation
-            ? 'needs_confirmation'
-            : 'files_missing';
-        // F070: Structured governance_blocked event — frontend renders actionable card
-        yield {
-          type: 'system_info',
-          catId,
-          content: JSON.stringify({
-            type: 'governance_blocked',
-            projectPath: workingDirectory,
-            reasonKind,
-            reason: preflight.reason,
-            invocationId: params.parentInvocationId,
-          }),
-          timestamp: Date.now(),
-        };
-        // F070: done with errorCode so routes mark invocation as failed (retryable)
-        turnExecutionFailureReason = 'GOVERNANCE_BOOTSTRAP_REQUIRED';
-        yield {
-          type: 'done',
-          catId,
-          isFinal: params.isLastCat,
-          errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
-          timestamp: Date.now(),
-        };
-        didComplete = true;
-        return;
-      }
-    }
-
     // F070 Phase 2: Inject dispatch mission context for external projects
     let missionPrefix = '';
     let capturedMissionPack: import('@cat-cafe/shared').DispatchMissionPack | undefined;
@@ -2444,10 +2648,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
         if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
-        if (resolvedAccount.models?.length && provider !== 'opencode') {
-          // #1086: account.models is an allowed-model list, not an implicit default.
-          // Prefer cat's defaultModel when present; fall back to account.models[0].
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel ?? resolvedAccount.models[0];
+        // #1086: account.models is an allowed-model list, never a runtime default.
+        // The member-selected model remains authoritative even if that list is absent.
+        if (defaultModel && provider !== 'opencode') {
+          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
         }
         if (resolvedAccount.baseUrl) {
           const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
@@ -2964,6 +3168,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       promptWithInvocationAdditions = composed.promptWithInvocationAdditions;
       effectivePrompt = composed.effectivePrompt;
     };
+    // F24-era isolated tests and legacy embedders may still provide an
+    // append-only transcript facade. F299 is enabled only by the durable owner
+    // capability; production wires the concrete TranscriptWriter, while a
+    // partial facade must not make unrelated session tests look provider-fenced.
+    const durableTranscriptWriter =
+      deps.transcriptWriter &&
+      typeof deps.transcriptWriter.appendDurableEvent === 'function' &&
+      typeof deps.transcriptWriter.keyedContentDigest === 'function'
+        ? deps.transcriptWriter
+        : undefined;
     const prepareCurrentPresentationDelivery = async (): Promise<void> => {
       const envelopes = [...memoryCuePresentationEnvelopes, ...asrPersonMemoryPresentationEnvelopes];
       const attempt = await prepareProviderPresentationAttempt({
@@ -2986,8 +3200,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           now: Date.now(),
         },
         buildEffectivePrompt: (segments) => composeEffectivePrompt(injectSystemPrompt, segments).effectivePrompt,
+        ...(durableTranscriptWriter
+          ? { createPromptGenerationId: durableTranscriptWriter.keyedContentDigest.bind(durableTranscriptWriter) }
+          : {}),
       });
       applyPreparedPrompt(attempt);
+      currentPresentationAttempt = attempt;
       const generationReadyAtMs = Date.now();
       if (contextContinuityHandshake && contextEpochDecision) {
         recordContextProjectionFinalGeneration(invocationSpan, {
@@ -3020,34 +3238,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       });
     };
     /**
-     * F296 B4a: capture the bytes that were actually built for this generation.
-     * In preflight mode these do not exist until the provider verdict settles,
-     * so the capture rides with generation construction instead of running
-     * ahead of it against an empty prompt.
-     */
-    const captureFinalGenerationPrompt = (): void => {
-      capturePromptIfEnabled({
-        catId: catId as string,
-        invocationId,
-        threadId,
-        userId,
-        model: resolvedAccount?.models?.[0] ?? 'unknown',
-        systemPrompt: params.systemPrompt ?? '',
-        missionPrefix: missionPrefix ?? undefined,
-        userPrompt: promptWithInvocationAdditions,
-        effectivePrompt,
-        injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
-        // AC-G10 (Phase G native L0 closure / KD-44): if this provider injects
-        // L0 via a native system-role channel (Claude `--system-prompt-file` /
-        // Codex `-c developer_instructions=`), the bridge will best-effort
-        // fetch the compiled L0 and stamp it onto `nativeSystemPrompt`. Hot
-        // path stays non-blocking — the bridge handles fetch async + fail-safe
-        // (see comment block in prompt-capture-bridge.ts).
-        nativeL0Provider: service.injectsL0Natively?.() ?? false,
-      });
-    };
-
-    /**
      * F296 B4a: construct exactly one final generation — epoch decision,
      * context prompt factory, identity injection, presentation mapper and
      * ledger reservation — from a settled continuity verdict.
@@ -3064,6 +3254,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
      * carrier's proof, and an unsupported source fails the invocation instead of
      * being silently dropped. Replay suppression lives in the epoch owner.
      */
+    const currentCompactionRefs = new Set<string>();
     const applyProviderCompactions = async (
       compactions: readonly ProviderCompactionObservation[] | undefined,
     ): Promise<void> => {
@@ -3078,6 +3269,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (!deps.contextEpochOwner) throw new Error('authoritative_compaction_owner_unavailable');
       for (const compaction of compactions) {
+        currentCompactionRefs.add(compaction.evidenceRef);
         await deps.contextEpochOwner.observeCompaction({
           userId,
           catId,
@@ -3096,9 +3288,50 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       await applyEpochScopedPrompt();
       computeIdentityInjection();
       await prepareCurrentPresentationDelivery();
-      captureFinalGenerationPrompt();
     };
     if (!usesProviderContinuityPreflight) await buildFinalGeneration();
+
+    if (durableTranscriptWriter && !deps.sessionChainStore) {
+      throw new Error('request_generation_transcript_owner_incomplete');
+    }
+    requestGenerationRecorder =
+      durableTranscriptWriter && deps.sessionChainStore
+        ? createRequestGenerationRecorder({
+            invocationId,
+            threadId,
+            userId,
+            catId,
+            transcriptWriter: durableTranscriptWriter,
+            sessionChainStore: deps.sessionChainStore,
+            ...(deps.profileRepository ? { profileRepository: deps.profileRepository } : {}),
+            snapshot: () => {
+              const presentations = requestGenerationPresentations(currentPresentationAttempt);
+              const messageSourceRefs = requestGenerationMessageSourceRefs({
+                threadId,
+                invocationId,
+                promptMessageIds,
+                presentations,
+                injectSystemPrompt,
+                hasContextHint: Boolean(contextHintPrefix),
+                hasStagingPrepend: Boolean(stagingPrepend),
+                hasMissionPrefix: Boolean(missionPrefix),
+              });
+              return {
+                continuity: requestGenerationContinuity(contextContinuityHandshake, contextEpochDecision, [
+                  ...currentCompactionRefs,
+                ]),
+                messageSourceRefs,
+                nativeInstructionSourceRefs: [
+                  {
+                    owner: 'system_prompt',
+                    ref: CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF,
+                  },
+                ],
+                presentations,
+              };
+            },
+          })
+        : undefined;
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
     let spawnCliOverride: AgentServiceOptions['spawnCliOverride'];
@@ -3772,12 +4005,94 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   });
                 } else {
                   // CLI session changed → old context is lost (resume failed / CLI restarted).
-                  // Use requestSeal + finalize to ensure transcript/digest are written,
-                  // not bare update(status:'sealed') which skips flush.
+                  // A provider-authenticated native resume rejection is stricter than
+                  // the legacy compatibility path: its replacement thread already
+                  // exists, but the async generator is paused on session_init, so we
+                  // must commit sealed-old + bound-new before allowing prompt.settle
+                  // and turn/start to continue.
                   let sealAccepted = false;
-                  const sealReason = antigravityReplacementSealReason(msg, existing.cliSessionId ?? existing.id);
+                  const declaredReplacement = isCodexSessionReplacementProvenance(msg.sessionReplacement)
+                    ? msg.sessionReplacement
+                    : undefined;
                   const runtimeReplacement = matchingCodexSessionReplacement(msg, existing.cliSessionId);
-                  if (deps.sessionSealer) {
+                  const nativeResumeReplacement =
+                    runtimeReplacement?.cause === 'native_resume_rejected' ? runtimeReplacement : undefined;
+                  const staleNativeResumeReplacement =
+                    declaredReplacement?.cause === 'native_resume_rejected' &&
+                    declaredReplacement.previousNativeThreadId !== existing.cliSessionId
+                      ? declaredReplacement
+                      : undefined;
+                  const rolloverId = `${invocationId}:codex-native-resume`;
+                  if (staleNativeResumeReplacement) {
+                    throw new SessionRolloverCommitError(
+                      'Native session rollover previous runtime is no longer active',
+                      [
+                        buildSessionRolloverLifecycleMessage({
+                          catId,
+                          rolloverId,
+                          status: 'failed',
+                          reason: nativeResumeRolloverReason(staleNativeResumeReplacement),
+                          failureStage: 'seal_request',
+                        }),
+                      ],
+                    );
+                  }
+                  const sealReason = nativeResumeReplacement
+                    ? nativeResumeRolloverReason(nativeResumeReplacement)
+                    : antigravityReplacementSealReason(msg, existing.cliSessionId ?? existing.id);
+                  const rolloverLifecycleMessages: AgentMessage[] = [];
+
+                  if (nativeResumeReplacement) {
+                    const nativeSealReason = nativeResumeRolloverReason(nativeResumeReplacement);
+                    const failed = (failureStage: SessionRolloverFailureStage, message: string): never => {
+                      throw new SessionRolloverCommitError(message, [
+                        ...rolloverLifecycleMessages,
+                        buildSessionRolloverLifecycleMessage({
+                          catId,
+                          rolloverId,
+                          status: 'failed',
+                          reason: nativeSealReason,
+                          failureStage,
+                        }),
+                      ]);
+                    };
+                    const sessionSealer =
+                      deps.sessionSealer ?? failed('seal_request', 'Native session rollover requires SessionSealer');
+                    const sealResult = await sessionSealer
+                      .requestSeal({
+                        sessionId: existing.id,
+                        reason: sealReason,
+                      })
+                      .catch((err: unknown) =>
+                        failed(
+                          'seal_request',
+                          `Native session rollover seal request failed: ${err instanceof Error ? err.message : String(err)}`,
+                        ),
+                      );
+                    if (!sealResult.accepted) {
+                      failed('seal_request', 'Native session rollover seal request was not accepted');
+                    }
+                    const pendingMessage = buildSessionRolloverLifecycleMessage({
+                      catId,
+                      rolloverId,
+                      status: 'pending',
+                      reason: nativeSealReason,
+                    });
+                    rolloverLifecycleMessages.push(pendingMessage);
+                    outputs.push(pendingMessage);
+                    const finalizeResult = await sessionSealer
+                      .finalize({ sessionId: existing.id })
+                      .catch((err: unknown) =>
+                        failed(
+                          'seal_finalize',
+                          `Native session rollover seal finalize failed: ${err instanceof Error ? err.message : String(err)}`,
+                        ),
+                      );
+                    if (!finalizeResult.sealed) {
+                      failed('seal_finalize', 'Native session rollover could not finalize the previous SessionRecord');
+                    }
+                    sealAccepted = true;
+                  } else if (deps.sessionSealer) {
                     try {
                       const result = await deps.sessionSealer.requestSeal({
                         sessionId: existing.id,
@@ -3833,93 +4148,156 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     });
                     sealAccepted = true;
                   }
+
                   // Only create new active record if old one was successfully sealed.
                   // Otherwise we'd have two active records — a dirty state.
                   if (sealAccepted || !deps.sessionSealer) {
-                    if (runtimeReplacement && params.continuityCapsule) {
-                      const sealTimestamp = Date.now();
-                      const continuityCapsule = completeCapsuleForRuntimeReplacement(params.continuityCapsule, {
-                        invocationId,
-                        createdAt: sealTimestamp,
-                        seal: {
-                          sessionId: existing.id,
-                          sessionSeq: existing.seq + 1,
-                          reason: sealReason,
-                        },
-                        replacement: runtimeReplacement,
-                      });
-                      await deps.sessionChainStore.update(existing.id, { continuityCapsule });
-                      const sealInfoMessage = {
-                        type: 'system_info' as const,
-                        catId,
-                        content: JSON.stringify({
-                          type: 'session_seal_requested',
-                          catId,
-                          sessionId: existing.id,
-                          sessionSeq: existing.seq + 1,
-                          reason: sealReason,
-                          continuityCapsule,
-                          continuityDiagnostics: {
-                            source: 'runtime_replacement',
-                            boundary: 'runtime_replacement',
-                            sealMechanism: sealReason,
-                            replacement: runtimeReplacement,
-                            generated: true,
-                            persistedVia: 'session_seal_requested',
-                            threadId,
-                            catId,
-                            invocationId,
-                            sessionId: existing.id,
-                          },
-                        }),
-                        timestamp: sealTimestamp,
-                      };
-                      outputs.push(sealInfoMessage);
-                      if (deps.transcriptWriter) {
-                        const sessInfo: TranscriptSessionInfo = {
-                          sessionId: existing.id,
-                          threadId,
-                          catId: existing.catId,
-                          ...(existing.cliSessionId ? { cliSessionId: existing.cliSessionId } : {}),
-                          seq: existing.seq,
-                        };
-                        deps.transcriptWriter.appendEvent(
-                          sessInfo,
-                          sealInfoMessage as unknown as Record<string, unknown>,
+                    let logicalRecId: string | undefined;
+                    try {
+                      if (runtimeReplacement && params.continuityCapsule) {
+                        const sealTimestamp = Date.now();
+                        const continuityCapsule = completeCapsuleForRuntimeReplacement(params.continuityCapsule, {
                           invocationId,
+                          createdAt: sealTimestamp,
+                          seal: {
+                            sessionId: existing.id,
+                            sessionSeq: existing.seq + 1,
+                            reason: sealReason,
+                          },
+                          replacement: runtimeReplacement,
+                        });
+                        await deps.sessionChainStore.update(existing.id, { continuityCapsule });
+                        const sealInfoMessage = {
+                          type: 'system_info' as const,
+                          catId,
+                          content: JSON.stringify({
+                            type: 'session_seal_requested',
+                            catId,
+                            sessionId: existing.id,
+                            sessionSeq: existing.seq + 1,
+                            reason: sealReason,
+                            continuityCapsule,
+                            continuityDiagnostics: {
+                              source: 'runtime_replacement',
+                              boundary: 'runtime_replacement',
+                              sealMechanism: sealReason,
+                              replacement: runtimeReplacement,
+                              generated: true,
+                              persistedVia: 'session_seal_requested',
+                              threadId,
+                              catId,
+                              invocationId,
+                              sessionId: existing.id,
+                            },
+                          }),
+                          timestamp: sealTimestamp,
+                        };
+                        outputs.push(sealInfoMessage);
+                        if (deps.transcriptWriter) {
+                          const sessInfo: TranscriptSessionInfo = {
+                            sessionId: existing.id,
+                            threadId,
+                            catId: existing.catId,
+                            ...(existing.cliSessionId ? { cliSessionId: existing.cliSessionId } : {}),
+                            seq: existing.seq,
+                          };
+                          deps.transcriptWriter.appendEvent(
+                            sessInfo,
+                            sealInfoMessage as unknown as Record<string, unknown>,
+                            invocationId,
+                          );
+                        }
+                      }
+                      if (!nativeResumeReplacement) {
+                        deps.sessionSealer?.finalize({ sessionId: existing.id }).catch(() => {});
+                      }
+                      // F118 D1: Inherit failure count from the replaced session.
+                      // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
+                      const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
+                      const logicalRec = await deps.sessionChainStore.create({
+                        ...sessionWorkspaceBinding,
+                        threadId,
+                        catId,
+                        userId,
+                        compressionCount: invocationCapacitySnapshot?.capability.observesCompression ? 0 : null,
+                      });
+                      logicalRecId = logicalRec.id;
+                      let newRec;
+                      try {
+                        newRec = await requireManagedSessionRuntimeIdBinding(
+                          deps.sessionChainStore,
+                          logicalRec.id,
+                          msg.sessionId,
+                        );
+                      } catch (err) {
+                        if (nativeResumeReplacement) {
+                          const now = Date.now();
+                          await deps.sessionChainStore.update(logicalRec.id, {
+                            status: 'sealed',
+                            sealReason: 'replacement_bind_failed',
+                            sealedAt: now,
+                            updatedAt: now,
+                          });
+                        }
+                        throw err;
+                      }
+                      sessionRuntimeBindingAccepted = true;
+                      invocationPolicyRecordId = newRec.id;
+                      await refreshInvocationPolicyExecution();
+                      if (inheritedFailures > 0) {
+                        await deps.sessionChainStore.update(newRec.id, {
+                          consecutiveRestoreFailures: inheritedFailures,
+                          ...sessionWorkspaceBinding,
+                          ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
+                        });
+                      } else if (params.continuityCapsule) {
+                        await deps.sessionChainStore.update(newRec.id, {
+                          ...sessionWorkspaceBinding,
+                          continuityCapsule: params.continuityCapsule,
+                        });
+                      }
+                      if (nativeResumeReplacement) {
+                        outputs.push(
+                          buildSessionRolloverLifecycleMessage({
+                            catId,
+                            rolloverId,
+                            status: 'succeeded',
+                            reason: nativeResumeRolloverReason(nativeResumeReplacement),
+                          }),
                         );
                       }
-                    }
-                    deps.sessionSealer?.finalize({ sessionId: existing.id }).catch(() => {});
-                    // F118 D1: Inherit failure count from the replaced session.
-                    // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
-                    const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
-                    const logicalRec = await deps.sessionChainStore.create({
-                      ...sessionWorkspaceBinding,
-                      threadId,
-                      catId,
-                      userId,
-                      compressionCount: invocationCapacitySnapshot?.capability.observesCompression ? 0 : null,
-                    });
-                    const newRec = await requireManagedSessionRuntimeIdBinding(
-                      deps.sessionChainStore,
-                      logicalRec.id,
-                      msg.sessionId,
-                    );
-                    sessionRuntimeBindingAccepted = true;
-                    invocationPolicyRecordId = newRec.id;
-                    await refreshInvocationPolicyExecution();
-                    if (inheritedFailures > 0) {
-                      await deps.sessionChainStore.update(newRec.id, {
-                        consecutiveRestoreFailures: inheritedFailures,
-                        ...sessionWorkspaceBinding,
-                        ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
-                      });
-                    } else if (params.continuityCapsule) {
-                      await deps.sessionChainStore.update(newRec.id, {
-                        ...sessionWorkspaceBinding,
-                        continuityCapsule: params.continuityCapsule,
-                      });
+                    } catch (err) {
+                      if (nativeResumeReplacement) {
+                        if (logicalRecId) {
+                          const logicalRec = await deps.sessionChainStore.get(logicalRecId);
+                          if (logicalRec?.status === 'active') {
+                            const now = Date.now();
+                            await deps.sessionChainStore.update(logicalRecId, {
+                              status: 'sealed',
+                              sealReason: 'replacement_bind_failed',
+                              sealedAt: now,
+                              updatedAt: now,
+                            });
+                          }
+                        }
+                        const failureStage: SessionRolloverFailureStage = logicalRecId
+                          ? 'replacement_bind'
+                          : 'replacement_create';
+                        throw new SessionRolloverCommitError(
+                          `Native session rollover ${failureStage} failed: ${err instanceof Error ? err.message : String(err)}`,
+                          [
+                            ...rolloverLifecycleMessages,
+                            buildSessionRolloverLifecycleMessage({
+                              catId,
+                              rolloverId,
+                              status: 'failed',
+                              reason: nativeResumeRolloverReason(nativeResumeReplacement),
+                              failureStage,
+                            }),
+                          ],
+                        );
+                      }
+                      throw err;
                     }
                   }
                 }
@@ -3955,7 +4333,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             }
           } catch (err) {
-            if (err instanceof SessionRuntimeIdBindingConflictError) throw err;
+            if (err instanceof SessionRuntimeIdBindingConflictError || err instanceof SessionRolloverCommitError) {
+              throw err;
+            }
             // Best-effort — don't break the invocation chain
           }
         }
@@ -4454,8 +4834,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     let allowSessionRetry = Boolean(sessionId);
     let allowTransientRetry = true;
+    let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptStartedAt = Date.now();
+      let launchCountThisAttempt = 0;
       // In preflight mode the generation does not exist yet — it is built inside
       // `settle`, after the provider verdict. Demanding it here would recreate
       // exactly the ordering this slice removes.
@@ -4485,9 +4868,41 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (!usesProviderContinuityPreflight && contextContinuityHandshake && hasTargetContinuityHandshake) {
         yield continuityInfoMessage();
       }
+      const generationRecorder = requestGenerationRecorder;
       const options: AgentServiceOptions = {
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
+        ...(generationRecorder
+          ? {
+              beforeProviderLaunch: async (prepared) => {
+                launchCountThisAttempt += 1;
+                const reason =
+                  nextRequestGenerationReason ??
+                  prepared.boundaryReason ??
+                  (launchCountThisAttempt > 1 ? ('provider_continuation' as const) : undefined);
+                if (currentRequestGenerationCommit) {
+                  const previousOutcome =
+                    reason === 'provider_continuation'
+                      ? 'accepted'
+                      : reason === 'provider_busy'
+                        ? 'rejected'
+                        : 'replaced';
+                  await generationRecorder.recordTerminal(
+                    currentRequestGenerationCommit,
+                    previousOutcome,
+                    reason ?? 'provider_generation_replaced',
+                  );
+                }
+                const committed = await generationRecorder.recordPrepared(prepared, {
+                  attempt: attempt + 1,
+                  ...(reason ? { reason } : {}),
+                });
+                currentRequestGenerationCommit = committed;
+                nextRequestGenerationReason = undefined;
+                return committed;
+              },
+            }
+          : {}),
       };
       let suppressedMissingSessionError: AgentMessage | undefined;
       let suppressedPromptLimitError: AgentMessage | undefined;
@@ -4557,18 +4972,56 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           break;
         }
         const msg = iterResult.value;
+        if (currentRequestGenerationCommit) await observeCurrentRequestGeneration(msg);
         // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
         // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
         // a daemon sending frequent status updates must not evade the 30-min kill deadline.
         if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
           resetInvocationTimeout();
         if (msg.contextCompaction) {
-          const support = contextCapability
+          const hookAuthenticationReady =
+            typeof deps.hookAuthenticationReady === 'function'
+              ? deps.hookAuthenticationReady()
+              : (deps.hookAuthenticationReady ?? false);
+          const hookCarrierReady =
+            typeof deps.claudeProjectHookCarrierReady === 'function'
+              ? deps.claudeProjectHookCarrierReady(workingProjectRoot ?? hostProjectRoot)
+              : (deps.claudeProjectHookCarrierReady ?? false);
+          // Ask the state machine with no attestation first. Only its specific
+          // "attestation unavailable" edge authorizes the session read below;
+          // auth/carrier/capability failures stop before sequence state.
+          let support = contextCapability
             ? resolveAuthoritativeCompactionSupport({
                 capability: contextCapability,
                 eventSource: msg.contextCompaction.eventSource,
+                hookAuthenticationReady,
+                hookCarrierReady,
+                hookInvocationAttested: false,
               })
             : { status: 'unsupported' as const, reason: 'typed_event_unroutable' as const };
+          let activeClaudeRecord: Awaited<ReturnType<ISessionChainStore['getActive']>> = null;
+          let claudeObservationKey: string | undefined;
+          if (
+            support.status === 'unsupported' &&
+            support.reason === 'hook_invocation_attestation_unavailable' &&
+            !('event' in msg.contextCompaction)
+          ) {
+            if (!deps.sessionChainStore) throw new Error('authoritative_compaction_owner_unavailable');
+            activeClaudeRecord = await deps.sessionChainStore.getActive(catId as CatId, threadId, userId);
+            const sequence = activeClaudeRecord
+              ? authenticatedCompactionSequenceForInvocation(activeClaudeRecord, invocationId)
+              : null;
+            claudeObservationKey =
+              activeClaudeRecord && sequence !== null ? `${activeClaudeRecord.id}:${sequence}` : undefined;
+            support = resolveAuthoritativeCompactionSupport({
+              capability: contextCapability!,
+              eventSource: msg.contextCompaction.eventSource,
+              hookAuthenticationReady,
+              hookCarrierReady,
+              hookInvocationAttested:
+                claudeObservationKey !== undefined && claudeObservationKey !== consumedClaudeCompactionObservation,
+            });
+          }
           if (support.status === 'unsupported') {
             throw new Error(`authoritative_compaction_unsupported:${support.reason}`);
           }
@@ -4580,10 +5033,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if ('event' in msg.contextCompaction) {
             compactionEvent = msg.contextCompaction.event;
           } else {
-            if (!deps.sessionChainStore) throw new Error('authoritative_compaction_owner_unavailable');
-            const activeRecord = await deps.sessionChainStore.getActive(catId as CatId, threadId, userId);
-            if (!activeRecord) throw new Error('authoritative_compaction_scope_unavailable');
-            compactionEvent = authoritativeCompactionEventFromSession(activeRecord, msg.contextCompaction.eventSource);
+            if (!activeClaudeRecord || !claudeObservationKey) {
+              throw new Error('authoritative_compaction_scope_unavailable');
+            }
+            compactionEvent = authoritativeCompactionEventFromSession(
+              activeClaudeRecord,
+              msg.contextCompaction.eventSource,
+            );
+            consumedClaudeCompactionObservation = claudeObservationKey;
           }
           await deps.contextEpochOwner.observeCompaction({
             userId,
@@ -4778,6 +5235,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Substantive output means the provider accepted a generation, so one
           // must exist. If it does not, the fence was bypassed — fail rather
           // than let output flow with no reserved generation behind it.
+          if (requestGenerationRecorder && !currentRequestGenerationCommit) {
+            throw new Error('request_generation_commit_unavailable');
+          }
           if (!presentationDelivery) throw new Error('presentation_delivery_attempt_unavailable');
           // F296 B4 (Sol review): the cold is consumed here — after the provider
           // accepted the generation — not at resolve time. Failure and release
@@ -4808,6 +5268,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           msg.type === 'provider_signal' || msg.type === 'liveness_signal'
             ? { ...msg, type: 'system_info' as const }
             : msg;
+        if (msg.type === 'error') await terminateCurrentRequestGeneration('error', 'provider_error');
+        if (msg.type === 'done') {
+          await terminateCurrentRequestGeneration(
+            hadError || msg.errorCode !== undefined ? 'error' : signal?.aborted ? 'cancelled' : 'accepted',
+            msg.errorCode,
+          );
+        }
         for await (const out of streamProcessedOutputs(deliveryMsg)) {
           yield out;
         }
@@ -4863,6 +5330,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               : suppressedMalformedError
                 ? 'malformed_toolcall'
                 : 'missing_session';
+        nextRequestGenerationReason = retryReason;
         log.info(
           {
             catId,
@@ -4955,6 +5423,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
         await presentationDelivery?.release('provider_transient_retry');
+        nextRequestGenerationReason = 'transient_cli_exit';
         log.info(
           {
             catId,
@@ -5110,6 +5579,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
     await closeActiveServiceIterator();
+    await terminateCurrentRequestGeneration(
+      signal?.aborted ? 'cancelled' : 'error',
+      err instanceof Error ? err.message : String(err),
+    );
     // F152: Record error on invocation span + OTel log
     invocationSpan.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) });
     emitOtelLog('ERROR', 'invocation_error', { [AGENT_ID]: catId, [STATUS]: 'error' }, invocationSpan);
@@ -5135,6 +5608,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     hadError = true;
     turnExecutionFailureReason ??= 'invocation_exception';
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
+    if (err instanceof SessionRolloverCommitError) {
+      for (const lifecycleMessage of err.lifecycleMessages) {
+        yield lifecycleMessage;
+      }
+    }
     yield {
       type: 'error' as const,
       catId,
@@ -5153,6 +5631,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     };
   } finally {
     await closeActiveServiceIterator();
+    await terminateCurrentRequestGeneration(
+      turnExecutionCompletedSuccessfully
+        ? 'accepted'
+        : callerSignal?.aborted || invocationAc.signal.aborted
+          ? 'cancelled'
+          : hadError || turnExecutionFailureReason !== undefined
+            ? 'error'
+            : 'unknown',
+      turnExecutionFailureReason ?? turnExecutionInterruptionReason,
+    );
     await presentationDelivery?.release('invocation_finalized_without_delivery');
     if (deps.turnExecutionStore && ownsTurnExecution) {
       let terminal: TurnExecutionTerminalInput;

@@ -1,7 +1,7 @@
 ---
-title: "F306 feature-close trace feedback"
+title: "EXT-002 feature-close trace feedback (legacy F306 delivery)"
 doc_kind: harness_feedback
-feature_ids: [F306]
+feature_ids: [EXT-002]
 created: 2026-08-25
 evidence_refs:
   - "thread_mt80fxovuy2dyh5b#0001787709974991-000205-88901fd0"
@@ -9,11 +9,13 @@ evidence_refs:
   - "qianfengXY/clowder-ai#11"
 ---
 
-# F306 Feature-Close Trace Feedback
+# EXT-002 Feature-Close Trace Feedback — legacy F306 delivery
+
+> **Identity note (2026-08-29):** 该交付及下述 trace 发生时，本地 canonical ID 为 `F306`；上游同号功能进入 main 后，本地 Mission Hub Project Workspaces 迁为 `EXT-002`。历史消息、PR、SHA 与日志坐标不改写。
 
 ## Context
 
-F306 是普通用户可见产品 Feature，本身不修改 harness。Completion checkpoint 因两项可复现 trace anomaly 触发展开：错误 remote 使门禁审计了非权威历史；typed local review settlement 未能持久化明确 verdict。
+EXT-002（交付时为本地 F306）是普通用户可见产品 Feature，本身不修改 harness。Completion checkpoint 因两项可复现 trace anomaly 触发展开：错误 remote 使门禁审计了非权威历史；typed local review settlement 未能持久化明确 verdict。
 
 ## Observed Friction
 
@@ -43,4 +45,4 @@ F306 是普通用户可见产品 Feature，本身不修改 harness。Completion 
 
 ## Disposition
 
-本报告只沉淀 harness 证据与改进目标，不改变 F306 AC。F306 的产品门禁由 PR #11 exact-head CI、Kimi review 与 Terra post-merge browser acceptance 独立闭合。
+本报告只沉淀 harness 证据与改进目标，不改变 EXT-002 AC。该功能的产品门禁由 PR #11 exact-head CI、Kimi review 与 Terra post-merge browser acceptance 独立闭合。

@@ -1,6 +1,6 @@
 ---
 name: merge-gate
-tips_exempt: harness/SOP workflow change (merge-gate Step 7.5 dev-process gate); no end-user capability
+tips_exempt: renewed for the synchronized internal merge and review policy; no distinct end-user capability or action
 description: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。
 triggers:
   - "合入 main"

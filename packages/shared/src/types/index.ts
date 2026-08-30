@@ -121,18 +121,6 @@ export {
   validateApprovalOriginRef,
   validateApprovalPublication,
 } from './approval-hub.js';
-// Authorization types (猫猫授权系统)
-export type {
-  AuthorizationAuditEntry,
-  AuthorizationRequestEvent,
-  AuthorizationRespondEvent,
-  AuthorizationRule,
-  PendingRequestRecord,
-  PermissionRequest,
-  PermissionResponse,
-  PermissionStatusResponse,
-  RespondScope,
-} from './authorization.js';
 // Backlog types (F049 Mission Control)
 export type {
   AcquireBacklogLeaseInput,
@@ -228,7 +216,9 @@ export type {
   GovernanceFinding,
   GovernanceHealthSummary,
   GovernancePackMeta,
+  GovernanceProvider,
   GovernanceRule,
+  GovernanceSelection,
   LockVersion,
   McpDeleteParams,
   McpEnvEntry,
@@ -283,6 +273,18 @@ export {
   builtinAccountIdForClient,
   protocolForClient,
 } from './client-routing.js';
+export type {
+  CloudBridgeDomFingerprintV1,
+  CloudBridgeFailureDiagnosticV1,
+  CloudBridgeIdempotencyDisposition,
+  CloudBridgeOutboundReceiptV1,
+  CloudBridgeOutboundStatus,
+  CloudBridgeOutboundTransport,
+} from './cloud-bridge-outbound-receipt.js';
+export {
+  isCloudBridgeFailureDiagnosticV1,
+  isCloudBridgeOutboundReceiptV1,
+} from './cloud-bridge-outbound-receipt.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,
@@ -833,6 +835,7 @@ export type {
 } from './meeting-context-block.js';
 export { createMeetingContextBlock } from './meeting-context-block.js';
 export {
+  type MeetingArtifactDescriptor,
   type MeetingIntake,
   type MeetingIntakeChoices,
   type MeetingIntakeExecutionState,
@@ -865,6 +868,7 @@ export {
   judgmentSurfaceEnteredOpportunityV1Schema,
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
+  memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_OPPORTUNITY_V1_PAIRS,
   RECALL_RESOLVER_FAMILIES,
@@ -1210,8 +1214,10 @@ export type {
   QueueTargetAttemptState,
   QueueTargetAttemptTerminalReason,
   QueueTargetOutcome,
+  QueueTargetOutcomeEvidenceRef,
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
+  QueueTurnExecutionEvidenceRef,
 } from './queue-receipt.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {
@@ -1219,6 +1225,8 @@ export type {
   RefluxCategory,
   RefluxPattern,
 } from './reflux.js';
+// F299 Phase D: transcript-owned provider request generations.
+export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
 export type {
   AnswerResolutionInput,
@@ -1363,6 +1371,23 @@ export {
   type SopDefinition,
   type SopDefinitionId,
 } from './sop-definition.generated.js';
+// Lane-neutral Standing Reflex episode/replay contract and content-free health projection.
+export {
+  compareStandingReflexReplays,
+  projectStandingReflexShadowHealth,
+  STANDING_REFLEX_BEATS,
+  STANDING_REFLEX_EXPLICIT_ABSENCES,
+  STANDING_REFLEX_SHADOW_CATEGORIES,
+  type StandingReflexEpisodeV1,
+  type StandingReflexReplayComparison,
+  type StandingReflexReplayContractV1,
+  type StandingReflexShadowCategory,
+  type StandingReflexShadowEventV1,
+  type StandingReflexShadowHealthProjection,
+  standingReflexEpisodeV1Schema,
+  standingReflexReplayContractV1Schema,
+  standingReflexShadowEventV1Schema,
+} from './standing-reflex-episode.js';
 // F252: Story Annotation types (Phase D — annotations at arbitrary timeline points)
 export type { AnnotationSet, StoryAnnotation } from './story-annotation.js';
 // F252: Story Rendering types (Phase C BFF → Frontend)
@@ -1411,9 +1436,6 @@ export type {
 export { extractFeatureIds, isTrackingKind } from './task.js';
 // F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
 // (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
-export type { CancelReasonValue, PermissionCancelEvent } from './task-outcome.js';
-// Task Outcome types (F192 Phase G)
-export { CANCEL_REASON_OPTIONS } from './task-outcome.js';
 // Taste Proposal types (F221 品味信号捕获)
 export type {
   TasteDimension,

@@ -140,6 +140,46 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
   assert.ok(untouchedUpstream.tags.includes('feature:f289'));
 });
 
+test('repository catalog migrates legacy F306 project workspaces without aliasing upstream F306', async () => {
+  const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+  const { migrateLegacyExtensionItems } = await import('../dist/routes/extension-feature-migration.js');
+  const { readExtensionFeatureRows } = await import('../dist/routes/extension-feature-catalog.js');
+  const backlogStore = new BacklogStore();
+  const legacy = await backlogStore.create({
+    userId: 'owner-1',
+    title: '[F306] Mission Hub Project Workspaces',
+    summary: 'legacy local feature metadata',
+    priority: 'p1',
+    tags: ['source:docs-backlog', 'feature:f306', 'status:done'],
+    createdBy: 'user',
+  });
+  const upstream = await backlogStore.create({
+    userId: 'owner-1',
+    title: '[F306] Codex App Capability Parity',
+    summary: 'upstream feature metadata',
+    priority: 'p1',
+    tags: ['source:docs-backlog', 'feature:f306', 'status:in-progress'],
+    createdBy: 'user',
+  });
+
+  const result = await migrateLegacyExtensionItems({
+    items: await backlogStore.listByUser('owner-1'),
+    extensionRows: await readExtensionFeatureRows(),
+    backlogStore,
+    userId: 'owner-1',
+  });
+
+  assert.deepEqual(result.migratedItemIds, [legacy.id]);
+  const migrated = await backlogStore.get(legacy.id, 'owner-1');
+  assert.equal(migrated.title, '[EXT-002] Mission Hub Project Workspaces');
+  assert.ok(migrated.tags.includes('feature:ext-002'));
+  assert.ok(migrated.tags.includes('feature-kind:extension'));
+
+  const untouchedUpstream = await backlogStore.get(upstream.id, 'owner-1');
+  assert.equal(untouchedUpstream.title, '[F306] Codex App Capability Parity');
+  assert.ok(untouchedUpstream.tags.includes('feature:f306'));
+});
+
 test('missing extension catalog is an empty overlay', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cat-cafe-extension-catalog-'));
   try {

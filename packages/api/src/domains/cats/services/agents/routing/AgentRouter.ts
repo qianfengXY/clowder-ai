@@ -540,6 +540,10 @@ export interface AgentRouterOptions {
   sessionChainStore?: ISessionChainStore;
   /** F296 B3b-1: persistent context epoch and cold/hot mode owner. */
   contextEpochOwner?: ContextEpochOwner;
+  /** F296: authenticated Claude project-hook readiness from API bootstrap. */
+  hookAuthenticationReady?: boolean | (() => boolean);
+  /** F296: project-local PreCompact carrier readiness for the invocation workspace. */
+  claudeProjectHookCarrierReady?: boolean | ((projectRoot: string) => boolean);
   /** F296 B3b-2: shared provider-presentation delivery ledger. */
   presentationLedger?: PresentationLedger;
   /** F211 Phase A2: runtime sidecar for provider runtime session metadata */
@@ -604,14 +608,14 @@ export interface AgentRouterOptions {
   turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222: Frustration auto-issue store */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  /** F222: Pending request store — cancel burst detection */
-  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229: Concierge config store for duty-cat岗位 prompt injection */
   conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
   cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  /** F247: shared signer for source-bound cloud Remote MCP returns. */
+  cloudReturnBindingSigner?: import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner;
   /** F247/F167: server-owned terminal producer for the exact cloud A2A carrier. */
   a2aDispatchDispositionService?: Pick<
     import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
@@ -635,6 +639,8 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  /** F231 canonical profile owner for F299 source-lifecycle binding. */
+  profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
 }
 
 /**
@@ -649,6 +655,8 @@ export class AgentRouter {
   private threadStore: IThreadStore | null;
   private sessionChainStore: ISessionChainStore | undefined;
   private contextEpochOwner: ContextEpochOwner | undefined;
+  private hookAuthenticationReady: boolean | (() => boolean);
+  private claudeProjectHookCarrierReady: boolean | ((projectRoot: string) => boolean);
   private presentationLedger: PresentationLedger | undefined;
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
   private transcriptWriter: TranscriptWriter | undefined;
@@ -697,13 +705,13 @@ export class AgentRouter {
   private turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222 */
   private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  private pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229 */
   private conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
   private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  private cloudReturnBindingSigner?: import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner;
   private a2aDispatchDispositionService?: Pick<
     import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
     'complete'
@@ -725,6 +733,7 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  private profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
   private speechMentionRe: RegExp;
 
   /**
@@ -809,6 +818,8 @@ export class AgentRouter {
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
     this.contextEpochOwner = options.contextEpochOwner;
+    this.hookAuthenticationReady = options.hookAuthenticationReady ?? false;
+    this.claudeProjectHookCarrierReady = options.claudeProjectHookCarrierReady ?? false;
     this.presentationLedger = options.presentationLedger;
     this.runtimeSessionStore = options.runtimeSessionStore;
     this.transcriptWriter = options.transcriptWriter;
@@ -837,10 +848,10 @@ export class AgentRouter {
     this.ballCustody = options.ballCustody;
     this.turnCustodyProjectionService = options.turnCustodyProjectionService;
     this.frustrationIssueStore = options.frustrationIssueStore;
-    this.pendingRequestStore = options.pendingRequestStore;
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
+    this.cloudReturnBindingSigner = options.cloudReturnBindingSigner;
     this.a2aDispatchDispositionService = options.a2aDispatchDispositionService;
     this.freshnessReinvokeCheck = options.freshnessReinvokeCheck;
     this.turnExecutionStore = options.turnExecutionStore;
@@ -851,6 +862,7 @@ export class AgentRouter {
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
+    this.profileRepository = options.profileRepository;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -1473,6 +1485,8 @@ export class AgentRouter {
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
         ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
+        hookAuthenticationReady: this.hookAuthenticationReady,
+        claudeProjectHookCarrierReady: this.claudeProjectHookCarrierReady,
         ...(this.presentationLedger ? { presentationLedger: this.presentationLedger } : {}),
         ...(this.runtimeSessionStore ? { runtimeSessionStore: this.runtimeSessionStore } : {}),
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
@@ -1489,6 +1503,7 @@ export class AgentRouter {
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
+        ...(this.cloudReturnBindingSigner ? { cloudReturnBindingSigner: this.cloudReturnBindingSigner } : {}),
         ...(this.a2aDispatchDispositionService
           ? { a2aDispatchDispositionService: this.a2aDispatchDispositionService }
           : {}),
@@ -1498,6 +1513,7 @@ export class AgentRouter {
           ? { providerNativeFreshnessFactory: this.providerNativeFreshnessFactory }
           : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
+        ...(this.profileRepository ? { profileRepository: this.profileRepository } : {}),
       },
       messageStore: this.messageStore,
       deliveryCursorStore: this.deliveryCursorStore,
@@ -1516,7 +1532,6 @@ export class AgentRouter {
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),
       ...(this.frustrationIssueStore ? { frustrationIssueStore: this.frustrationIssueStore } : {}),
-      ...(this.pendingRequestStore ? { pendingRequestStore: this.pendingRequestStore } : {}),
       ...(this.ballCustody ? { ballCustody: this.ballCustody } : {}),
       ...(this.turnCustodyProjectionService ? { turnCustodyProjectionService: this.turnCustodyProjectionService } : {}),
       ...(this.freshnessEventLog ? { freshnessEventLog: this.freshnessEventLog } : {}),

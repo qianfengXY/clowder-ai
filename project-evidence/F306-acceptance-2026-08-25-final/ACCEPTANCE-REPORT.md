@@ -1,5 +1,7 @@
 # F306 post-merge acceptance — APPROVED
 
+> **Historical identity:** 本验收针对 2026-08-25 当时的本地 F306；该功能于 2026-08-29 迁为 `EXT-002`。目录名、merge SHA 与证据内容保持历史原样。
+
 - **Exact merged revision:** `fork/main@2ab1335c70f9bd29d1b3ee59b2c86cd280362418`
 - **Environment:** isolated worktree, web `127.0.0.1:5172`, API `127.0.0.1:3172`, isolated Redis `6328`, synthetic `default-user` only.
 - **Excluded:** dormant live runtime, production/user data, runtime configuration, repository files, historic failure evidence.

@@ -96,6 +96,15 @@ describe('Mission Hub project workspace projection', () => {
 
     expect(isCanonicalProjectItem(item)).toBe(false);
     expect(item.tags).toContain('feature-kind:extension');
-    expect(isCanonicalProjectItem({ ...item, title: '[F306] Project workspaces', tags: ['feature:f306'] })).toBe(true);
+    expect(
+      isCanonicalProjectItem({ ...item, title: '[F306] Codex App Capability Parity', tags: ['feature:f306'] }),
+    ).toBe(true);
+    expect(
+      isCanonicalProjectItem({
+        ...item,
+        title: '[EXT-002] Mission Hub Project Workspaces',
+        tags: ['feature:ext-002', 'feature-kind:extension'],
+      }),
+    ).toBe(false);
   });
 });

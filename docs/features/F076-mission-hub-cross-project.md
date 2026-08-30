@@ -1,10 +1,10 @@
 ---
 feature_ids: [F076]
-related_features: [F049, F058, F070, F152, F306]
+related_features: [F049, F058, F070, F152]
 topics: [mission-hub, cross-project, dispatch, reflux, command-center, client-governance]
 doc_kind: spec
 created: 2026-03-07
-tips_exempt: "Superseded Mission Hub projection; the current user journey and discovery action are owned by the F306 project-workspaces capability tip."
+tips_exempt: "Superseded Mission Hub projection; the current user journey and discovery action are owned by the EXT-002 project-workspaces capability tip."
 ---
 
 # F076: Mission Hub 跨项目作战面板 + 甲方项目治理引擎
@@ -13,7 +13,7 @@ tips_exempt: "Superseded Mission Hub projection; the current user journey and di
 > **Evolved from**: F049（Mission Control MVP）+ F058（Mission Hub 增强）+ F070（Portable Governance）
 > **Superseded by**: F152（Expedition Memory — 外部项目记忆冷启动 + 经验回流）
 
-> **Project workspace evolution (2026-08-25)**: F306 保留本 Feature 建立的 `ExternalProject` registry、项目 backlog 绑定与历史治理数据，但替代“功能/依赖/外部项目并列 Tab”的不对称 Mission Hub 投影。F076 的 Need Audit 实验面保留为历史/可选能力，不再定义默认项目入口。
+> **Project workspace evolution (2026-08-25; identity migrated 2026-08-29)**: EXT-002（原本地 F306）保留本 Feature 建立的 `ExternalProject` registry、项目 backlog 绑定与历史治理数据，但替代“功能/依赖/外部项目并列 Tab”的不对称 Mission Hub 投影。F076 的 Need Audit 实验面保留为历史/可选能力，不再定义默认项目入口。
 
 ## Why
 
@@ -150,7 +150,7 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 
 - **Evolved from**: F049/F058（Mission Hub 基座）
 - **Related**: F070（治理回流与 dispatch 边界）
-- **Related**: F306（项目成为 Mission Hub 一级坐标；本 Feature 的外部项目特殊 Tab 被统一工作区取代）
+- **Related extension**: EXT-002（项目成为 Mission Hub 一级坐标；本 Feature 的外部项目特殊 Tab 被统一工作区取代）
 | 依赖 | 关系 |
 |------|------|
 | F049 Mission Control MVP | Evolved from — 单项目任务调度基座 |

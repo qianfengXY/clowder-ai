@@ -1,5 +1,5 @@
 /**
- * F076/F306: External Project registry and ownership-scoped BACKLOG routes
+ * F076/EXT-002: External Project registry and ownership-scoped BACKLOG routes
  */
 
 import { readFile } from 'node:fs/promises';

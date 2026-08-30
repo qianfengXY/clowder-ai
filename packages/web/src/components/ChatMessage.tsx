@@ -29,6 +29,7 @@ import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { ExternalLinkIcon } from './HubConfigIcons';
 import { describeMessageInvocationTrajectory, InvocationTrajectoryAnchor } from './InvocationTrajectoryAnchor';
+import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { focusTurnAbsorptionSummary, MessageReceiptDock } from './MessageReceiptDock';
@@ -627,6 +628,7 @@ export const ChatMessage = memo(function ChatMessage({
 
     const userHeader = (
       <div className="flex justify-end items-center gap-2 mb-1">
+        <MessageActionSlot />
         {isWhisper && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
@@ -742,6 +744,7 @@ export const ChatMessage = memo(function ChatMessage({
     message.extra?.auxiliaryTurnExecutions?.length ? (
       <div
         className="mb-1 flex flex-col gap-1 min-w-0"
+        data-testid="message-header"
         data-turn-execution-owner={message.extra?.turnExecution?.invocationId}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -848,6 +851,7 @@ export const ChatMessage = memo(function ChatMessage({
               onSynthesize={ttsSynthesize}
             />
           )}
+          <MessageActionSlot />
         </div>
         {showSchedulerAccent && (
           <div className={SCHEDULER_ACCENT_BADGE_CLASS}>

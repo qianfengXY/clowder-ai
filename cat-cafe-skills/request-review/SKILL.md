@@ -1,6 +1,6 @@
 ---
 name: request-review
-tips_exempt: harness-internal review routing convention; no distinct end-user capability surface
+tips_exempt: renewed for synchronized internal review routing semantics; no distinct end-user capability or action
 description: >
   Route a change to a non-author local peer when local review is the selected independent validation source.
   Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
