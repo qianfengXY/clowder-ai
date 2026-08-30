@@ -1,5 +1,9 @@
 import type { CatId } from '@cat-cafe/shared';
 import {
+  readManagedCommandWakeCarrierIdentity,
+  retireManagedCommandWakeCarrierCustody,
+} from '../../../../ball-custody/managed-command-wake-carrier-retirement.js';
+import {
   WaitContinuationCarrierError,
   waitContinuationCarrierFromStoredMessage,
 } from '../../../../ball-custody/wait-continuation-carrier.js';
@@ -59,6 +63,27 @@ export async function reconcileStartupCustodyMessage(
     if (!message || message.deliveryStatus !== 'queued' || !current) return null;
     if (current.status === 'terminal' && (current.withdrawnByCatIds?.length ?? 0) > 0) {
       return { message, terminalized: true, handledTargets: 0, failedTargets: 0 };
+    }
+    const managedCarrier = readManagedCommandWakeCarrierIdentity(message);
+    if (
+      managedCarrier &&
+      deps.dynamicTaskStore &&
+      !deps.dynamicTaskStore.getById(managedCarrier.taskId) &&
+      current.status === 'queued' &&
+      current.carrierStateByTargetCatId?.[managedCarrier.catId]?.status !== 'processing'
+    ) {
+      const retirement = await retireManagedCommandWakeCarrierCustody(
+        deps.messageStore,
+        message,
+        managedCarrier,
+        now(),
+      );
+      if (retirement === 'retired') {
+        const retired = await deps.messageStore.getById(messageId);
+        if (!retired) return null;
+        return { message: retired, terminalized: true, handledTargets: 0, failedTargets: 0 };
+      }
+      continue;
     }
     const built = await buildRestartProjection(deps, message, current, now());
     if (sameActiveProjection(current, built.next)) {

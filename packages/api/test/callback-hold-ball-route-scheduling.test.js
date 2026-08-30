@@ -88,6 +88,36 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     return { ...deps, ...overrides };
   }
 
+  function seedManagedHoldTask(deps, { threadId, userId, taskId = 'hold-ball-prior-managed' }) {
+    deps._insertedTasks.push({
+      id: taskId,
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: Date.now() + 900_000 },
+      params: {
+        message: 'prior managed wake',
+        targetCatId: 'codex',
+        triggerUserId: userId,
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          createdBy: 'hold-ball:codex',
+          managedCommand: {
+            state: 'enqueued',
+            command: 'pnpm test',
+            startedAt: Date.now() - 10_000,
+            messageId: 'message-prior-managed',
+          },
+        },
+      },
+      display: { label: 'prior managed hold', category: 'system', description: 'prior managed hold' },
+      deliveryThreadId: threadId,
+      enabled: true,
+      createdBy: 'hold-ball:codex',
+      createdAt: new Date().toISOString(),
+    });
+    return taskId;
+  }
+
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -242,6 +272,165 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(liveTasks[0].id, secondTaskId);
     assert.match(liveTasks[0].params.message, /wait-B/);
     assert.match(liveTasks[0].params.message, /continue-B/);
+  });
+
+  test('retires a prior managed-command carrier before deleting its producer task', async () => {
+    const order = [];
+    const deps = makeStubDeps({
+      managedCommandWakeRecovery: {
+        async retireReplacedTask(taskId) {
+          order.push(`retire:${taskId}`);
+          return 'retired';
+        },
+      },
+    });
+    const originalRemove = deps.dynamicTaskStore.remove;
+    deps.dynamicTaskStore.remove = (taskId) => {
+      order.push(`remove:${taskId}`);
+      return originalRemove(taskId);
+    };
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-managed-replace', 'hb-managed-replace');
+    const priorTaskId = seedManagedHoldTask(deps, { threadId: thread.id, userId: 'user-hb-managed-replace' });
+    const { invocationId, callbackToken } = await registry.create('user-hb-managed-replace', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'next bounded wait',
+        nextStep: 'continue after next wait',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.ok(order.indexOf(`retire:${priorTaskId}`) >= 0);
+    assert.ok(order.indexOf(`remove:${priorTaskId}`) > order.indexOf(`retire:${priorTaskId}`));
+    assert.ok(deps._removedIds.includes(priorTaskId));
+  });
+
+  test('rolls back a new hold when prior managed-command carrier retirement is unavailable', async () => {
+    const deps = makeStubDeps({
+      managedCommandWakeRecovery: {
+        async retireReplacedTask() {
+          return 'unavailable';
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-managed-retire-fail', 'hb-managed-retire-fail');
+    const priorTaskId = seedManagedHoldTask(deps, {
+      threadId: thread.id,
+      userId: 'user-hb-managed-retire-fail',
+      taskId: 'hold-ball-prior-retire-fail',
+    });
+    const { invocationId, callbackToken } = await registry.create('user-hb-managed-retire-fail', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'unsafe replacement must fail',
+        nextStep: 'must not launch replacement',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 503);
+    const liveTasks = deps.dynamicTaskStore.getAll();
+    assert.deepEqual(
+      liveTasks.map((task) => task.id),
+      [priorTaskId],
+    );
+    assert.ok(!deps._unregisteredIds.includes(priorTaskId));
+    assert.ok(!deps._removedIds.includes(priorTaskId));
+    assert.equal(deps._registeredDynamic.length, 1, 'new task was registered before fail-closed cleanup');
+    assert.ok(
+      deps._unregisteredIds.some((taskId) => taskId !== priorTaskId),
+      'new task must be unregistered',
+    );
+    assert.ok(
+      deps._removedIds.some((taskId) => taskId !== priorTaskId),
+      'new task must be removed',
+    );
+  });
+
+  test('rolls back a new hold when prior managed-command carrier retirement throws', async () => {
+    const deps = makeStubDeps({
+      managedCommandWakeRecovery: {
+        async retireReplacedTask() {
+          throw new Error('simulated retirement store failure');
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-managed-retire-throw', 'hb-managed-retire-throw');
+    const priorTaskId = seedManagedHoldTask(deps, {
+      threadId: thread.id,
+      userId: 'user-hb-managed-retire-throw',
+      taskId: 'hold-ball-prior-retire-throw',
+    });
+    const { invocationId, callbackToken } = await registry.create('user-hb-managed-retire-throw', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'throwing retirement must fail closed',
+        nextStep: 'must not launch replacement',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(
+      deps.dynamicTaskStore.getAll().map((task) => task.id),
+      [priorTaskId],
+    );
+    assert.ok(!deps._unregisteredIds.includes(priorTaskId));
+    assert.ok(!deps._removedIds.includes(priorTaskId));
+  });
+
+  test('keeps an in-flight prior managed-command producer until its exact child settles', async () => {
+    const deps = makeStubDeps({
+      managedCommandWakeRecovery: {
+        async retireReplacedTask() {
+          return 'in_flight';
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-managed-in-flight', 'hb-managed-in-flight');
+    const priorTaskId = seedManagedHoldTask(deps, {
+      threadId: thread.id,
+      userId: 'user-hb-managed-in-flight',
+      taskId: 'hold-ball-prior-in-flight',
+    });
+    const { invocationId, callbackToken } = await registry.create('user-hb-managed-in-flight', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'continue after current managed wake',
+        nextStep: 'resume after current child settles',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.ok(!deps._unregisteredIds.includes(priorTaskId));
+    assert.ok(!deps._removedIds.includes(priorTaskId));
+    assert.equal(deps.dynamicTaskStore.getAll().length, 2, 'current producer and its successor both remain traceable');
   });
 
   test('F167-G cloud P1: registerDynamic failure rolls back new insert and retains prior hold (atomic swap)', async () => {

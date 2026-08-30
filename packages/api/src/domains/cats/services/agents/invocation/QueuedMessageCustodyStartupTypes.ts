@@ -1,3 +1,4 @@
+import type { DynamicTaskStore } from '../../../../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
@@ -15,6 +16,8 @@ export interface StartupCustodyDeps {
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   /** Reuses the live Queue preflight to fence a source already superseded in Ball custody. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  /** F167: surviving producer truth for scheduler-authored managed wake carriers. */
+  dynamicTaskStore?: Pick<DynamicTaskStore, 'getById'>;
   invocationQueue: InvocationQueue;
   log: StartupCustodyLog;
   now?: () => number;

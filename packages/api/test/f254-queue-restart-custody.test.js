@@ -115,6 +115,7 @@ function createReconciler({
   records = [],
   turnExecutions = [],
   a2aDispatchDispositionService,
+  dynamicTaskStore,
 }) {
   const liveA2AReplacementPreflight = {
     async inspectHandoff({ sourceMessageId, catId }) {
@@ -131,6 +132,7 @@ function createReconciler({
     invocationQueue,
     invocationRecordStore: createRecordStore(records),
     turnExecutionStore: createTurnExecutionStore(turnExecutions),
+    ...(dynamicTaskStore ? { dynamicTaskStore } : {}),
     a2aDispatchDispositionService: a2aDispatchDispositionService ?? liveA2AReplacementPreflight,
     now: () => 2_000,
     log: { info() {}, warn() {} },
@@ -311,7 +313,15 @@ describe('F254 Queue restart custody', () => {
       },
     });
     const invocationQueue = new InvocationQueue();
-    const reconciler = createReconciler({ messageStore, invocationQueue });
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      dynamicTaskStore: {
+        getById(taskId) {
+          return taskId === 'hold-ball-owner-restart' ? { id: taskId } : null;
+        },
+      },
+    });
 
     const result = await reconciler.reconcile();
 
@@ -366,6 +376,95 @@ describe('F254 Queue restart custody', () => {
       catIds: [],
       complete: true,
     });
+  });
+
+  test('terminalizes an exact taskless managed-command carrier without replaying its failed attempt', async () => {
+    const messageStore = createMessageStore();
+    const failedAttempt = {
+      id: 'entry-orphan-managed:opus:1',
+      targetCatId: 'opus',
+      sequence: 1,
+      state: 'failed',
+      createdAt: 1_000,
+      updatedAt: 1_500,
+      invocationId: 'invocation-missing-disposition',
+      terminalReason: 'invocation_failed',
+    };
+    const message = appendQueued(
+      messageStore,
+      custody({
+        entryId: 'entry-orphan-managed',
+        revision: 3,
+        ownerUserId: 'user-1',
+        ownerAuthProvenance: 'strict',
+        failedByCatIds: ['opus'],
+        targetAttempts: [failedAttempt],
+        updatedAt: 1_500,
+      }),
+      {
+        userId: 'scheduler',
+        catId: null,
+        source: {
+          connector: 'hold-ball',
+          label: 'managed wake',
+          icon: '⏱️',
+          meta: {
+            wakeWhen: true,
+            taskId: 'hold-ball-missing-producer',
+            threadId: 'thread-1',
+            catId: 'opus',
+            terminalReceipt: true,
+          },
+        },
+      },
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      dynamicTaskStore: { getById: () => null },
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 0);
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-orphan-managed'), null);
+    const stored = messageStore.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'delivered');
+    assert.equal(stored.queueCustody.status, 'terminal');
+    assert.deepEqual(stored.queueCustody.pendingTargetCats, []);
+    assert.deepEqual(stored.queueCustody.failedByCatIds, []);
+    assert.deepEqual(stored.queueCustody.withdrawnByCatIds, ['opus']);
+    assert.deepEqual(stored.queueCustody.targetAttempts, [failedAttempt]);
+
+    const second = await reconciler.reconcile();
+    assert.equal(second.entriesRestored, 0);
+    assert.equal(second.messagesTerminalized, 0);
+  });
+
+  test('does not classify a task-like ordinary connector as an orphan managed command', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(messageStore, custody({ ownerUserId: 'user-1' }), {
+      userId: 'scheduler',
+      source: {
+        connector: 'ordinary-scheduler',
+        label: 'ordinary connector',
+        meta: { wakeWhen: true, taskId: 'hold-ball-looking-string' },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      dynamicTaskStore: { getById: () => null },
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 1);
+    assert.equal(messageStore.getById(message.id).deliveryStatus, 'queued');
+    assert.ok(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1'));
   });
 
   test('rehydrates a wait continuation carrier from its canonical connector message', async () => {

@@ -121,6 +121,23 @@ export class ManagedCommandWakeRecoverySweep {
     }
     return retired;
   }
+  async retireReplacedTask(taskId: string): Promise<'retired' | 'in_flight' | 'unavailable' | 'missing'> {
+    const parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
+    if (!parsed) return 'missing';
+    const messageId = parsed.command.messageId;
+    if (!messageId) return 'retired';
+    const retire = this.deps.retireEventCarrier;
+    if (!retire) return 'unavailable';
+    const outcome = await retire({
+      taskId,
+      threadId: parsed.threadId,
+      userId: parsed.userId,
+      catId: parsed.catId,
+      messageId,
+    });
+    if (outcome !== 'retired') return outcome;
+    return this.consume(parsed, undefined, 'withdrawn') === 'recovered' ? 'retired' : 'unavailable';
+  }
   async retireThread(
     threadId: string,
     userId: string,

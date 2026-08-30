@@ -5657,6 +5657,7 @@ async function main(): Promise<void> {
           messageStore,
           socketManager: socketManager ?? undefined,
           invocationQueue,
+          dynamicTaskStore,
           ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
           resumePrestartRetirement: (entries) => queueProcessor.resumeDurablePrestartRetirement(entries),
           ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),

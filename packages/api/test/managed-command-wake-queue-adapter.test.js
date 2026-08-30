@@ -152,4 +152,52 @@ test('managed wake adapter retries one exact failed disposition attempt under it
     }),
     'not_retryable',
   );
+
+  const transitionQueueCustody = messageStore.transitionQueueCustody.bind(messageStore);
+  let failRetirementWrite = true;
+  messageStore.transitionQueueCustody = (...args) => {
+    if (failRetirementWrite) {
+      failRetirementWrite = false;
+      throw new Error('simulated custody write failure');
+    }
+    return transitionQueueCustody(...args);
+  };
+  assert.equal(
+    await adapter.retireEventCarrier({
+      taskId,
+      threadId,
+      userId,
+      catId,
+      messageId: message.id,
+    }),
+    'unavailable',
+  );
+  assert.ok(
+    queue.getEntrySnapshot(threadId, userId, entry.id),
+    'failed durable retirement must restore the exact Queue snapshot',
+  );
+
+  assert.equal(
+    await adapter.retireEventCarrier({
+      taskId,
+      threadId,
+      userId,
+      catId,
+      messageId: message.id,
+    }),
+    'retired',
+  );
+  const retired = messageStore.getById(message.id);
+  assert.equal(retired.deliveryStatus, 'delivered');
+  assert.equal(retired.queueCustody.status, 'terminal');
+  assert.deepEqual(retired.queueCustody.pendingTargetCats, []);
+  assert.deepEqual(retired.queueCustody.withdrawnByCatIds, [catId]);
+  assert.deepEqual(
+    retired.queueCustody.targetAttempts.map(({ id, state }) => ({ id, state })),
+    [
+      { id: `${entry.id}:${catId}:1`, state: 'failed' },
+      { id: `${entry.id}:${catId}:2`, state: 'cancelled' },
+    ],
+  );
+  assert.equal(queue.getEntrySnapshot(threadId, userId, entry.id), null);
 });

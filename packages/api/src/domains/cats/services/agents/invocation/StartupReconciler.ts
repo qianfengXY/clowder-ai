@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { DynamicTaskStore } from '../../../../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
@@ -89,6 +90,8 @@ export interface StartupReconcilerDeps {
   invocationQueue?: InvocationQueue;
   /** F298: exact A2A replacement fence shared with live Queue admission. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  /** F167: task-side producer truth used to detect orphan managed-command carriers. */
+  dynamicTaskStore?: Pick<DynamicTaskStore, 'getById'>;
   /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
   resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
   /** Resume a durable exact-group retirement before any later entry in that scope may dispatch. */
@@ -413,6 +416,7 @@ export class StartupReconciler {
       ...(this.deps.a2aDispatchDispositionService
         ? { a2aDispatchDispositionService: this.deps.a2aDispatchDispositionService }
         : {}),
+      ...(this.deps.dynamicTaskStore ? { dynamicTaskStore: this.deps.dynamicTaskStore } : {}),
       invocationQueue,
       messageStore: messageStore as IMessageStore,
       log: this.deps.log,
