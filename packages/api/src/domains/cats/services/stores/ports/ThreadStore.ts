@@ -616,6 +616,8 @@ export interface IThreadStore {
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
+  /** Removes the reverse backlog reference without deleting the thread or its messages. */
+  unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): boolean | Promise<boolean>;
   /**
    * F046 D3: Persist one-shot feedback for suppressed A2A mentions.
    * The next invocation of this cat in this thread should consume and clear it.
@@ -1073,6 +1075,14 @@ export class ThreadStore implements IThreadStore {
   linkBacklogItem(threadId: string, backlogItemId: string): void {
     const thread = this.get(threadId);
     if (thread) thread.backlogItemId = backlogItemId;
+  }
+
+  unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || (expectedBacklogItemId && thread.backlogItemId !== expectedBacklogItemId)) return false;
+    if (!thread.backlogItemId) return false;
+    delete thread.backlogItemId;
+    return true;
   }
 
   setMentionRoutingFeedback(threadId: string, catId: CatId, feedback: ThreadMentionRoutingFeedback): void {

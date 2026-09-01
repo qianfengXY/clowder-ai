@@ -332,6 +332,17 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(updated?.backlogItemId, 'blg_123');
   });
 
+  it('unlinkBacklogItem() only clears the expected reverse backlog reference', async () => {
+    const thread = await store.create('user1', 'Backlog unlink');
+    await store.linkBacklogItem(thread.id, 'blg_123');
+
+    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_other'), false);
+    assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_123');
+
+    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_123'), true);
+    assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
+  });
+
   it('set/consumeMentionRoutingFeedback() returns one-shot payload', async () => {
     const thread = await store.create('user1', 'Feedback');
     await store.setMentionRoutingFeedback(thread.id, 'codex', {

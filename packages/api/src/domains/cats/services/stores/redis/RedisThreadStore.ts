@@ -586,6 +586,20 @@ export class RedisThreadStore implements IThreadStore {
     await this.setDetailFields(key, 'backlogItemId', backlogItemId);
   }
 
+  async unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    if (!expectedBacklogItemId) {
+      return (await this.redis.hdel(key, 'backlogItemId')) > 0;
+    }
+    const removed = await this.redis.eval(
+      "if redis.call('HGET', KEYS[1], 'backlogItemId') == ARGV[1] then return redis.call('HDEL', KEYS[1], 'backlogItemId') else return 0 end",
+      1,
+      key,
+      expectedBacklogItemId,
+    );
+    return Number(removed) > 0;
+  }
+
   async setMentionRoutingFeedback(
     threadId: string,
     catId: CatId,

@@ -19,7 +19,7 @@ import type {
   UpdateBacklogDispatchProgressInput,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/BacklogStore.js';
+import type { DeleteBacklogItemInput, EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/BacklogStore.js';
 import { BacklogTransitionError, buildTaskBackedBacklogItem, isMatchingTaskBackedItem } from '../ports/BacklogStore.js';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
@@ -44,6 +44,32 @@ if ttl and ttl > 0 then
   redis.call('EXPIRE', KEYS[1], ttl)
   redis.call('EXPIRE', KEYS[2], ttl)
 end
+return 1
+`;
+
+/**
+ * KEYS[1] = backlog:item:{id}
+ * KEYS[2] = backlog:items:user:{userId}
+ * KEYS[3] = backlog:dispatch-lock:{id}
+ * ARGV[1] = expected userId
+ * ARGV[2] = expected projectId
+ * ARGV[3] = itemId
+ *
+ * return: 1 deleted, 0 missing or outside the exact owner/project scope
+ */
+const DELETE_ITEM_LUA = `
+if redis.call('HGET', KEYS[1], 'id') == false then
+  return 0
+end
+if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] then
+  return 0
+end
+if redis.call('HGET', KEYS[1], 'projectId') ~= ARGV[2] then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], ARGV[3])
+redis.call('DEL', KEYS[3])
 return 1
 `;
 
@@ -646,6 +672,22 @@ export class RedisBacklogStore implements IBacklogStore {
     };
     await this.writeItem(updated);
     return updated;
+  }
+
+  async delete(itemId: string, input: DeleteBacklogItemInput): Promise<BacklogItem | null> {
+    const existing = await this.get(itemId, input.userId);
+    if (!existing || existing.projectId !== input.projectId) return null;
+    const deleted = await this.redis.eval(
+      DELETE_ITEM_LUA,
+      3,
+      BacklogKeys.detail(itemId),
+      BacklogKeys.userList(input.userId),
+      BacklogKeys.dispatchLock(itemId),
+      input.userId,
+      input.projectId,
+      itemId,
+    );
+    return Number(deleted) === 1 ? existing : null;
   }
 
   async get(itemId: string, userId?: string): Promise<BacklogItem | null> {

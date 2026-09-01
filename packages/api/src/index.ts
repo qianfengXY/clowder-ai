@@ -5013,6 +5013,7 @@ async function main(): Promise<void> {
     externalProjectStore,
     needAuditFrameStore,
     backlogStore,
+    threadStore,
     ...(workflowSopStore ? { workflowSopStore } : {}),
   });
   await app.register(desktopDevelopmentLoopRoutes, {

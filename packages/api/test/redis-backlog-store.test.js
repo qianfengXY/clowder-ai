@@ -137,6 +137,33 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal((await store.listByUser('default-user'))[0]?.projectId, 'project-traqen');
   });
 
+  it('delete removes only the exact owner/project item and clears its list and dispatch lock', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: '[F007] Retired feature',
+      summary: 'must be reusable after explicit removal',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+    await redis.set(`backlog:dispatch-lock:${created.id}`, 'test-lock');
+
+    assert.equal(
+      await store.delete(created.id, { userId: 'default-user', projectId: 'another-project' }),
+      null,
+      'a project mismatch must leave the record intact',
+    );
+    assert.ok(await store.get(created.id));
+
+    const removed = await store.delete(created.id, { userId: 'default-user', projectId: 'project-traqen' });
+    assert.equal(removed?.id, created.id);
+    assert.equal(await store.get(created.id), null);
+    assert.equal(await redis.zscore('backlog:items:user:default-user', created.id), null);
+    assert.equal(await redis.get(`backlog:dispatch-lock:${created.id}`), null);
+  });
+
   it('reopen transitions a done item to open with an auditable correction reason', async (t) => {
     if (!connected) return t.skip('Redis not connected');
     const created = await store.create({

@@ -48,6 +48,12 @@ export interface EnsureTaskBackedBacklogItemInput {
   readonly createdBy: CreateBacklogItemInput['createdBy'];
 }
 
+/** Exact owner/project scope required for permanent removal of an imported backlog record. */
+export interface DeleteBacklogItemInput {
+  readonly userId: string;
+  readonly projectId: string;
+}
+
 export function taskBacklogItemId(taskId: string): string {
   return `task:${taskId}`;
 }
@@ -98,6 +104,7 @@ export interface IBacklogStore {
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
+  delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   get(itemId: string, userId?: string): BacklogItem | null | Promise<BacklogItem | null>;
   listByUser(userId: string): BacklogItem[] | Promise<BacklogItem[]>;
   suggestClaim(itemId: string, input: SuggestBacklogClaimInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -241,6 +248,13 @@ export class BacklogStore implements IBacklogStore {
     };
     this.items.set(itemId, updated);
     return updated;
+  }
+
+  delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (!existing || existing.userId !== input.userId || existing.projectId !== input.projectId) return null;
+    this.items.delete(itemId);
+    return existing;
   }
 
   get(itemId: string, userId?: string): BacklogItem | null {
