@@ -18,6 +18,7 @@ describe('managed-work invocation binding provenance', () => {
         messageStore: { getById: messageForId },
         threadStore: { get: async () => ({ id: 'ordinary-feature-thread', backlogItemId: 'backlog-1' }) },
         workflowSopStore: {
+          get: async () => ({ stage: 'impl' }),
           bindManagedWorkAttempt: async (ownerUserId, backlogItemId, executorCatId) => {
             bindCalls.push({ ownerUserId, backlogItemId, executorCatId });
             return {
@@ -60,6 +61,23 @@ describe('managed-work invocation binding provenance', () => {
     const result = await resolveManagedWorkInvocationBinding({ ...input, triggerMessageId: 'ordinary-trigger' });
     assert.deepEqual(result, { workId: 'work-1', attemptId: 'attempt-1' });
     assert.equal(bindCalls.length, 1);
+  });
+
+  test('does not claim implementation ownership for a kickoff conversation', async () => {
+    const { resolveManagedWorkInvocationBinding } = await loadResolver();
+    const { input, bindCalls } = fixture(async () => ({ content: '请砚砚与搬砖工一起头脑风暴' }));
+
+    const result = await resolveManagedWorkInvocationBinding({
+      ...input,
+      triggerMessageId: 'kickoff-conversation',
+      workflowSopStore: {
+        ...input.workflowSopStore,
+        get: async () => ({ stage: 'kickoff' }),
+      },
+    });
+
+    assert.equal(result, undefined);
+    assert.deepEqual(bindCalls, []);
   });
 
   test('persisted feature Review workspace never claims implementation ownership', async () => {
