@@ -38,6 +38,14 @@ export async function resolveManagedWorkInvocationBinding(input: {
   if (thread && isReviewWorkspaceThreadId(thread.id)) return undefined;
   if (!thread?.backlogItemId) return undefined;
 
+  // Kickoff is a collaborative planning surface, not implementation execution.
+  // Binding its first responding cat would make later @mentions of peers fail
+  // closed on the same attempt and turn an ordinary brainstorming thread into a
+  // single-executor lane. The persisted SOP stage is the authority here; prompt
+  // content and the requested cat must not decide work identity.
+  const workflowSop = await input.workflowSopStore.get(thread.backlogItemId);
+  if (workflowSop?.stage === 'kickoff') return undefined;
+
   const bundle = await input.workflowSopStore.bindManagedWorkAttempt(
     input.ownerUserId,
     thread.backlogItemId,

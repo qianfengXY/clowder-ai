@@ -307,6 +307,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         updateParticipantActivity: async () => {},
       },
       workflowSopStore: {
+        get: async () => ({ stage: 'impl' }),
         bindManagedWorkAttempt: async (ownerUserId, backlogItemId, executorCatId) => {
           assert.equal(ownerUserId, 'owner-1');
           assert.equal(backlogItemId, 'item-managed');
