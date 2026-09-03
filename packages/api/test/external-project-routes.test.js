@@ -14,6 +14,7 @@ describe('External Project Routes', () => {
   /** @type {import('../dist/domains/cats/services/stores/ports/ThreadStore.js').ThreadStore} */
   let threadStore;
   const workflowSops = new Map();
+  let workflowSopDeleteError;
 
   beforeEach(async () => {
     const { ExternalProjectStore } = await import('../dist/domains/projects/external-project-store.js');
@@ -28,6 +29,7 @@ describe('External Project Routes', () => {
     backlogStore = new BacklogStore();
     threadStore = new ThreadStore();
     workflowSops.clear();
+    workflowSopDeleteError = null;
     app = Fastify();
     await app.register(externalProjectRoutes, {
       externalProjectStore,
@@ -38,10 +40,13 @@ describe('External Project Routes', () => {
         async get(backlogItemId) {
           return workflowSops.get(backlogItemId) ?? null;
         },
-        async upsert() {
-          throw new Error('Not implemented in this route test double');
+        async upsert(backlogItemId, featureId, input, updatedBy) {
+          const restored = { backlogItemId, featureId, ...input, updatedBy };
+          workflowSops.set(backlogItemId, restored);
+          return restored;
         },
         async delete(backlogItemId) {
+          if (workflowSopDeleteError) throw workflowSopDeleteError;
           return workflowSops.delete(backlogItemId);
         },
       },
@@ -925,11 +930,24 @@ describe('External Project Routes', () => {
   });
 
   test('DELETE external backlog item removes an imported feature and detaches its thread', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | Maine Coon | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
     const projectRes = await app.inject({
       method: 'POST',
       url: '/api/external-projects',
       headers: H,
-      payload: { name: 'Traqen', description: '', sourcePath: '/tmp/traqen' },
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
     });
     const projectId = projectRes.json().project.id;
     const item = backlogStore.create({
@@ -961,12 +979,327 @@ describe('External Project Routes', () => {
       method: 'DELETE',
       url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
       headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        reason: 'Retired from the authoritative project roadmap',
+      },
     });
 
     assert.equal(removed.statusCode, 204);
     assert.equal(backlogStore.get(item.id), null);
     assert.equal(threadStore.get(thread.id)?.backlogItemId, undefined);
     assert.equal(workflowSops.has(item.id), false);
+  });
+
+  test('DELETE refuses an active feature even when a manual item spoofs importer tags', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'active-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | Maine Coon | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] user-created task',
+      summary: 'manual item with spoofed source tag',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004'],
+      createdBy: 'user',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: item.updatedAt,
+        reason: 'Spoofed importer provenance must not authorize deletion',
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.match(removed.json().error, /active project catalog/i);
+    assert.ok(backlogStore.get(item.id));
+  });
+
+  test('DELETE detaches every owned thread that references the retired backlog item', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'multi-thread-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+    const primary = threadStore.create('user1', 'primary');
+    const additional = threadStore.create('user1', 'additional');
+    threadStore.linkBacklogItem(primary.id, item.id);
+    threadStore.linkBacklogItem(additional.id, item.id);
+    backlogStore.suggestClaim(item.id, {
+      catId: 'cat-4v94tazw',
+      why: 'historical',
+      plan: 'retire',
+      requestedPhase: 'brainstorm',
+    });
+    backlogStore.decideClaim(item.id, { decision: 'approve', decidedBy: 'user1' });
+    backlogStore.markDispatched(item.id, {
+      threadId: primary.id,
+      threadPhase: 'brainstorm',
+      dispatchedBy: 'user1',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        reason: 'Retired from the authoritative project roadmap',
+      },
+    });
+
+    assert.equal(removed.statusCode, 204);
+    assert.equal(threadStore.get(primary.id)?.backlogItemId, undefined);
+    assert.equal(threadStore.get(additional.id)?.backlogItemId, undefined);
+  });
+
+  test('DELETE rejects a stale item snapshot and restores detached thread and workflow state', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'stale-retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+    const thread = threadStore.create('user1', 'historical');
+    threadStore.linkBacklogItem(thread.id, item.id);
+    workflowSops.set(item.id, {
+      backlogItemId: item.id,
+      featureId: 'F007',
+      sopDefinitionId: 'development',
+      stage: 'discussion',
+      batonHolder: 'user1',
+      nextSkill: null,
+      resumeCapsule: { goal: 'retire', done: [], currentFocus: 'cleanup' },
+      checks: {
+        remoteMainSynced: 'unknown',
+        qualityGatePassed: 'unknown',
+        reviewApproved: 'unknown',
+        visionGuardDone: 'unknown',
+      },
+      version: 1,
+      updatedAt: item.updatedAt,
+      updatedBy: 'user1',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt - 1,
+        reason: 'Stale snapshots must never authorize permanent deletion',
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.ok(backlogStore.get(item.id));
+    assert.equal(threadStore.get(thread.id)?.backlogItemId, item.id);
+    assert.equal(workflowSops.get(item.id)?.featureId, 'F007');
+  });
+
+  test('DELETE keeps backlog and thread links intact when workflow cleanup fails', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'workflow-failure-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+    const thread = threadStore.create('user1', 'historical');
+    threadStore.linkBacklogItem(thread.id, item.id);
+    workflowSops.set(item.id, { backlogItemId: item.id });
+    workflowSopDeleteError = new Error('injected workflow cleanup failure');
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        reason: 'Retired from the authoritative project roadmap',
+      },
+    });
+
+    assert.equal(removed.statusCode, 500);
+    assert.ok(backlogStore.get(item.id));
+    assert.equal(threadStore.get(thread.id)?.backlogItemId, item.id);
+    assert.equal(workflowSops.has(item.id), true);
+  });
+
+  test('Traqen reconciliation refreshes canonical titles and priorities and removes only F005/F007', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'traqen-reconciliation-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Priority | Feature | Status | Owner | Source | Spec |',
+        '|---|---|---|---|---|---|---|',
+        '| F001 | P0 | Workspace & Source Truth | spec | CodeX | approved | [F001](features/F001.md) |',
+        '| F002 | P0 | Deterministic Evidence & API Structure | spec | TBD | confirmed | [F002](features/F002.md) |',
+        '| F003 | P1 | Agent Candidates & Reviewed Business Function Tree | spec | TBD | confirmed | [F003](features/F003.md) |',
+        '| F004 | P0 | Change Impact Analysis | spec | TBD | confirmed | [F004](features/F004.md) |',
+        '| F006 | P2 | Workspace capability settings | spec | TBD | authorized | [F006](features/F006.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const oldNames = {
+      F001: 'Workspace and legacy-system analysis foundation',
+      F002: 'Feature and API traceability',
+      F003: 'Traceability graph',
+      F004: 'Claim review',
+      F005: 'Change impact',
+      F006: 'Workspace capability settings',
+      F007: 'Project relaunch discovery',
+    };
+    for (const [featureId, name] of Object.entries(oldNames)) {
+      backlogStore.create({
+        userId: 'user1',
+        projectId,
+        title: `[${featureId}] ${name}`,
+        summary: 'stale persisted snapshot',
+        priority: 'p2',
+        tags: ['source:docs-backlog', `feature:${featureId.toLowerCase()}`, 'status:spec'],
+        createdBy: 'user',
+      });
+    }
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+    assert.equal(imported.statusCode, 200);
+    assert.equal(imported.json().refreshed, 5);
+
+    for (const featureId of ['F005', 'F007']) {
+      const item = backlogStore
+        .listByUser('user1')
+        .find((candidate) => candidate.tags.includes(`feature:${featureId.toLowerCase()}`));
+      const removed = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: featureId,
+          expectedUpdatedAt: item.updatedAt,
+          reason: `Co-creator authorized retirement of ${featureId}`,
+        },
+      });
+      assert.equal(removed.statusCode, 204);
+    }
+
+    const finalItems = backlogStore
+      .listByUser('user1')
+      .filter((item) => item.projectId === projectId)
+      .map((item) => ({
+        featureId: item.tags
+          .find((tag) => tag.startsWith('feature:'))
+          .slice('feature:'.length)
+          .toUpperCase(),
+        title: item.title,
+        priority: item.priority,
+      }))
+      .sort((left, right) => left.featureId.localeCompare(right.featureId));
+    assert.deepEqual(finalItems, [
+      { featureId: 'F001', title: '[F001] Workspace & Source Truth', priority: 'p0' },
+      { featureId: 'F002', title: '[F002] Deterministic Evidence & API Structure', priority: 'p0' },
+      { featureId: 'F003', title: '[F003] Agent Candidates & Reviewed Business Function Tree', priority: 'p1' },
+      { featureId: 'F004', title: '[F004] Change Impact Analysis', priority: 'p0' },
+      { featureId: 'F006', title: '[F006] Workspace capability settings', priority: 'p2' },
+    ]);
   });
 
   test('import-backlog creates a project-bound replacement for orphaned historical data', async () => {

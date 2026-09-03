@@ -52,6 +52,8 @@ export interface EnsureTaskBackedBacklogItemInput {
 export interface DeleteBacklogItemInput {
   readonly userId: string;
   readonly projectId: string;
+  /** Compare-and-delete guard so an operator cannot remove a record that changed after inspection. */
+  readonly expectedUpdatedAt: number;
 }
 
 export function taskBacklogItemId(taskId: string): string {
@@ -252,7 +254,14 @@ export class BacklogStore implements IBacklogStore {
 
   delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null {
     const existing = this.items.get(itemId);
-    if (!existing || existing.userId !== input.userId || existing.projectId !== input.projectId) return null;
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.projectId !== input.projectId ||
+      existing.updatedAt !== input.expectedUpdatedAt
+    ) {
+      return null;
+    }
     this.items.delete(itemId);
     return existing;
   }

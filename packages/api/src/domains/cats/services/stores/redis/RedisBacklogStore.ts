@@ -53,7 +53,8 @@ return 1
  * KEYS[3] = backlog:dispatch-lock:{id}
  * ARGV[1] = expected userId
  * ARGV[2] = expected projectId
- * ARGV[3] = itemId
+ * ARGV[3] = expected updatedAt
+ * ARGV[4] = itemId
  *
  * return: 1 deleted, 0 missing or outside the exact owner/project scope
  */
@@ -67,8 +68,11 @@ end
 if redis.call('HGET', KEYS[1], 'projectId') ~= ARGV[2] then
   return 0
 end
+if redis.call('HGET', KEYS[1], 'updatedAt') ~= ARGV[3] then
+  return 0
+end
 redis.call('DEL', KEYS[1])
-redis.call('ZREM', KEYS[2], ARGV[3])
+redis.call('ZREM', KEYS[2], ARGV[4])
 redis.call('DEL', KEYS[3])
 return 1
 `;
@@ -685,6 +689,7 @@ export class RedisBacklogStore implements IBacklogStore {
       BacklogKeys.dispatchLock(itemId),
       input.userId,
       input.projectId,
+      String(input.expectedUpdatedAt),
       itemId,
     );
     return Number(deleted) === 1 ? existing : null;

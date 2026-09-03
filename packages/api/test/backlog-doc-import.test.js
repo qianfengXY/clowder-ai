@@ -83,6 +83,7 @@ describe('backlog-doc-import parser', () => {
       {
         id: 'F006',
         name: 'Workspace capability settings',
+        priority: 'p0',
         status: 'spec',
         owner: 'TBD',
         link: 'features/F006.md',
@@ -100,6 +101,7 @@ describe('backlog-doc-import parser', () => {
 
     const rows = parseActiveFeaturesFromBacklog(markdown);
     assert.equal(rows[0].name, 'Workspace 能力设置');
+    assert.equal(rows[0].priority, 'p0');
     assert.equal(rows[0].status, 'spec');
     assert.equal(rows[0].link, 'features/F006.zh-CN.md');
   });
@@ -273,6 +275,13 @@ describe('featureStatusToBacklogStatus', () => {
 });
 
 describe('buildBacklogInputFromFeature initialStatus', () => {
+  test('explicit roadmap priority overrides the status-derived fallback', async () => {
+    const { buildBacklogInputFromFeature } = await import('../dist/routes/backlog-doc-import.js');
+    const row = { id: 'F001', name: 'Workspace & Source Truth', priority: 'p0', status: 'spec', owner: 'CodeX' };
+    const input = buildBacklogInputFromFeature(row, 'user1');
+    assert.strictEqual(input.priority, 'p0');
+  });
+
   test('in-progress feature gets initialStatus dispatched', async () => {
     const { buildBacklogInputFromFeature } = await import('../dist/routes/backlog-doc-import.js');
     const row = {

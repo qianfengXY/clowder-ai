@@ -151,13 +151,32 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await redis.set(`backlog:dispatch-lock:${created.id}`, 'test-lock');
 
     assert.equal(
-      await store.delete(created.id, { userId: 'default-user', projectId: 'another-project' }),
+      await store.delete(created.id, {
+        userId: 'default-user',
+        projectId: 'another-project',
+        expectedUpdatedAt: created.updatedAt,
+      }),
       null,
       'a project mismatch must leave the record intact',
     );
     assert.ok(await store.get(created.id));
 
-    const removed = await store.delete(created.id, { userId: 'default-user', projectId: 'project-traqen' });
+    assert.equal(
+      await store.delete(created.id, {
+        userId: 'default-user',
+        projectId: 'project-traqen',
+        expectedUpdatedAt: created.updatedAt - 1,
+      }),
+      null,
+      'a stale snapshot must leave the record intact',
+    );
+    assert.ok(await store.get(created.id));
+
+    const removed = await store.delete(created.id, {
+      userId: 'default-user',
+      projectId: 'project-traqen',
+      expectedUpdatedAt: created.updatedAt,
+    });
     assert.equal(removed?.id, created.id);
     assert.equal(await store.get(created.id), null);
     assert.equal(await redis.zscore('backlog:items:user:default-user', created.id), null);

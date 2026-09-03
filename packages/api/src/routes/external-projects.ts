@@ -33,7 +33,7 @@ export interface ExternalProjectRoutesOptions {
   externalProjectStore: ExternalProjectStore;
   needAuditFrameStore: NeedAuditFrameStore;
   backlogStore: IBacklogStore;
-  threadStore?: Pick<IThreadStore, 'get' | 'linkBacklogItem' | 'unlinkBacklogItem'>;
+  threadStore?: Pick<IThreadStore, 'get' | 'list' | 'linkBacklogItem' | 'unlinkBacklogItem'>;
   workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert' | 'delete'>;
 }
 
@@ -46,6 +46,33 @@ function sameTags(left: readonly string[], right: readonly string[]): boolean {
 
 function isManagedImportItem(item: BacklogItem): boolean {
   return item.tags.includes('source:docs-backlog') || item.tags.includes('source:extension-catalog');
+}
+
+interface RetireBacklogItemRequest {
+  readonly expectedFeatureId: string;
+  readonly expectedUpdatedAt: number;
+  readonly reason: string;
+}
+
+function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const candidate = body as Record<string, unknown>;
+  if (
+    typeof candidate.expectedFeatureId !== 'string' ||
+    !/^(?:F\d{3}|EXT-\d{3})$/i.test(candidate.expectedFeatureId.trim()) ||
+    typeof candidate.expectedUpdatedAt !== 'number' ||
+    !Number.isSafeInteger(candidate.expectedUpdatedAt) ||
+    candidate.expectedUpdatedAt < 0 ||
+    typeof candidate.reason !== 'string' ||
+    candidate.reason.trim().length === 0
+  ) {
+    return null;
+  }
+  return {
+    expectedFeatureId: candidate.expectedFeatureId.trim().toUpperCase(),
+    expectedUpdatedAt: candidate.expectedUpdatedAt,
+    reason: candidate.reason.trim(),
+  };
 }
 
 export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOptions> = async (app, opts) => {
@@ -316,50 +343,149 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const project = await requireOwnedProject(projectId, userId, reply);
     if (!project) return;
 
+    const retireRequest = parseRetireBacklogItemRequest(request.body);
+    if (!retireRequest) {
+      return reply.status(400).send({
+        error: 'expectedFeatureId, expectedUpdatedAt, and reason are required to permanently remove a backlog item',
+      });
+    }
+
     const item = await backlogStore.get(backlogItemId, userId);
     if (!item || item.projectId !== project.id) {
       return reply.status(404).send({ error: 'Backlog item not found' });
     }
-    if (!isManagedImportItem(item)) {
-      return reply.status(409).send({ error: 'Only importer-managed backlog items can be removed here' });
+    const itemFeatureId = getFeatureTagId(item.tags)?.toUpperCase();
+    if (!itemFeatureId || itemFeatureId !== retireRequest.expectedFeatureId) {
+      return reply.status(409).send({ error: 'Backlog item feature identity changed before it could be removed' });
     }
 
-    const linkedThreadIds = [...new Set([item.pendingThreadId, item.dispatchedThreadId].filter(Boolean))] as string[];
-    const linkedThreads: string[] = [];
-    if (linkedThreadIds.length > 0 && !opts.threadStore) {
-      return reply.status(503).send({ error: 'Thread store unavailable; cannot safely detach backlog item' });
+    // Importer tags are editable backlog data, not deletion authority. The current
+    // project catalogs are the source of truth for whether a feature is retired.
+    let activeRows: BacklogFeatureRow[];
+    try {
+      const markdown = await readFile(join(project.sourcePath, project.backlogPath), 'utf-8');
+      const extensionRows = await readExtensionFeatureRows(
+        join(project.sourcePath, DEFAULT_EXTENSION_CATALOG_RELATIVE_PATH),
+      );
+      activeRows = [...parseActiveFeaturesFromBacklog(markdown), ...extensionRows];
+    } catch (error) {
+      return reply.status(400).send({
+        error: `Cannot verify the active project catalog: ${error instanceof Error ? error.message : String(error)}`,
+      });
     }
-    for (const threadId of linkedThreadIds) {
-      const thread = await opts.threadStore?.get(threadId);
+    if (activeRows.some((row) => row.id.toUpperCase() === retireRequest.expectedFeatureId)) {
+      return reply
+        .status(409)
+        .send({ error: `${retireRequest.expectedFeatureId} is still present in the active project catalog` });
+    }
+
+    if (!opts.threadStore || !opts.workflowSopStore) {
+      return reply.status(503).send({ error: 'Required stores unavailable; cannot safely remove backlog item' });
+    }
+
+    // The backlog record only carries its primary thread IDs. Scan the complete
+    // owner-visible thread set so secondary conversation links cannot dangle.
+    let ownerThreads: Awaited<ReturnType<typeof opts.threadStore.list>>;
+    try {
+      ownerThreads = await opts.threadStore.list(userId);
+    } catch (error) {
+      return reply.status(500).send({
+        error: `Cannot inspect linked threads: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+    const ownerThreadIds = new Set(ownerThreads.map((thread) => thread.id));
+    const linkedThreads = new Map(
+      ownerThreads.filter((thread) => thread.backlogItemId === item.id).map((thread) => [thread.id, thread]),
+    );
+    const primaryThreadIds = [...new Set([item.pendingThreadId, item.dispatchedThreadId].filter(Boolean))] as string[];
+    for (const threadId of primaryThreadIds) {
+      const thread = await opts.threadStore.get(threadId);
       if (!thread || thread.backlogItemId !== item.id) continue;
-      if (thread.createdBy !== userId) {
+      if (!ownerThreadIds.has(thread.id)) {
         return reply.status(409).send({ error: 'Backlog item is linked to a thread outside the current user scope' });
       }
-      linkedThreads.push(threadId);
+      linkedThreads.set(thread.id, thread);
     }
 
     const detachedThreadIds: string[] = [];
-    try {
-      for (const threadId of linkedThreads) {
-        if (await opts.threadStore?.unlinkBacklogItem(threadId, item.id)) detachedThreadIds.push(threadId);
+    const restoreDetachedThreads = async (): Promise<void> => {
+      for (const threadId of detachedThreadIds) {
+        await opts.threadStore?.linkBacklogItem(threadId, item.id);
       }
-      const deleted = await backlogStore.delete(item.id, { userId, projectId: project.id });
+    };
+
+    const workflowSop = await opts.workflowSopStore.get(item.id);
+    let workflowSopDeleted = false;
+    const restoreWorkflowSop = async (): Promise<void> => {
+      if (!workflowSopDeleted || !workflowSop) return;
+      await opts.workflowSopStore?.upsert(
+        item.id,
+        workflowSop.featureId,
+        {
+          sopDefinitionId: workflowSop.sopDefinitionId,
+          stage: workflowSop.stage,
+          batonHolder: workflowSop.batonHolder,
+          nextSkill: workflowSop.nextSkill,
+          resumeCapsule: workflowSop.resumeCapsule,
+          checks: workflowSop.checks,
+        },
+        workflowSop.updatedBy,
+        userId,
+      );
+      workflowSopDeleted = false;
+    };
+
+    try {
+      for (const threadId of linkedThreads.keys()) {
+        if (!(await opts.threadStore.unlinkBacklogItem(threadId, item.id))) {
+          await restoreDetachedThreads();
+          return reply.status(409).send({ error: 'A linked thread changed before the backlog item could be removed' });
+        }
+        detachedThreadIds.push(threadId);
+      }
+
+      if (workflowSop) {
+        workflowSopDeleted = await opts.workflowSopStore.delete(item.id);
+        if (!workflowSopDeleted) {
+          await restoreDetachedThreads();
+          return reply.status(409).send({ error: 'Workflow state changed before the backlog item could be removed' });
+        }
+      }
+
+      const deleted = await backlogStore.delete(item.id, {
+        userId,
+        projectId: project.id,
+        expectedUpdatedAt: retireRequest.expectedUpdatedAt,
+      });
       if (!deleted) {
-        for (const threadId of detachedThreadIds) await opts.threadStore?.linkBacklogItem(threadId, item.id);
+        await restoreWorkflowSop();
+        await restoreDetachedThreads();
         return reply.status(409).send({ error: 'Backlog item changed before it could be removed' });
       }
     } catch (error) {
-      for (const threadId of detachedThreadIds) await opts.threadStore?.linkBacklogItem(threadId, item.id);
+      try {
+        await restoreWorkflowSop();
+        await restoreDetachedThreads();
+      } catch (restoreError) {
+        app.log.error(
+          { err: restoreError, projectId: project.id, backlogItemId: item.id },
+          'Failed to restore state after backlog removal error',
+        );
+      }
       return reply.status(500).send({
         error: `Cannot safely remove backlog item: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
 
-    // Remove the feature-level workflow state, but intentionally preserve the
-    // detached thread and its conversation history.
-    if (opts.workflowSopStore && (await opts.workflowSopStore.get(item.id))) {
-      await opts.workflowSopStore.delete(item.id);
-    }
+    app.log.info(
+      {
+        projectId: project.id,
+        backlogItemId: item.id,
+        featureId: retireRequest.expectedFeatureId,
+        reason: retireRequest.reason,
+      },
+      'Permanently removed retired project backlog item',
+    );
     return reply.status(204).send();
   });
 
