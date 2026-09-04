@@ -177,6 +177,60 @@ test(
 );
 
 test(
+  'a concurrent owner-thread link restores its missing owner index before retirement',
+  { skip: redisIsolationSkipReason(REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'external project retirement concurrent sparse owner index');
+    let retirementReached;
+    let releaseRetirement;
+    const reached = new Promise((resolve) => {
+      retirementReached = resolve;
+    });
+    const release = new Promise((resolve) => {
+      releaseRetirement = resolve;
+    });
+    const fixture = await createFixture((atomicStore) => ({
+      async retire(input) {
+        retirementReached();
+        await release;
+        return atomicStore.retire(input);
+      },
+    }));
+    const { app, redis, backlogStore, threadStore, projectId, item } = fixture;
+
+    try {
+      const lateThread = await threadStore.create('owner-redis', 'Late owner thread');
+      await redis.zrem('threads:user:owner-redis', lateThread.id);
+      const responsePromise = app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: 'F007',
+          expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
+          reason: 'retired from the authoritative project roadmap',
+          mode: 'import-reconciliation',
+        },
+      });
+
+      await reached;
+      await threadStore.linkBacklogItem(lateThread.id, item.id);
+      releaseRetirement();
+      const response = await responsePromise;
+
+      assert.equal(response.statusCode, 204, response.body);
+      assert.equal(await backlogStore.get(item.id, 'owner-redis'), null);
+      assert.equal((await threadStore.get(lateThread.id))?.backlogItemId, undefined);
+    } finally {
+      releaseRetirement?.();
+      await app.close();
+      await redis.quit();
+    }
+  },
+);
+
+test(
   'an in-flight dispatch lock rejects retirement without mutating related state',
   { skip: redisIsolationSkipReason(REDIS_URL) },
   async () => {

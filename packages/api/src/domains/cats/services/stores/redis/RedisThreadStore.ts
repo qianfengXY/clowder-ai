@@ -79,6 +79,8 @@ local threadOwner = redis.call('HGET', KEYS[1], 'createdBy')
 if threadOwner ~= ARGV[2] then
   if threadOwner ~= 'system' or redis.call('ZSCORE', KEYS[3], ARGV[3]) == false then return -3 end
 end
+local lastActiveAt = redis.call('HGET', KEYS[1], 'lastActiveAt') or '0'
+redis.call('ZADD', KEYS[3], lastActiveAt, ARGV[3])
 redis.call('HSET', KEYS[1], 'backlogItemId', ARGV[1])
 return 1
 `;
