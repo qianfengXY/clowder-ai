@@ -124,6 +124,7 @@ export {
 // Backlog types (F049 Mission Control)
 export type {
   AcquireBacklogLeaseInput,
+  AdoptBacklogImportOriginInput,
   AtomicDispatchInput,
   BacklogAuditAction,
   BacklogAuditActor,

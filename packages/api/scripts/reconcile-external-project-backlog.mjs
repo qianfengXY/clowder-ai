@@ -44,8 +44,15 @@ export function parseReconcileArguments(argv) {
   const operatorConfirmedLegacyFeatureIds = confirmedLegacyValue
     ? parseFeatureIds(confirmedLegacyValue, '--confirm-legacy-retire')
     : [];
+  const confirmedAdoptionValue = optionalFlag(argv, '--confirm-legacy-adopt');
+  const operatorConfirmedLegacyAdoptionFeatureIds = confirmedAdoptionValue
+    ? parseFeatureIds(confirmedAdoptionValue, '--confirm-legacy-adopt')
+    : [];
   if (operatorConfirmedLegacyFeatureIds.some((featureId) => !retireFeatureIds.includes(featureId))) {
     throw new Error('--confirm-legacy-retire must be a subset of --retire');
+  }
+  if (operatorConfirmedLegacyAdoptionFeatureIds.some((featureId) => !expectedActiveFeatureIds.includes(featureId))) {
+    throw new Error('--confirm-legacy-adopt must be a subset of --expect-active');
   }
   if (!/^https?:\/\//.test(apiUrl)) throw new Error('--api-url must use http or https');
   return {
@@ -55,6 +62,7 @@ export function parseReconcileArguments(argv) {
     retireFeatureIds,
     expectedActiveFeatureIds,
     operatorConfirmedLegacyFeatureIds,
+    operatorConfirmedLegacyAdoptionFeatureIds,
   };
 }
 
@@ -120,6 +128,40 @@ function buildRetirementRequest(options, items, featureId, confirmedLegacyIds) {
   };
 }
 
+async function adoptLegacyImportOrigins(options, items) {
+  const adopted = [];
+  for (const featureId of options.operatorConfirmedLegacyAdoptionFeatureIds ?? []) {
+    const matches = items.filter((item) => featureIdOf(item) === featureId);
+    if (matches.length > 1) throw new Error(`Refusing to adopt duplicate ${featureId} backlog records`);
+    const item = matches[0];
+    if (!item) continue;
+    if (isManagedImportItem(item, options.projectId, featureId)) continue;
+    if (item.importOrigin) {
+      throw new Error(`Refusing to adopt ${featureId}: backlog item already has different immutable provenance`);
+    }
+    const result = await requestJson(
+      options,
+      `/api/external-projects/${encodeURIComponent(options.projectId)}/backlog/items/${encodeURIComponent(item.id)}/adopt-import-origin`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedFeatureId: featureId,
+          expectedUpdatedAt: item.updatedAt,
+          reason: `Explicit post-deploy legacy import adoption for ${featureId}`,
+          confirmation: `ADOPT LEGACY IMPORT ${featureId} ${item.id}`,
+        }),
+      },
+    );
+    const adoptedItem = result?.item;
+    if (!adoptedItem || !isManagedImportItem(adoptedItem, options.projectId, featureId)) {
+      throw new Error(`Legacy adoption for ${featureId} returned invalid importer provenance`);
+    }
+    adopted.push(featureId);
+    items = items.map((candidate) => (candidate.id === adoptedItem.id ? adoptedItem : candidate));
+  }
+  return adopted;
+}
+
 /**
  * One-shot, idempotent post-deploy reconciliation. Import refreshes active source
  * metadata; permanent removals still require an explicit feature allowlist.
@@ -127,6 +169,8 @@ function buildRetirementRequest(options, items, featureId, confirmedLegacyIds) {
 export async function reconcileExternalProjectBacklog(input) {
   const options = { ...input, fetchImpl: input.fetchImpl ?? fetch };
   const confirmedLegacyIds = new Set(options.operatorConfirmedLegacyFeatureIds ?? []);
+  const initialItems = await listItems(options);
+  const adopted = await adoptLegacyImportOrigins(options, initialItems);
   const imported = await requestJson(
     options,
     `/api/external-projects/${encodeURIComponent(options.projectId)}/import-backlog`,
@@ -164,6 +208,7 @@ export async function reconcileExternalProjectBacklog(input) {
   }
 
   return {
+    adopted,
     imported,
     removed,
     finalItems: items.map((item) => ({

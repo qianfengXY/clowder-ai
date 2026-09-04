@@ -122,6 +122,48 @@ test(
       assert.equal(await workflowSopStore.get(item.id), null);
       assert.equal((await threadStore.get(primaryThread.id))?.backlogItemId, undefined);
       assert.equal((await threadStore.get(secondaryThread.id))?.backlogItemId, undefined);
+      await assert.rejects(
+        threadStore.linkBacklogItem(primaryThread.id, item.id),
+        /backlog.*not found/,
+        'a delayed dispatch reverse-link write cannot recreate a retired relationship',
+      );
+      assert.equal((await threadStore.get(primaryThread.id))?.backlogItemId, undefined);
+    } finally {
+      await app.close();
+      await redis.quit();
+    }
+  },
+);
+
+test(
+  'an in-flight dispatch lock rejects retirement without mutating related state',
+  { skip: redisIsolationSkipReason(REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'external project retirement dispatch exclusion');
+    const fixture = await createFixture();
+    const { app, redis, backlogStore, threadStore, workflowSopStore, projectId, item, primaryThread } = fixture;
+
+    try {
+      const lock = await backlogStore.tryAcquireDispatchLock(item.id);
+      assert.equal(typeof lock, 'string');
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: 'F007',
+          expectedUpdatedAt: item.updatedAt,
+          reason: 'exercise dispatch exclusion',
+          mode: 'import-reconciliation',
+        },
+      });
+
+      assert.equal(response.statusCode, 409, response.body);
+      assert.match(response.json().error, /dispatch_in_progress/);
+      assert.ok(await backlogStore.get(item.id, 'owner-redis'));
+      assert.ok(await workflowSopStore.get(item.id));
+      assert.equal((await threadStore.get(primaryThread.id))?.backlogItemId, item.id);
+      await backlogStore.releaseDispatchLock(item.id, lock);
     } finally {
       await app.close();
       await redis.quit();

@@ -1,5 +1,6 @@
 import type {
   AcquireBacklogLeaseInput,
+  AdoptBacklogImportOriginInput,
   AtomicDispatchInput,
   BacklogDependencies,
   BacklogItem,
@@ -106,6 +107,10 @@ export interface IBacklogStore {
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
+  adoptImportOrigin(
+    itemId: string,
+    input: AdoptBacklogImportOriginInput,
+  ): BacklogItem | null | Promise<BacklogItem | null>;
   delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   get(itemId: string, userId?: string): BacklogItem | null | Promise<BacklogItem | null>;
   listByUser(userId: string): BacklogItem[] | Promise<BacklogItem[]>;
@@ -246,6 +251,39 @@ export class BacklogStore implements IBacklogStore {
           actor: makeUserActor(input.refreshedBy),
           timestamp: now,
           detail: statusUpgrade ? `docs-backlog-sync (status: ${statusUpgrade})` : 'docs-backlog-sync',
+        },
+      ],
+    };
+    this.items.set(itemId, updated);
+    return updated;
+  }
+
+  adoptImportOrigin(itemId: string, input: AdoptBacklogImportOriginInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.projectId !== input.projectId ||
+      existing.updatedAt !== input.expectedUpdatedAt ||
+      input.importOrigin.projectId !== input.projectId ||
+      existing.importOrigin
+    ) {
+      return null;
+    }
+
+    const now = Math.max(Date.now(), existing.updatedAt + 1);
+    const updated: BacklogItem = {
+      ...existing,
+      importOrigin: input.importOrigin,
+      updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'import_origin_adopted',
+          actor: makeUserActor(input.adoptedBy),
+          timestamp: now,
+          detail: `${input.importOrigin.featureId}: ${input.reason}`,
         },
       ],
     };

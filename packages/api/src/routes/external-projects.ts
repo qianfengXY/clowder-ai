@@ -56,16 +56,52 @@ function importOriginFor(row: BacklogFeatureRow, projectId: string): BacklogImpo
   };
 }
 
+function hasExactImportOrigin(item: BacklogItem, origin: BacklogImportOrigin): boolean {
+  return (
+    item.importOrigin?.kind === origin.kind &&
+    item.importOrigin.projectId === origin.projectId &&
+    item.importOrigin.featureId === origin.featureId &&
+    item.importOrigin.source === origin.source
+  );
+}
+
 function isManagedImportItem(item: BacklogItem, projectId: string, featureId: string): boolean {
   return (
     item.importOrigin?.kind === 'external-project-catalog' &&
     item.importOrigin.projectId === projectId &&
-    item.importOrigin.featureId === featureId
+    item.importOrigin.featureId === featureId &&
+    (item.importOrigin.source === 'docs-backlog' || item.importOrigin.source === 'extension-catalog')
   );
 }
 
-function isLegacyImportRefreshCandidate(item: BacklogItem): boolean {
-  return item.tags.includes('source:docs-backlog') || item.tags.includes('source:extension-catalog');
+interface AdoptImportOriginRequest {
+  readonly expectedFeatureId: string;
+  readonly expectedUpdatedAt: number;
+  readonly reason: string;
+  readonly confirmation: string;
+}
+
+function parseAdoptImportOriginRequest(body: unknown): AdoptImportOriginRequest | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const candidate = body as Record<string, unknown>;
+  if (
+    typeof candidate.expectedFeatureId !== 'string' ||
+    !/^(?:F\d{3}|EXT-\d{3})$/i.test(candidate.expectedFeatureId.trim()) ||
+    typeof candidate.expectedUpdatedAt !== 'number' ||
+    !Number.isSafeInteger(candidate.expectedUpdatedAt) ||
+    candidate.expectedUpdatedAt < 0 ||
+    typeof candidate.reason !== 'string' ||
+    candidate.reason.trim().length === 0 ||
+    typeof candidate.confirmation !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    expectedFeatureId: candidate.expectedFeatureId.trim().toUpperCase(),
+    expectedUpdatedAt: candidate.expectedUpdatedAt,
+    reason: candidate.reason.trim(),
+    confirmation: candidate.confirmation.trim(),
+  };
 }
 
 interface RetireBacklogItemRequest {
@@ -223,6 +259,65 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     return reply.status(201).send(item);
   });
 
+  app.post('/api/external-projects/:id/backlog/items/:backlogItemId/adopt-import-origin', async (request, reply) => {
+    const userId = requireUserId(request, reply);
+    if (!userId) return;
+    const { id: projectId, backlogItemId } = request.params as { id: string; backlogItemId: string };
+    const project = await requireOwnedProject(projectId, userId, reply);
+    if (!project) return;
+    const adoption = parseAdoptImportOriginRequest(request.body);
+    if (!adoption) {
+      return reply.status(400).send({
+        error: 'expectedFeatureId, expectedUpdatedAt, reason, and confirmation are required to adopt legacy data',
+      });
+    }
+    if (adoption.confirmation !== `ADOPT LEGACY IMPORT ${adoption.expectedFeatureId} ${backlogItemId}`) {
+      return reply.status(400).send({ error: 'Exact operator confirmation is required for legacy adoption' });
+    }
+
+    const item = await backlogStore.get(backlogItemId, userId);
+    if (!item || item.projectId !== project.id) return reply.status(404).send({ error: 'Backlog item not found' });
+    const itemFeatureId = getFeatureTagId(item.tags)?.toUpperCase();
+    if (itemFeatureId !== adoption.expectedFeatureId) {
+      return reply.status(409).send({ error: 'Backlog item feature identity changed before adoption' });
+    }
+
+    let rows: BacklogFeatureRow[];
+    try {
+      const markdown = await readFile(join(project.sourcePath, project.backlogPath), 'utf-8');
+      const extensionRows = await readExtensionFeatureRows(
+        join(project.sourcePath, DEFAULT_EXTENSION_CATALOG_RELATIVE_PATH),
+      );
+      rows = [...parseActiveFeaturesFromBacklog(markdown), ...extensionRows];
+    } catch (error) {
+      return reply.status(400).send({
+        error: `Cannot verify the active project catalog: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+    const row = rows.find((candidate) => candidate.id.toUpperCase() === adoption.expectedFeatureId);
+    if (!row)
+      return reply.status(409).send({ error: `${adoption.expectedFeatureId} is not an active catalog feature` });
+    const origin = importOriginFor(row, project.id);
+    if (!item.tags.includes(`source:${origin.source}`)) {
+      return reply.status(409).send({ error: 'Legacy backlog item source tag does not match the active catalog' });
+    }
+    if (item.importOrigin) {
+      if (hasExactImportOrigin(item, origin)) return reply.send({ item, adopted: false });
+      return reply.status(409).send({ error: 'Backlog item already has different immutable importer provenance' });
+    }
+
+    const adopted = await backlogStore.adoptImportOrigin(item.id, {
+      userId,
+      projectId: project.id,
+      expectedUpdatedAt: adoption.expectedUpdatedAt,
+      importOrigin: origin,
+      adoptedBy: userId,
+      reason: adoption.reason,
+    });
+    if (!adopted) return reply.status(409).send({ error: 'Backlog item changed before import origin adoption' });
+    return reply.send({ item: adopted, adopted: true });
+  });
+
   // --- BACKLOG import ---
 
   app.post('/api/external-projects/:id/import-backlog', async (request, reply) => {
@@ -259,6 +354,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
         backlogStore,
         ...(opts.workflowSopStore ? { workflowSopStore: opts.workflowSopStore } : {}),
         userId,
+        requiredImportProjectId: project.id,
       });
       existingItems = [...migration.items];
     } catch (error) {
@@ -273,14 +369,15 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     let orphans = 0;
     const existingByFeatureId = new Map<string, BacklogItem>();
     for (const item of existingItems) {
-      if (item.projectId !== project.id || !isLegacyImportRefreshCandidate(item)) continue;
-      const featureTagId = getFeatureTagId(item.tags);
-      if (featureTagId && !existingByFeatureId.has(featureTagId)) {
-        existingByFeatureId.set(featureTagId, item);
+      if (item.projectId !== project.id || item.importOrigin?.projectId !== project.id) continue;
+      const featureId = item.importOrigin.featureId.toLowerCase();
+      if (!existingByFeatureId.has(featureId)) {
+        existingByFeatureId.set(featureId, item);
       }
     }
     for (const row of rows) {
       const featureId = row.id.toLowerCase();
+      const expectedOrigin = importOriginFor(row, project.id);
 
       const orphanItems = existingItems.filter((item) => getFeatureTagId(item.tags) === featureId && !item.projectId);
       if (orphanItems.length > 0) {
@@ -289,7 +386,9 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
 
       // 1. Refresh importer-managed items from the current source row. Import never
       // treats an absent row as deletion evidence: source documents can be partial.
-      const existing = existingByFeatureId.get(featureId);
+      const managedCandidate = existingByFeatureId.get(featureId);
+      const existing =
+        managedCandidate && hasExactImportOrigin(managedCandidate, expectedOrigin) ? managedCandidate : undefined;
       if (existing) {
         const importInput = buildBacklogInputFromFeature(row, userId);
         const mappedStatus = featureStatusToBacklogStatus(row.status);

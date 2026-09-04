@@ -877,6 +877,12 @@ describe('External Project Routes', () => {
       tags: ['source:docs-backlog', 'feature:f001'],
       createdBy: 'user',
       projectId,
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F001',
+        source: 'docs-backlog',
+      },
     });
     assert.equal(bound.projectId, projectId);
 
@@ -929,6 +935,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f004', 'status:in-progress'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F004',
+        source: 'docs-backlog',
+      },
     });
     const retired = backlogStore.create({
       userId: 'user1',
@@ -956,6 +968,124 @@ describe('External Project Routes', () => {
     assert.equal(imported.json().refreshed, 1);
     assert.equal(backlogStore.get(stale.id)?.title, '[F004] Change Impact Analysis');
     assert.equal(backlogStore.get(retired.id)?.status, 'open');
+  });
+
+  test('import-backlog never refreshes a public item that only spoofs catalog tags', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'import-tag-spoof-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Priority | Feature | Status | Owner | Link |',
+        '|---|---|---|---|---|---|',
+        '| F004 | P0 | Change Impact Analysis | done | CodeX | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/backlog/items`,
+      headers: H,
+      payload: {
+        title: '[F004] private manual work',
+        summary: 'must not be overwritten',
+        priority: 'p3',
+        tags: ['source:docs-backlog', 'feature:f004', 'status:done'],
+        createdBy: 'user',
+      },
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    const item = created.json();
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+
+    assert.equal(imported.statusCode, 200, imported.body);
+    assert.equal(imported.json().refreshed, 0);
+    assert.equal(imported.json().imported, 0);
+    assert.equal(imported.json().skipped, 1);
+    assert.deepEqual(backlogStore.get(item.id), item);
+    assert.equal(backlogStore.get(item.id)?.importOrigin, undefined);
+  });
+
+  test('legacy import adoption requires exact confirmation and appends immutable provenance audit', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'import-adoption-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Feature | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | CodeX | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const legacy = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] Claim review',
+      summary: 'old source text',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004'],
+      createdBy: 'user',
+    });
+    const endpoint = `/api/external-projects/${projectId}/backlog/items/${legacy.id}/adopt-import-origin`;
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: endpoint,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: legacy.updatedAt,
+        reason: 'verified legacy Traqen row',
+        confirmation: 'ADOPT LEGACY IMPORT F004 wrong-item',
+      },
+    });
+    assert.equal(rejected.statusCode, 400);
+    assert.equal(backlogStore.get(legacy.id)?.importOrigin, undefined);
+
+    const adopted = await app.inject({
+      method: 'POST',
+      url: endpoint,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: legacy.updatedAt,
+        reason: 'verified legacy Traqen row',
+        confirmation: `ADOPT LEGACY IMPORT F004 ${legacy.id}`,
+      },
+    });
+    assert.equal(adopted.statusCode, 200, adopted.body);
+    assert.equal(adopted.json().adopted, true);
+    assert.deepEqual(adopted.json().item.importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F004',
+      source: 'docs-backlog',
+    });
+    assert.equal(adopted.json().item.audit.at(-1).action, 'import_origin_adopted');
   });
 
   test('DELETE external backlog item removes an imported feature and detaches its thread', async () => {
@@ -1418,6 +1548,24 @@ describe('External Project Routes', () => {
       });
     }
 
+    for (const featureId of ['F001', 'F002', 'F003', 'F004', 'F006']) {
+      const item = backlogStore
+        .listByUser('user1')
+        .find((candidate) => candidate.tags.includes(`feature:${featureId.toLowerCase()}`));
+      const adopted = await app.inject({
+        method: 'POST',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}/adopt-import-origin`,
+        headers: H,
+        payload: {
+          expectedFeatureId: featureId,
+          expectedUpdatedAt: item.updatedAt,
+          reason: `Co-creator confirmed ${featureId} is a legacy imported row`,
+          confirmation: `ADOPT LEGACY IMPORT ${featureId} ${item.id}`,
+        },
+      });
+      assert.equal(adopted.statusCode, 200, adopted.body);
+    }
+
     const imported = await app.inject({
       method: 'POST',
       url: `/api/external-projects/${projectId}/import-backlog`,
@@ -1578,6 +1726,12 @@ describe('External Project Routes', () => {
       priority: 'p1',
       tags: ['source:docs-backlog', 'feature:f289', 'status:implementation'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'EXT-001',
+        source: 'extension-catalog',
+      },
     });
 
     const importRes = await app.inject({

@@ -32,6 +32,7 @@ export interface BacklogLease {
 
 export type BacklogAuditAction =
   | 'created'
+  | 'import_origin_adopted'
   | 'refreshed'
   | 'suggested'
   | 'approved'
@@ -119,6 +120,16 @@ export interface RefreshBacklogItemInput {
   readonly dependencies?: BacklogDependencies;
   /** Optional status override from import. Only upgrades (open→dispatched), never downgrades. */
   readonly importStatus?: BacklogStatus;
+}
+
+/** Explicit, audited adoption of a pre-provenance catalog import. */
+export interface AdoptBacklogImportOriginInput {
+  readonly userId: string;
+  readonly projectId: string;
+  readonly expectedUpdatedAt: number;
+  readonly importOrigin: BacklogImportOrigin;
+  readonly adoptedBy: string;
+  readonly reason: string;
 }
 
 export interface SuggestBacklogClaimInput {

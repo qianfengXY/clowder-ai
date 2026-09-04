@@ -1,5 +1,6 @@
 import type {
   AcquireBacklogLeaseInput,
+  AdoptBacklogImportOriginInput,
   AtomicDispatchInput,
   BacklogItem,
   BacklogLease,
@@ -105,6 +106,33 @@ if statusUpgrade then
   redis.call('HSET', key, 'status', importStatus)
   if importStatus == 'done' then redis.call('HSET', key, 'doneAt', now) end
 end
+return 1
+`;
+
+/**
+ * Install importer provenance exactly once under owner/project/update CAS.
+ * Existing provenance is immutable and therefore always rejects adoption.
+ */
+const ADOPT_IMPORT_ORIGIN_LUA = `
+local key = KEYS[1]
+if redis.call('HGET', key, 'id') == false then return -1 end
+if redis.call('HGET', key, 'userId') ~= ARGV[1] then return -2 end
+if redis.call('HGET', key, 'projectId') ~= ARGV[2] then return -2 end
+if redis.call('HGET', key, 'updatedAt') ~= ARGV[3] then return -3 end
+if redis.call('HEXISTS', key, 'importOrigin') == 1 then return -4 end
+
+local auditRaw = redis.call('HGET', key, 'audit')
+local auditOk, audit = pcall(cjson.decode, auditRaw or '[]')
+if not auditOk or type(audit) ~= 'table' then return -5 end
+local entryOk, auditEntry = pcall(cjson.decode, ARGV[6])
+if not entryOk or type(auditEntry) ~= 'table' then return -5 end
+table.insert(audit, auditEntry)
+
+redis.call('HSET', key,
+  'importOrigin', ARGV[4],
+  'updatedAt', ARGV[5],
+  'audit', cjson.encode(audit)
+)
 return 1
 `;
 
@@ -725,6 +753,38 @@ export class RedisBacklogStore implements IBacklogStore {
     if (result === -2) throw new BacklogTransitionError('Cannot refresh backlog item with invalid persisted audit');
     const updated = await this.get(itemId);
     if (updated && result === 1) await this.touchLeaseTtl(updated);
+    return updated;
+  }
+
+  async adoptImportOrigin(itemId: string, input: AdoptBacklogImportOriginInput): Promise<BacklogItem | null> {
+    if (input.importOrigin.projectId !== input.projectId) return null;
+    const now = Math.max(Date.now(), input.expectedUpdatedAt + 1);
+    const auditEntry = JSON.stringify({
+      id: generateSortableId(now + 1),
+      action: 'import_origin_adopted',
+      actor: makeUserActor(input.adoptedBy),
+      timestamp: now,
+      detail: `${input.importOrigin.featureId}: ${input.reason}`,
+    });
+    const result = Number(
+      await this.redis.eval(
+        ADOPT_IMPORT_ORIGIN_LUA,
+        1,
+        BacklogKeys.detail(itemId),
+        input.userId,
+        input.projectId,
+        String(input.expectedUpdatedAt),
+        JSON.stringify(input.importOrigin),
+        String(now),
+        auditEntry,
+      ),
+    );
+    if (result === -5) {
+      throw new BacklogTransitionError('Cannot adopt import origin with invalid persisted audit');
+    }
+    if (result !== 1) return null;
+    const updated = await this.get(itemId);
+    if (updated) await this.touchLeaseTtl(updated);
     return updated;
   }
 

@@ -7,7 +7,14 @@ import {
 
 test('reconcile refreshes first, deletes only allowlisted retired features, and verifies the final set', async () => {
   let items = [
-    { id: 'item-f001', title: '[F001] stale', priority: 'p2', status: 'open', updatedAt: 1, tags: ['feature:f001'] },
+    {
+      id: 'item-f001',
+      title: '[F001] stale',
+      priority: 'p2',
+      status: 'open',
+      updatedAt: 1,
+      tags: ['source:docs-backlog', 'feature:f001'],
+    },
     {
       id: 'item-f005',
       title: '[F005] stale',
@@ -40,6 +47,21 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
   const requests = [];
   const fetchImpl = async (url, init = {}) => {
     requests.push({ url, init });
+    if (url.endsWith('/adopt-import-origin')) {
+      const payload = JSON.parse(init.body);
+      const index = items.findIndex((candidate) => candidate.id === 'item-f001');
+      items[index] = {
+        ...items[index],
+        updatedAt: 2,
+        importOrigin: {
+          kind: 'external-project-catalog',
+          projectId: 'traqen-project',
+          featureId: payload.expectedFeatureId,
+          source: 'docs-backlog',
+        },
+      };
+      return new Response(JSON.stringify({ item: items[index], adopted: true }), { status: 200 });
+    }
     if (url.endsWith('/import-backlog')) {
       items[0] = { ...items[0], title: '[F001] Workspace & Source Truth', priority: 'p0', updatedAt: 4 };
       return new Response(JSON.stringify({ imported: 0, refreshed: 1 }), { status: 200 });
@@ -61,14 +83,18 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
     projectId: 'traqen-project',
     retireFeatureIds: ['F005', 'F007'],
     expectedActiveFeatureIds: ['F001'],
+    operatorConfirmedLegacyAdoptionFeatureIds: ['F001'],
     fetchImpl,
   });
 
+  assert.deepEqual(result.adopted, ['F001']);
   assert.deepEqual(result.removed, ['F005', 'F007']);
   assert.deepEqual(result.finalItems, [
     { id: 'item-f001', featureId: 'F001', title: '[F001] Workspace & Source Truth', priority: 'p0', status: 'open' },
   ]);
-  assert.equal(requests[0].url.endsWith('/import-backlog'), true);
+  assert.equal(requests[0].url.includes('/api/backlog/items?projectId='), true);
+  assert.equal(requests[1].url.endsWith('/adopt-import-origin'), true);
+  assert.equal(requests[2].url.endsWith('/import-backlog'), true);
   assert.deepEqual(
     requests
       .filter((request) => request.init.method === 'DELETE')
@@ -184,6 +210,8 @@ test('CLI parser requires explicit retirement and expected-active allowlists', (
       'F001,F002',
       '--confirm-legacy-retire',
       'F005,F007',
+      '--confirm-legacy-adopt',
+      'F001,F002',
     ]),
     {
       apiUrl: 'http://127.0.0.1:3004',
@@ -192,7 +220,29 @@ test('CLI parser requires explicit retirement and expected-active allowlists', (
       retireFeatureIds: ['F005', 'F007'],
       expectedActiveFeatureIds: ['F001', 'F002'],
       operatorConfirmedLegacyFeatureIds: ['F005', 'F007'],
+      operatorConfirmedLegacyAdoptionFeatureIds: ['F001', 'F002'],
     },
+  );
+});
+
+test('CLI parser rejects legacy adoption outside the expected-active allowlist', () => {
+  assert.throws(
+    () =>
+      parseReconcileArguments([
+        '--api-url',
+        'http://127.0.0.1:3004',
+        '--user-id',
+        'default-user',
+        '--project-id',
+        'traqen-project',
+        '--retire',
+        'F005',
+        '--expect-active',
+        'F001',
+        '--confirm-legacy-adopt',
+        'F002',
+      ]),
+    /subset of --expect-active/,
   );
 });
 

@@ -21,6 +21,8 @@ export async function migrateLegacyExtensionItems(input: {
   readonly backlogStore: IBacklogStore;
   readonly workflowSopStore?: WorkflowSopMigrationStore;
   readonly userId: string;
+  /** External-project imports only migrate rows explicitly adopted for the target extension. */
+  readonly requiredImportProjectId?: string;
 }): Promise<LegacyExtensionMigrationResult> {
   const rowsByLegacyId = indexExtensionRowsByLegacyId(input.extensionRows);
   if (rowsByLegacyId.size === 0) return { items: input.items, migratedItemIds: [] };
@@ -34,6 +36,18 @@ export async function migrateLegacyExtensionItems(input: {
     if (!legacyId) continue;
     const extension = rowsByLegacyId.get(legacyId);
     if (!extension || !hasExactLegacyImportedTitle(item, legacyId, extension.name)) continue;
+    if (
+      input.requiredImportProjectId &&
+      !(
+        item.projectId === input.requiredImportProjectId &&
+        item.importOrigin?.kind === 'external-project-catalog' &&
+        item.importOrigin.projectId === input.requiredImportProjectId &&
+        item.importOrigin.featureId === extension.id.toUpperCase() &&
+        item.importOrigin.source === 'extension-catalog'
+      )
+    ) {
+      continue;
+    }
 
     const refreshed = await migrateLegacyExtensionItem({ ...input, item, legacyId, extension });
     items[index] = refreshed;

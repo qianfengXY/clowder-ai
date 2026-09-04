@@ -19,7 +19,8 @@ export type ExternalProjectBacklogRetirementResult =
   | 'missing'
   | 'backlog_conflict'
   | 'provenance_mismatch'
-  | 'workflow_conflict';
+  | 'workflow_conflict'
+  | 'dispatch_in_progress';
 
 export interface IExternalProjectBacklogRetirementStore {
   retire(input: ExternalProjectBacklogRetirementInput): Promise<ExternalProjectBacklogRetirementResult>;
@@ -36,6 +37,7 @@ if redis.call('HGET', backlogKey, 'id') == false then return -1 end
 if redis.call('HGET', backlogKey, 'userId') ~= ARGV[1] then return -2 end
 if redis.call('HGET', backlogKey, 'projectId') ~= ARGV[2] then return -2 end
 if redis.call('HGET', backlogKey, 'updatedAt') ~= ARGV[3] then return -2 end
+if redis.call('EXISTS', KEYS[3]) == 1 then return -5 end
 
 local requiredOriginRaw = ARGV[5]
 if requiredOriginRaw ~= '' then
@@ -116,6 +118,8 @@ export class RedisExternalProjectBacklogRetirementStore implements IExternalProj
         return 'provenance_mismatch';
       case -4:
         return 'workflow_conflict';
+      case -5:
+        return 'dispatch_in_progress';
       default:
         return 'backlog_conflict';
     }

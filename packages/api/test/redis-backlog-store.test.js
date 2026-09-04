@@ -146,6 +146,43 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal((await store.listByUser('default-user'))[0]?.projectId, 'project-traqen');
   });
 
+  it('adoptImportOrigin installs immutable provenance under exact owner/project/update CAS', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: '[F004] legacy imported title',
+      summary: 'legacy source snapshot',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+    const input = {
+      userId: 'default-user',
+      projectId: 'project-traqen',
+      expectedUpdatedAt: created.updatedAt,
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId: 'project-traqen',
+        featureId: 'F004',
+        source: 'docs-backlog',
+      },
+      adoptedBy: 'default-user',
+      reason: 'operator verified the legacy row',
+    };
+
+    const adopted = await store.adoptImportOrigin(created.id, input);
+    assert.deepEqual(adopted?.importOrigin, input.importOrigin);
+    assert.ok(adopted.updatedAt > created.updatedAt);
+    assert.equal(adopted.audit.at(-1).action, 'import_origin_adopted');
+    assert.equal(
+      await store.adoptImportOrigin(created.id, input),
+      null,
+      'stale or repeated adoption cannot overwrite origin',
+    );
+    assert.deepEqual((await store.get(created.id))?.importOrigin, input.importOrigin);
+  });
+
   it('refreshMetadata cannot overwrite a concurrent lifecycle transition', async (t) => {
     if (!connected) return t.skip('Redis not connected');
     const created = await store.create({

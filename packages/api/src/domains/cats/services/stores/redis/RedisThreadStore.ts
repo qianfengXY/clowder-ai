@@ -39,6 +39,7 @@ import {
   parseThreadMetadataJson,
   validateMergedTotals,
 } from '../ports/ThreadStore.js';
+import { BacklogKeys } from '../redis-keys/backlog-keys.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 import { readAuthoritativeHash, readAuthoritativeMembers } from './redis-pipeline-reply.js';
@@ -65,6 +66,20 @@ if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
   return 0
 end
 redis.call('HSET', KEYS[1], unpack(ARGV))
+return 1
+`;
+
+/** A reverse link may only point at a live backlog record owned by the thread owner or system-thread index owner. */
+const LINK_LIVE_BACKLOG_ITEM_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return -1 end
+if tonumber(redis.call('HGET', KEYS[1], 'deletedAt') or '0') > 0 then return -1 end
+if redis.call('HEXISTS', KEYS[2], 'id') == 0 then return -2 end
+if redis.call('HGET', KEYS[2], 'userId') ~= ARGV[2] then return -2 end
+local threadOwner = redis.call('HGET', KEYS[1], 'createdBy')
+if threadOwner ~= ARGV[2] then
+  if threadOwner ~= 'system' or redis.call('ZSCORE', KEYS[3], ARGV[3]) == false then return -3 end
+end
+redis.call('HSET', KEYS[1], 'backlogItemId', ARGV[1])
 return 1
 `;
 
@@ -582,8 +597,25 @@ export class RedisThreadStore implements IThreadStore {
   }
 
   async linkBacklogItem(threadId: string, backlogItemId: string): Promise<void> {
-    const key = ThreadKeys.detail(threadId);
-    await this.setDetailFields(key, 'backlogItemId', backlogItemId);
+    const backlogKey = BacklogKeys.detail(backlogItemId);
+    const backlogOwner = await this.redis.hget(backlogKey, 'userId');
+    if (!backlogOwner) throw new Error(`Cannot link backlog item: backlog ${backlogItemId} not found`);
+    const result = Number(
+      await this.redis.eval(
+        LINK_LIVE_BACKLOG_ITEM_LUA,
+        3,
+        ThreadKeys.detail(threadId),
+        backlogKey,
+        ThreadKeys.userList(backlogOwner),
+        backlogItemId,
+        backlogOwner,
+        threadId,
+      ),
+    );
+    if (result === -1) throw new Error(`Cannot link backlog item: thread ${threadId} not found`);
+    if (result === -2) throw new Error(`Cannot link backlog item: backlog ${backlogItemId} not found`);
+    if (result === -3) throw new Error('Cannot link backlog item across owners');
+    if (result !== 1) throw new Error('Cannot link backlog item: atomic validation failed');
   }
 
   async unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): Promise<boolean> {
