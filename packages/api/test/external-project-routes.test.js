@@ -36,6 +36,29 @@ describe('External Project Routes', () => {
       needAuditFrameStore: new NeedAuditFrameStore(),
       backlogStore,
       threadStore,
+      backlogRetirementStore: {
+        async retire(input) {
+          const item = backlogStore.get(input.itemId, input.userId);
+          if (!item) return 'missing';
+          if (item.projectId !== input.projectId || item.updatedAt !== input.expectedUpdatedAt) {
+            return 'backlog_conflict';
+          }
+          if (
+            input.requiredImportOrigin &&
+            JSON.stringify(item.importOrigin) !== JSON.stringify(input.requiredImportOrigin)
+          ) {
+            return 'provenance_mismatch';
+          }
+          const sop = workflowSops.get(item.id) ?? null;
+          if (JSON.stringify(sop) !== JSON.stringify(input.expectedWorkflowSop)) return 'workflow_conflict';
+          if (workflowSopDeleteError) throw workflowSopDeleteError;
+          for (const thread of threadStore.list(input.userId)) {
+            if (thread.backlogItemId === item.id) threadStore.unlinkBacklogItem(thread.id, item.id);
+          }
+          workflowSops.delete(item.id);
+          return backlogStore.delete(item.id, input) ? 'deleted' : 'backlog_conflict';
+        },
+      },
       workflowSopStore: {
         async get(backlogItemId) {
           return workflowSops.get(backlogItemId) ?? null;
@@ -44,11 +67,6 @@ describe('External Project Routes', () => {
           const restored = { backlogItemId, featureId, ...input, updatedBy };
           workflowSops.set(backlogItemId, restored);
           return restored;
-        },
-        async restoreSnapshot(snapshot) {
-          if (workflowSops.has(snapshot.backlogItemId)) return false;
-          workflowSops.set(snapshot.backlogItemId, structuredClone(snapshot));
-          return true;
         },
         async delete(backlogItemId) {
           if (workflowSopDeleteError) throw workflowSopDeleteError;
@@ -920,6 +938,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f007', 'status:in-progress'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
     });
 
     const imported = await app.inject({
@@ -963,6 +987,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f007', 'status:in-progress'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
     });
     const thread = threadStore.create('user1', 'F007 historical discussion');
     threadStore.linkBacklogItem(thread.id, item.id);
@@ -988,6 +1018,7 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
         reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
       },
     });
 
@@ -1036,6 +1067,8 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F004',
         expectedUpdatedAt: item.updatedAt,
         reason: 'Spoofed importer provenance must not authorize deletion',
+        mode: 'operator-confirmed',
+        confirmation: `PERMANENTLY DELETE F004 ${item.id}`,
       },
     });
 
@@ -1067,7 +1100,7 @@ describe('External Project Routes', () => {
       title: '[F007] Manual retrospective',
       summary: 'user-authored history that happens to reuse the feature tag',
       priority: 'p2',
-      tags: ['feature:f007'],
+      tags: ['source:docs-backlog', 'feature:f007'],
       createdBy: 'user',
     });
 
@@ -1079,12 +1112,71 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
         reason: 'Manual records must never be selected by importer reconciliation',
+        mode: 'import-reconciliation',
       },
     });
 
     assert.equal(removed.statusCode, 409);
-    assert.match(removed.json().error, /not importer-managed/i);
+    assert.match(removed.json().error, /immutable importer provenance/i);
     assert.ok(backlogStore.get(item.id));
+  });
+
+  test('DELETE legacy retirement requires the exact feature and item confirmation', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'legacy-confirmed-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | Feature | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] legacy imported row',
+      summary: 'created before immutable import provenance existed',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+
+    const wrongConfirmation = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        reason: 'operator-confirmed legacy retirement',
+        mode: 'operator-confirmed',
+        confirmation: 'PERMANENTLY DELETE F007 another-item',
+      },
+    });
+    assert.equal(wrongConfirmation.statusCode, 400);
+    assert.ok(backlogStore.get(item.id));
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        reason: 'operator-confirmed legacy retirement',
+        mode: 'operator-confirmed',
+        confirmation: `PERMANENTLY DELETE F007 ${item.id}`,
+      },
+    });
+    assert.equal(removed.statusCode, 204, removed.body);
+    assert.equal(backlogStore.get(item.id), null);
   });
 
   test('DELETE detaches every owned thread that references the retired backlog item', async () => {
@@ -1112,6 +1204,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f007'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
     });
     const primary = threadStore.create('user1', 'primary');
     const additional = threadStore.create('user1', 'additional');
@@ -1138,6 +1236,7 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
         reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
       },
     });
 
@@ -1146,7 +1245,7 @@ describe('External Project Routes', () => {
     assert.equal(threadStore.get(additional.id)?.backlogItemId, undefined);
   });
 
-  test('DELETE rejects a stale item snapshot and restores detached thread and workflow state', async () => {
+  test('DELETE rejects a stale item snapshot without mutating thread or workflow state', async () => {
     const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -1171,6 +1270,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f007'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
     });
     const thread = threadStore.create('user1', 'historical');
     threadStore.linkBacklogItem(thread.id, item.id);
@@ -1202,6 +1307,7 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt - 1,
         reason: 'Stale snapshots must never authorize permanent deletion',
+        mode: 'import-reconciliation',
       },
     });
 
@@ -1236,6 +1342,12 @@ describe('External Project Routes', () => {
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f007'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
     });
     const thread = threadStore.create('user1', 'historical');
     threadStore.linkBacklogItem(thread.id, item.id);
@@ -1250,6 +1362,7 @@ describe('External Project Routes', () => {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
         reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
       },
     });
 
@@ -1325,6 +1438,8 @@ describe('External Project Routes', () => {
           expectedFeatureId: featureId,
           expectedUpdatedAt: item.updatedAt,
           reason: `Co-creator authorized retirement of ${featureId}`,
+          mode: 'operator-confirmed',
+          confirmation: `PERMANENTLY DELETE ${featureId} ${item.id}`,
         },
       });
       assert.equal(removed.statusCode, 204);
@@ -1409,6 +1524,12 @@ describe('External Project Routes', () => {
     const projectItems = backlogStore.listByUser('user1').filter((item) => item.projectId === projectId);
     assert.equal(projectItems.length, 1);
     assert.equal(projectItems[0].title, '[F002] Solo Feature');
+    assert.deepEqual(projectItems[0].importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F002',
+      source: 'docs-backlog',
+    });
   });
 
   test('import-backlog exposes EXT catalog entries and preserves legacy Desktop loop identity', async () => {
@@ -1473,5 +1594,11 @@ describe('External Project Routes', () => {
     assert.equal(extension?.id, legacy.id);
     assert.ok(extension?.tags.includes('feature-kind:extension'));
     assert.ok(upstream);
+    assert.deepEqual(upstream.importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F289',
+      source: 'docs-backlog',
+    });
   });
 });

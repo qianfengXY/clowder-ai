@@ -1,7 +1,6 @@
 import type {
   AcquireBacklogLeaseInput,
   AtomicDispatchInput,
-  BacklogDependencies,
   BacklogItem,
   BacklogLease,
   CorrectDispatchedPhaseInput,
@@ -43,6 +42,68 @@ local ttl = tonumber(ARGV[4])
 if ttl and ttl > 0 then
   redis.call('EXPIRE', KEYS[1], ttl)
   redis.call('EXPIRE', KEYS[2], ttl)
+end
+return 1
+`;
+
+/**
+ * Update importer-owned metadata from the current Redis truth. Lifecycle fields
+ * are deliberately never read into JavaScript and never written by this script.
+ */
+const REFRESH_METADATA_LUA = `
+-- REFRESH_METADATA_ATOMIC
+local key = KEYS[1]
+if redis.call('HGET', key, 'id') == false then
+  return -1
+end
+
+local title = ARGV[1]
+local summary = ARGV[2]
+local priority = ARGV[3]
+local tags = ARGV[4]
+local dependencies = ARGV[5]
+local importStatus = ARGV[6]
+local now = ARGV[7]
+local auditEntry = cjson.decode(ARGV[8])
+local changed = false
+
+if redis.call('HGET', key, 'title') ~= title then changed = true end
+if redis.call('HGET', key, 'summary') ~= summary then changed = true end
+if redis.call('HGET', key, 'priority') ~= priority then changed = true end
+if redis.call('HGET', key, 'tags') ~= tags then changed = true end
+if dependencies ~= '__UNCHANGED__' and (redis.call('HGET', key, 'dependencies') or '') ~= dependencies then
+  changed = true
+end
+
+local currentStatus = redis.call('HGET', key, 'status')
+local statusUpgrade = currentStatus == 'open' and importStatus ~= '' and importStatus ~= 'open'
+if statusUpgrade then changed = true end
+if not changed then return 0 end
+
+local auditRaw = redis.call('HGET', key, 'audit')
+local auditOk, audit = pcall(cjson.decode, auditRaw or '[]')
+if not auditOk or type(audit) ~= 'table' then return -2 end
+if statusUpgrade then
+  auditEntry.detail = 'docs-backlog-sync (status: ' .. importStatus .. ')'
+else
+  auditEntry.detail = 'docs-backlog-sync'
+end
+table.insert(audit, auditEntry)
+
+redis.call('HSET', key,
+  'title', title,
+  'summary', summary,
+  'priority', priority,
+  'tags', tags,
+  'updatedAt', now,
+  'audit', cjson.encode(audit)
+)
+if dependencies ~= '__UNCHANGED__' then
+  redis.call('HSET', key, 'dependencies', dependencies)
+end
+if statusUpgrade then
+  redis.call('HSET', key, 'status', importStatus)
+  if importStatus == 'done' then redis.call('HSET', key, 'doneAt', now) end
 end
 return 1
 `;
@@ -576,6 +637,8 @@ export class RedisBacklogStore implements IBacklogStore {
       tags: [...input.tags],
       status: input.initialStatus ?? 'open',
       createdBy: input.createdBy,
+      ...(input.importOrigin ? { importOrigin: input.importOrigin } : {}),
+      ...(input.dependencies ? { dependencies: input.dependencies } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       createdAt: now,
       updatedAt: now,
@@ -635,46 +698,33 @@ export class RedisBacklogStore implements IBacklogStore {
   }
 
   async refreshMetadata(itemId: string, input: RefreshBacklogItemInput): Promise<BacklogItem | null> {
-    const existing = await this.get(itemId);
-    if (!existing) return null;
-
-    // Status upgrade: only open→dispatched or open→done, never downgrade
-    const statusUpgrade =
-      input.importStatus && existing.status === 'open' && input.importStatus !== 'open'
-        ? input.importStatus
-        : undefined;
-
-    const unchanged =
-      existing.title === input.title &&
-      existing.summary === input.summary &&
-      existing.priority === input.priority &&
-      this.sameTags(existing.tags, input.tags) &&
-      this.sameDependencies(existing.dependencies, input.dependencies) &&
-      !statusUpgrade;
-    if (unchanged) return existing;
-
     const now = Date.now();
-    const updated: BacklogItem = {
-      ...existing,
-      title: input.title,
-      summary: input.summary,
-      priority: input.priority,
-      tags: [...input.tags],
-      ...(input.dependencies !== undefined ? { dependencies: input.dependencies } : {}),
-      ...(statusUpgrade ? { status: statusUpgrade } : {}),
-      updatedAt: now,
-      audit: [
-        ...existing.audit,
-        {
-          id: generateSortableId(now + 1),
-          action: 'refreshed',
-          actor: makeUserActor(input.refreshedBy),
-          timestamp: now,
-          detail: statusUpgrade ? `docs-backlog-sync (status: ${statusUpgrade})` : 'docs-backlog-sync',
-        },
-      ],
-    };
-    await this.writeItem(updated);
+    const auditEntry = JSON.stringify({
+      id: generateSortableId(now + 1),
+      action: 'refreshed',
+      actor: makeUserActor(input.refreshedBy),
+      timestamp: now,
+      detail: '',
+    });
+    const result = Number(
+      await this.redis.eval(
+        REFRESH_METADATA_LUA,
+        1,
+        BacklogKeys.detail(itemId),
+        input.title,
+        input.summary,
+        input.priority,
+        JSON.stringify(input.tags),
+        input.dependencies === undefined ? '__UNCHANGED__' : JSON.stringify(input.dependencies),
+        input.importStatus ?? '',
+        String(now),
+        auditEntry,
+      ),
+    );
+    if (result === -1) return null;
+    if (result === -2) throw new BacklogTransitionError('Cannot refresh backlog item with invalid persisted audit');
+    const updated = await this.get(itemId);
+    if (updated && result === 1) await this.touchLeaseTtl(updated);
     return updated;
   }
 
@@ -1207,6 +1257,8 @@ export class RedisBacklogStore implements IBacklogStore {
     if (item.pendingThreadId) result.pendingThreadId = item.pendingThreadId;
     if (item.kickoffMessageId) result.kickoffMessageId = item.kickoffMessageId;
     if (item.projectId) result.projectId = item.projectId;
+    if (item.importOrigin) result.importOrigin = JSON.stringify(item.importOrigin);
+    if (item.dependencies) result.dependencies = JSON.stringify(item.dependencies);
     return result;
   }
 
@@ -1218,6 +1270,12 @@ export class RedisBacklogStore implements IBacklogStore {
     const approvedAt = data.approvedAt ? Number.parseInt(data.approvedAt, 10) : null;
     const dispatchedAt = data.dispatchedAt ? Number.parseInt(data.dispatchedAt, 10) : null;
     const doneAt = data.doneAt ? Number.parseInt(data.doneAt, 10) : null;
+    const importOrigin = data.importOrigin
+      ? this.parseJson(data.importOrigin, null as BacklogItem['importOrigin'] | null)
+      : null;
+    const dependencies = data.dependencies
+      ? this.parseJson(data.dependencies, null as BacklogItem['dependencies'] | null)
+      : null;
     return {
       id: data.id ?? '',
       userId: data.userId ?? '',
@@ -1238,6 +1296,8 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(data.pendingThreadId ? { pendingThreadId: data.pendingThreadId } : {}),
       ...(data.kickoffMessageId ? { kickoffMessageId: data.kickoffMessageId } : {}),
       ...(data.projectId ? { projectId: data.projectId } : {}),
+      ...(importOrigin ? { importOrigin } : {}),
+      ...(dependencies ? { dependencies } : {}),
       ...(approvedAt ? { approvedAt } : {}),
       ...(dispatchedAt ? { dispatchedAt } : {}),
       ...(doneAt ? { doneAt } : {}),
@@ -1251,38 +1311,6 @@ export class RedisBacklogStore implements IBacklogStore {
     } catch {
       return fallback;
     }
-  }
-
-  private sameTags(left: readonly string[], right: readonly string[]): boolean {
-    if (left.length !== right.length) return false;
-    const leftSorted = [...left].sort();
-    const rightSorted = [...right].sort();
-    for (let index = 0; index < leftSorted.length; index += 1) {
-      if (leftSorted[index] !== rightSorted[index]) return false;
-    }
-    return true;
-  }
-
-  private sameStringArray(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
-    if (!a && !b) return true;
-    if (!a || !b) return false;
-    if (a.length !== b.length) return false;
-    const as = [...a].sort();
-    const bs = [...b].sort();
-    for (let i = 0; i < as.length; i += 1) {
-      if (as[i] !== bs[i]) return false;
-    }
-    return true;
-  }
-
-  private sameDependencies(a: BacklogDependencies | undefined, b: BacklogDependencies | undefined): boolean {
-    if (!a && !b) return true;
-    if (!a || !b) return false;
-    return (
-      this.sameStringArray(a.evolvedFrom, b.evolvedFrom) &&
-      this.sameStringArray(a.blockedBy, b.blockedBy) &&
-      this.sameStringArray(a.related, b.related)
-    );
   }
 
   private normalizeLeaseTtl(ttlMs: number): number {

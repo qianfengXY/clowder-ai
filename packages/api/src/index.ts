@@ -4890,6 +4890,9 @@ async function main(): Promise<void> {
 
   // F076: External projects + Need Audit
   const { ExternalProjectStore } = await import('./domains/projects/external-project-store.js');
+  const { RedisExternalProjectBacklogRetirementStore } = await import(
+    './domains/projects/external-project-backlog-retirement-store.js'
+  );
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
   const { NeedAuditFrameStore } = await import('./domains/projects/need-audit-frame-store.js');
   const externalProjectStore = new ExternalProjectStore(redis);
@@ -5014,6 +5017,7 @@ async function main(): Promise<void> {
     needAuditFrameStore,
     backlogStore,
     threadStore,
+    ...(redis ? { backlogRetirementStore: new RedisExternalProjectBacklogRetirementStore(redis) } : {}),
     ...(workflowSopStore ? { workflowSopStore } : {}),
   });
   await app.register(desktopDevelopmentLoopRoutes, {

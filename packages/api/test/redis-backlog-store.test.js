@@ -130,11 +130,110 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       tags: ['source:docs-backlog', 'feature:f006'],
       createdBy: 'user',
       projectId: 'project-traqen',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId: 'project-traqen',
+        featureId: 'F006',
+        source: 'docs-backlog',
+      },
+      dependencies: { blockedBy: ['F007'] },
     });
 
     assert.equal(created.projectId, 'project-traqen');
     assert.equal((await store.get(created.id))?.projectId, 'project-traqen');
+    assert.deepEqual((await store.get(created.id))?.importOrigin, created.importOrigin);
+    assert.deepEqual((await store.get(created.id))?.dependencies, { blockedBy: ['F007'] });
     assert.equal((await store.listByUser('default-user'))[0]?.projectId, 'project-traqen');
+  });
+
+  it('refreshMetadata cannot overwrite a concurrent lifecycle transition', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: '[F003] stale title',
+      summary: 'stale summary',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f003'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId: 'project-traqen',
+        featureId: 'F003',
+        source: 'docs-backlog',
+      },
+    });
+
+    let refreshEvalSeen = false;
+    let releaseSnapshot;
+    let snapshotTaken;
+    const release = new Promise((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const staleRead = new Promise((resolve) => {
+      snapshotTaken = resolve;
+    });
+    const redisProxy = new Proxy(redis, {
+      get(target, property) {
+        if (property === 'eval') {
+          return async (...args) => {
+            if (String(args[0]).includes('REFRESH_METADATA_ATOMIC')) refreshEvalSeen = true;
+            return target.eval(...args);
+          };
+        }
+        if (property === 'hgetall') {
+          return async (...args) => {
+            const snapshot = await target.hgetall(...args);
+            if (!refreshEvalSeen && String(args[0]).endsWith(created.id)) {
+              snapshotTaken();
+              await release;
+            }
+            return snapshot;
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const refreshStore = new RedisBacklogStore(redisProxy, { ttlSeconds: 120 });
+    const refreshPromise = refreshStore.refreshMetadata(created.id, {
+      title: '[F003] Agent Candidates & Reviewed Business Function Tree',
+      summary: 'canonical source summary',
+      priority: 'p1',
+      tags: ['source:docs-backlog', 'feature:f003', 'status:spec'],
+      refreshedBy: 'default-user',
+    });
+
+    const firstBoundary = await Promise.race([
+      refreshPromise.then(() => 'atomic-refresh'),
+      staleRead.then(() => 'stale-read'),
+    ]);
+    await store.suggestClaim(created.id, {
+      catId: 'codex',
+      why: 'preserve current work',
+      plan: 'continue lifecycle',
+      requestedPhase: 'coding',
+    });
+    await store.decideClaim(created.id, { decision: 'approve', decidedBy: 'default-user' });
+    await store.markDispatched(created.id, {
+      threadId: 'thread-f003',
+      threadPhase: 'coding',
+      dispatchedBy: 'default-user',
+    });
+    releaseSnapshot();
+    await refreshPromise;
+
+    assert.equal(firstBoundary, 'atomic-refresh');
+    const finalItem = await store.get(created.id);
+    assert.equal(finalItem?.title, '[F003] Agent Candidates & Reviewed Business Function Tree');
+    assert.equal(finalItem?.priority, 'p1');
+    assert.equal(finalItem?.status, 'dispatched');
+    assert.equal(finalItem?.dispatchedThreadId, 'thread-f003');
+    assert.deepEqual(finalItem?.importOrigin, created.importOrigin);
+    assert.deepEqual(
+      finalItem?.audit.map((entry) => entry.action),
+      ['created', 'refreshed', 'suggested', 'approved', 'dispatched'],
+    );
   });
 
   it('delete removes only the exact owner/project item and clears its list and dispatch lock', async (t) => {

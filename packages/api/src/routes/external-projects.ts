@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
+  BacklogImportOrigin,
   BacklogItem,
   CatId,
   CreateDesktopDevelopmentProjectBindingInput,
@@ -15,6 +16,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
+import type { IExternalProjectBacklogRetirementStore } from '../domains/projects/external-project-backlog-retirement-store.js';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { NeedAuditFrameStore } from '../domains/projects/need-audit-frame-store.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
@@ -33,8 +35,9 @@ export interface ExternalProjectRoutesOptions {
   externalProjectStore: ExternalProjectStore;
   needAuditFrameStore: NeedAuditFrameStore;
   backlogStore: IBacklogStore;
-  threadStore?: Pick<IThreadStore, 'get' | 'list' | 'unlinkBacklogItem' | 'restoreBacklogItemLink'>;
-  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert' | 'delete' | 'restoreSnapshot'>;
+  threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+  backlogRetirementStore?: IExternalProjectBacklogRetirementStore;
+  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert'>;
 }
 
 function sameTags(left: readonly string[], right: readonly string[]): boolean {
@@ -44,7 +47,24 @@ function sameTags(left: readonly string[], right: readonly string[]): boolean {
   return leftSorted.every((tag, index) => tag === rightSorted[index]);
 }
 
-function isManagedImportItem(item: BacklogItem): boolean {
+function importOriginFor(row: BacklogFeatureRow, projectId: string): BacklogImportOrigin {
+  return {
+    kind: 'external-project-catalog',
+    projectId,
+    featureId: row.id.toUpperCase(),
+    source: row.kind === 'extension' ? 'extension-catalog' : 'docs-backlog',
+  };
+}
+
+function isManagedImportItem(item: BacklogItem, projectId: string, featureId: string): boolean {
+  return (
+    item.importOrigin?.kind === 'external-project-catalog' &&
+    item.importOrigin.projectId === projectId &&
+    item.importOrigin.featureId === featureId
+  );
+}
+
+function isLegacyImportRefreshCandidate(item: BacklogItem): boolean {
   return item.tags.includes('source:docs-backlog') || item.tags.includes('source:extension-catalog');
 }
 
@@ -52,6 +72,8 @@ interface RetireBacklogItemRequest {
   readonly expectedFeatureId: string;
   readonly expectedUpdatedAt: number;
   readonly reason: string;
+  readonly mode: 'import-reconciliation' | 'operator-confirmed';
+  readonly confirmation?: string;
 }
 
 function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest | null {
@@ -64,7 +86,9 @@ function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest 
     !Number.isSafeInteger(candidate.expectedUpdatedAt) ||
     candidate.expectedUpdatedAt < 0 ||
     typeof candidate.reason !== 'string' ||
-    candidate.reason.trim().length === 0
+    candidate.reason.trim().length === 0 ||
+    (candidate.mode !== 'import-reconciliation' && candidate.mode !== 'operator-confirmed') ||
+    (candidate.confirmation !== undefined && typeof candidate.confirmation !== 'string')
   ) {
     return null;
   }
@@ -72,6 +96,8 @@ function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest 
     expectedFeatureId: candidate.expectedFeatureId.trim().toUpperCase(),
     expectedUpdatedAt: candidate.expectedUpdatedAt,
     reason: candidate.reason.trim(),
+    mode: candidate.mode,
+    ...(typeof candidate.confirmation === 'string' ? { confirmation: candidate.confirmation.trim() } : {}),
   };
 }
 
@@ -247,7 +273,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     let orphans = 0;
     const existingByFeatureId = new Map<string, BacklogItem>();
     for (const item of existingItems) {
-      if (item.projectId !== project.id || !isManagedImportItem(item)) continue;
+      if (item.projectId !== project.id || !isLegacyImportRefreshCandidate(item)) continue;
       const featureTagId = getFeatureTagId(item.tags);
       if (featureTagId && !existingByFeatureId.has(featureTagId)) {
         existingByFeatureId.set(featureTagId, item);
@@ -313,7 +339,11 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       //    without mutating historical items that may belong to another project.
       if (orphanItems.length > 0) {
         const input = buildBacklogInputFromFeature(row, userId);
-        const imported = await backlogStore.create({ ...input, projectId: project.id });
+        const imported = await backlogStore.create({
+          ...input,
+          projectId: project.id,
+          importOrigin: importOriginFor(row, project.id),
+        });
         existingByFeatureId.set(featureId, imported);
         created++;
         continue;
@@ -321,7 +351,11 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
 
       // 4. Create new item
       const input = buildBacklogInputFromFeature(row, userId);
-      const imported = await backlogStore.create({ ...input, projectId: project.id });
+      const imported = await backlogStore.create({
+        ...input,
+        projectId: project.id,
+        importOrigin: importOriginFor(row, project.id),
+      });
       existingByFeatureId.set(featureId, imported);
       created++;
     }
@@ -346,7 +380,8 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const retireRequest = parseRetireBacklogItemRequest(request.body);
     if (!retireRequest) {
       return reply.status(400).send({
-        error: 'expectedFeatureId, expectedUpdatedAt, and reason are required to permanently remove a backlog item',
+        error:
+          'expectedFeatureId, expectedUpdatedAt, reason, and mode are required to permanently remove a backlog item',
       });
     }
 
@@ -358,10 +393,15 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     if (!itemFeatureId || itemFeatureId !== retireRequest.expectedFeatureId) {
       return reply.status(409).send({ error: 'Backlog item feature identity changed before it could be removed' });
     }
-    if (!isManagedImportItem(item)) {
-      return reply
-        .status(409)
-        .send({ error: 'Backlog item is not importer-managed and cannot be retired by reconciliation' });
+    const importReconciliation = retireRequest.mode === 'import-reconciliation';
+    if (importReconciliation && !isManagedImportItem(item, project.id, retireRequest.expectedFeatureId)) {
+      return reply.status(409).send({ error: 'Backlog item has no immutable importer provenance' });
+    }
+    if (
+      !importReconciliation &&
+      retireRequest.confirmation !== `PERMANENTLY DELETE ${retireRequest.expectedFeatureId} ${item.id}`
+    ) {
+      return reply.status(400).send({ error: 'Exact operator confirmation is required for a manual retirement' });
     }
 
     // Importer tags are editable backlog data, not deletion authority. The current
@@ -384,92 +424,40 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
         .send({ error: `${retireRequest.expectedFeatureId} is still present in the active project catalog` });
     }
 
-    if (!opts.threadStore || !opts.workflowSopStore) {
+    if (!opts.threadStore || !opts.backlogRetirementStore || !opts.workflowSopStore) {
       return reply.status(503).send({ error: 'Required stores unavailable; cannot safely remove backlog item' });
     }
-
-    // The backlog record only carries its primary thread IDs. Scan the complete
-    // owner-visible thread set so secondary conversation links cannot dangle.
-    let ownerThreads: Awaited<ReturnType<typeof opts.threadStore.list>>;
-    try {
-      ownerThreads = await opts.threadStore.list(userId);
-    } catch (error) {
-      return reply.status(500).send({
-        error: `Cannot inspect linked threads: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
+    // RedisThreadStore.list() also repairs a missing user-thread index. Feed the
+    // repaired snapshot into the atomic transaction while the Lua script scans
+    // the live index again, closing both historical-index and concurrent-link gaps.
+    const ownerThreads = await opts.threadStore.list(userId);
     const ownerThreadIds = new Set(ownerThreads.map((thread) => thread.id));
-    const linkedThreads = new Map(
-      ownerThreads.filter((thread) => thread.backlogItemId === item.id).map((thread) => [thread.id, thread]),
-    );
     const primaryThreadIds = [...new Set([item.pendingThreadId, item.dispatchedThreadId].filter(Boolean))] as string[];
     for (const threadId of primaryThreadIds) {
       const thread = await opts.threadStore.get(threadId);
-      if (!thread || thread.backlogItemId !== item.id) continue;
-      if (!ownerThreadIds.has(thread.id)) {
+      if (thread?.backlogItemId === item.id && !ownerThreadIds.has(threadId)) {
         return reply.status(409).send({ error: 'Backlog item is linked to a thread outside the current user scope' });
       }
-      linkedThreads.set(thread.id, thread);
     }
-
-    const detachedThreadIds: string[] = [];
-    const restoreDetachedThreads = async (): Promise<void> => {
-      for (const threadId of detachedThreadIds) {
-        if (!(await opts.threadStore?.restoreBacklogItemLink(threadId, item.id))) {
-          throw new Error(`Thread ${threadId} changed before its backlog link could be restored`);
-        }
-      }
-    };
-
+    const candidateThreadIds = [
+      ...new Set([
+        ...ownerThreads.filter((thread) => thread.backlogItemId === item.id).map((thread) => thread.id),
+        ...primaryThreadIds,
+      ]),
+    ];
     const workflowSop = await opts.workflowSopStore.get(item.id);
-    let workflowSopDeleted = false;
-    const restoreWorkflowSop = async (): Promise<void> => {
-      if (!workflowSopDeleted || !workflowSop) return;
-      if (!(await opts.workflowSopStore?.restoreSnapshot(workflowSop))) {
-        throw new Error('Workflow state changed before its exact snapshot could be restored');
-      }
-      workflowSopDeleted = false;
-    };
-
-    try {
-      for (const threadId of linkedThreads.keys()) {
-        if (!(await opts.threadStore.unlinkBacklogItem(threadId, item.id))) {
-          await restoreDetachedThreads();
-          return reply.status(409).send({ error: 'A linked thread changed before the backlog item could be removed' });
-        }
-        detachedThreadIds.push(threadId);
-      }
-
-      if (workflowSop) {
-        workflowSopDeleted = await opts.workflowSopStore.delete(item.id);
-        if (!workflowSopDeleted) {
-          await restoreDetachedThreads();
-          return reply.status(409).send({ error: 'Workflow state changed before the backlog item could be removed' });
-        }
-      }
-
-      const deleted = await backlogStore.delete(item.id, {
-        userId,
-        projectId: project.id,
-        expectedUpdatedAt: retireRequest.expectedUpdatedAt,
-      });
-      if (!deleted) {
-        await restoreWorkflowSop();
-        await restoreDetachedThreads();
-        return reply.status(409).send({ error: 'Backlog item changed before it could be removed' });
-      }
-    } catch (error) {
-      try {
-        await restoreWorkflowSop();
-        await restoreDetachedThreads();
-      } catch (restoreError) {
-        app.log.error(
-          { err: restoreError, projectId: project.id, backlogItemId: item.id },
-          'Failed to restore state after backlog removal error',
-        );
-      }
-      return reply.status(500).send({
-        error: `Cannot safely remove backlog item: ${error instanceof Error ? error.message : String(error)}`,
+    const retirement = await opts.backlogRetirementStore.retire({
+      itemId: item.id,
+      userId,
+      projectId: project.id,
+      expectedUpdatedAt: retireRequest.expectedUpdatedAt,
+      ...(importReconciliation && item.importOrigin ? { requiredImportOrigin: item.importOrigin } : {}),
+      expectedWorkflowSop: workflowSop,
+      candidateThreadIds,
+    });
+    if (retirement !== 'deleted') {
+      return reply.status(retirement === 'missing' ? 404 : 409).send({
+        error: `Backlog retirement rejected: ${retirement}`,
       });
     }
 
@@ -478,6 +466,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
         projectId: project.id,
         backlogItemId: item.id,
         featureId: retireRequest.expectedFeatureId,
+        mode: retireRequest.mode,
         reason: retireRequest.reason,
       },
       'Permanently removed retired project backlog item',

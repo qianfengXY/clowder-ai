@@ -130,6 +130,7 @@ export type {
   BacklogAuditEntry,
   BacklogClaimSuggestion,
   BacklogDependencies,
+  BacklogImportOrigin,
   BacklogItem,
   BacklogLease,
   BacklogLeaseState,

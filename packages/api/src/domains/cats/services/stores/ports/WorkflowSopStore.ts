@@ -33,6 +33,4 @@ export interface IWorkflowSopStore {
     executorCatId: CatId,
   ): Promise<WorkflowSopAdmissionBundle | null>;
   delete(backlogItemId: string): Promise<boolean>;
-  /** Restore an exact previously deleted snapshot; refuses to overwrite concurrent state. */
-  restoreSnapshot(snapshot: WorkflowSop): Promise<boolean>;
 }

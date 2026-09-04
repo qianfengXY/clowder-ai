@@ -58,6 +58,14 @@ export interface BacklogAuditEntry {
   readonly detail?: string;
 }
 
+/** Server-owned provenance for records created by an external-project catalog import. */
+export interface BacklogImportOrigin {
+  readonly kind: 'external-project-catalog';
+  readonly projectId: string;
+  readonly featureId: string;
+  readonly source: 'docs-backlog' | 'extension-catalog';
+}
+
 export interface BacklogItem {
   readonly id: string;
   readonly userId: string;
@@ -68,6 +76,8 @@ export interface BacklogItem {
   readonly tags: readonly string[];
   readonly status: BacklogStatus;
   readonly createdBy: CatId | 'user';
+  /** Immutable import provenance. User-facing create/update APIs never accept this field. */
+  readonly importOrigin?: BacklogImportOrigin;
   readonly suggestion?: BacklogClaimSuggestion;
   readonly lease?: BacklogLease;
   readonly dispatchedThreadId?: string;
@@ -91,6 +101,8 @@ export interface CreateBacklogItemInput {
   readonly priority: BacklogPriority;
   readonly tags: readonly string[];
   readonly createdBy: CatId | 'user';
+  /** Internal-only provenance supplied by the catalog importer. */
+  readonly importOrigin?: BacklogImportOrigin;
   readonly dependencies?: BacklogDependencies;
   /** Optional initial status for import (skips workflow transitions). Defaults to 'open'. */
   readonly initialStatus?: BacklogStatus;

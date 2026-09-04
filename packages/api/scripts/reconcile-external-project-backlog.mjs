@@ -11,6 +11,14 @@ function requiredFlag(argv, name) {
   return value;
 }
 
+function optionalFlag(argv, name) {
+  const index = argv.indexOf(name);
+  if (index < 0) return '';
+  const value = argv[index + 1]?.trim() ?? '';
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+  return value;
+}
+
 function parseFeatureIds(value, label) {
   const ids = [
     ...new Set(
@@ -32,8 +40,22 @@ export function parseReconcileArguments(argv) {
   const projectId = requiredFlag(argv, '--project-id');
   const retireFeatureIds = parseFeatureIds(requiredFlag(argv, '--retire'), '--retire');
   const expectedActiveFeatureIds = parseFeatureIds(requiredFlag(argv, '--expect-active'), '--expect-active');
+  const confirmedLegacyValue = optionalFlag(argv, '--confirm-legacy-retire');
+  const operatorConfirmedLegacyFeatureIds = confirmedLegacyValue
+    ? parseFeatureIds(confirmedLegacyValue, '--confirm-legacy-retire')
+    : [];
+  if (operatorConfirmedLegacyFeatureIds.some((featureId) => !retireFeatureIds.includes(featureId))) {
+    throw new Error('--confirm-legacy-retire must be a subset of --retire');
+  }
   if (!/^https?:\/\//.test(apiUrl)) throw new Error('--api-url must use http or https');
-  return { apiUrl, userId, projectId, retireFeatureIds, expectedActiveFeatureIds };
+  return {
+    apiUrl,
+    userId,
+    projectId,
+    retireFeatureIds,
+    expectedActiveFeatureIds,
+    operatorConfirmedLegacyFeatureIds,
+  };
 }
 
 function featureIdOf(item) {
@@ -41,8 +63,13 @@ function featureIdOf(item) {
   return tag?.slice('feature:'.length).toUpperCase() ?? null;
 }
 
-function isManagedImportItem(item) {
-  return item.tags?.includes('source:docs-backlog') || item.tags?.includes('source:extension-catalog');
+function isManagedImportItem(item, projectId, featureId) {
+  return (
+    item.importOrigin?.kind === 'external-project-catalog' &&
+    item.importOrigin.projectId === projectId &&
+    item.importOrigin.featureId === featureId &&
+    (item.importOrigin.source === 'docs-backlog' || item.importOrigin.source === 'extension-catalog')
+  );
 }
 
 async function requestJson(options, path, init = {}) {
@@ -68,12 +95,38 @@ async function listItems(options) {
   return result.items;
 }
 
+function buildRetirementRequest(options, items, featureId, confirmedLegacyIds) {
+  const matches = items.filter((item) => featureIdOf(item) === featureId);
+  if (matches.length > 1) throw new Error(`Refusing to delete duplicate ${featureId} backlog records`);
+  const item = matches[0];
+  if (!item) return null;
+
+  const importerManaged = isManagedImportItem(item, options.projectId, featureId);
+  const operatorConfirmedLegacy = confirmedLegacyIds.has(featureId);
+  if (!importerManaged && !operatorConfirmedLegacy) {
+    throw new Error(`Refusing to delete ${featureId}: matching backlog item has no immutable importer provenance`);
+  }
+  return {
+    item,
+    payload: {
+      expectedFeatureId: featureId,
+      expectedUpdatedAt: item.updatedAt,
+      reason: `Explicit post-deploy retirement reconciliation for ${featureId}`,
+      mode: importerManaged ? 'import-reconciliation' : 'operator-confirmed',
+      ...(!importerManaged && operatorConfirmedLegacy
+        ? { confirmation: `PERMANENTLY DELETE ${featureId} ${item.id}` }
+        : {}),
+    },
+  };
+}
+
 /**
  * One-shot, idempotent post-deploy reconciliation. Import refreshes active source
  * metadata; permanent removals still require an explicit feature allowlist.
  */
 export async function reconcileExternalProjectBacklog(input) {
   const options = { ...input, fetchImpl: input.fetchImpl ?? fetch };
+  const confirmedLegacyIds = new Set(options.operatorConfirmedLegacyFeatureIds ?? []);
   const imported = await requestJson(
     options,
     `/api/external-projects/${encodeURIComponent(options.projectId)}/import-backlog`,
@@ -85,23 +138,14 @@ export async function reconcileExternalProjectBacklog(input) {
   let items = await listItems(options);
   const removed = [];
   for (const featureId of options.retireFeatureIds) {
-    const matches = items.filter((item) => featureIdOf(item) === featureId);
-    if (matches.length > 1) throw new Error(`Refusing to delete duplicate ${featureId} backlog records`);
-    const item = matches[0];
-    if (!item) continue;
-    if (!isManagedImportItem(item)) {
-      throw new Error(`Refusing to delete ${featureId}: matching backlog item is not importer-managed`);
-    }
+    const retirement = buildRetirementRequest(options, items, featureId, confirmedLegacyIds);
+    if (!retirement) continue;
     await requestJson(
       options,
-      `/api/external-projects/${encodeURIComponent(options.projectId)}/backlog/items/${encodeURIComponent(item.id)}`,
+      `/api/external-projects/${encodeURIComponent(options.projectId)}/backlog/items/${encodeURIComponent(retirement.item.id)}`,
       {
         method: 'DELETE',
-        body: JSON.stringify({
-          expectedFeatureId: featureId,
-          expectedUpdatedAt: item.updatedAt,
-          reason: `Explicit post-deploy retirement reconciliation for ${featureId}`,
-        }),
+        body: JSON.stringify(retirement.payload),
       },
     );
     removed.push(featureId);

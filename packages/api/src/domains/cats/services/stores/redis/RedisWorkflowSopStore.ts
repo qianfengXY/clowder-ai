@@ -106,22 +106,6 @@ end
 return 'OK'
 `;
 
-/**
- * Restore an exact deleted SOP snapshot without synthesizing a new version or
- * timestamp. SET NX refuses to overwrite state created by a concurrent writer.
- */
-const RESTORE_SNAPSHOT_LUA = `
-if redis.call('EXISTS', KEYS[1]) == 1 then
-  return 0
-end
-redis.call('SET', KEYS[1], ARGV[1])
-local ttl = tonumber(ARGV[2])
-if ttl > 0 then
-  redis.call('EXPIRE', KEYS[1], ttl)
-end
-return 1
-`;
-
 export class RedisWorkflowSopStore implements IWorkflowSopStore {
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
@@ -295,12 +279,5 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
     const key = WorkflowSopKeys.detail(backlogItemId);
     const count = await this.redis.del(key);
     return count > 0;
-  }
-
-  async restoreSnapshot(snapshot: WorkflowSop): Promise<boolean> {
-    const key = WorkflowSopKeys.detail(snapshot.backlogItemId);
-    const ttl = this.ttlSeconds ?? -1;
-    const restored = await this.redis.eval(RESTORE_SNAPSHOT_LUA, 1, key, JSON.stringify(snapshot), String(ttl));
-    return Number(restored) === 1;
   }
 }

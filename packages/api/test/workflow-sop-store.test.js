@@ -357,16 +357,5 @@ describe(
       const deleted = await store.delete('nonexistent');
       assert.equal(deleted, false);
     });
-
-    it('restores an exact deleted snapshot without changing version or updatedAt', async () => {
-      await store.upsert('item-restore', 'F007', { stage: 'discussion' }, 'user1', 'owner-1');
-      const original = await store.get('item-restore');
-      assert.ok(original);
-
-      assert.equal(await store.delete('item-restore'), true);
-      assert.equal(await store.restoreSnapshot(original), true);
-      assert.deepEqual(await store.get('item-restore'), original);
-      assert.equal(await store.restoreSnapshot(original), false);
-    });
   },
 );

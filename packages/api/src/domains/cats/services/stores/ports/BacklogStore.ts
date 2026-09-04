@@ -161,6 +161,7 @@ export class BacklogStore implements IBacklogStore {
       tags: [...input.tags],
       status: input.initialStatus ?? 'open',
       createdBy: input.createdBy,
+      ...(input.importOrigin ? { importOrigin: input.importOrigin } : {}),
       ...(input.dependencies ? { dependencies: input.dependencies } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       createdAt: now,

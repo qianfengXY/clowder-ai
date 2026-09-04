@@ -618,8 +618,6 @@ export interface IThreadStore {
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
   /** Removes the reverse backlog reference without deleting the thread or its messages. */
   unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): boolean | Promise<boolean>;
-  /** Restores a removed reverse reference only while the field remains absent. */
-  restoreBacklogItemLink(threadId: string, backlogItemId: string): boolean | Promise<boolean>;
   /**
    * F046 D3: Persist one-shot feedback for suppressed A2A mentions.
    * The next invocation of this cat in this thread should consume and clear it.
@@ -1084,13 +1082,6 @@ export class ThreadStore implements IThreadStore {
     if (!thread || (expectedBacklogItemId && thread.backlogItemId !== expectedBacklogItemId)) return false;
     if (!thread.backlogItemId) return false;
     delete thread.backlogItemId;
-    return true;
-  }
-
-  restoreBacklogItemLink(threadId: string, backlogItemId: string): boolean {
-    const thread = this.get(threadId);
-    if (!thread || thread.backlogItemId !== undefined) return false;
-    thread.backlogItemId = backlogItemId;
     return true;
   }
 
