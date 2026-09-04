@@ -35,7 +35,7 @@ export interface ExternalProjectRoutesOptions {
   externalProjectStore: ExternalProjectStore;
   needAuditFrameStore: NeedAuditFrameStore;
   backlogStore: IBacklogStore;
-  threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+  threadStore?: Pick<IThreadStore, 'get' | 'list' | 'listBacklogItemThreadIds'>;
   backlogRetirementStore?: IExternalProjectBacklogRetirementStore;
   workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert'>;
 }
@@ -537,10 +537,12 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     if (!opts.threadStore || !opts.backlogRetirementStore || !opts.workflowSopStore) {
       return reply.status(503).send({ error: 'Required stores unavailable; cannot safely remove backlog item' });
     }
-    // RedisThreadStore.list() also repairs a missing user-thread index. Feed the
-    // repaired snapshot into the atomic transaction while the Lua script scans
-    // the live index again, closing both historical-index and concurrent-link gaps.
+    // Sidebar indexes are not an authority boundary: legacy or partially repaired
+    // threads can still point at this item while absent from the user's list.
+    // Discover every persisted reverse link, then let the Redis transaction scan
+    // the live user index again to cover links created after this read.
     const ownerThreads = await opts.threadStore.list(userId);
+    const linkedThreadIds = await opts.threadStore.listBacklogItemThreadIds(item.id);
     const ownerThreadIds = new Set(ownerThreads.map((thread) => thread.id));
     const primaryThreadIds = [...new Set([item.pendingThreadId, item.dispatchedThreadId].filter(Boolean))] as string[];
     for (const threadId of primaryThreadIds) {
@@ -553,6 +555,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       ...new Set([
         ...ownerThreads.filter((thread) => thread.backlogItemId === item.id).map((thread) => thread.id),
         ...primaryThreadIds,
+        ...linkedThreadIds,
       ]),
     ];
     const workflowSop = await opts.workflowSopStore.get(item.id);

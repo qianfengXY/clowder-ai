@@ -618,6 +618,50 @@ export class RedisThreadStore implements IThreadStore {
     if (result !== 1) throw new Error('Cannot link backlog item: atomic validation failed');
   }
 
+  async listBacklogItemThreadIds(backlogItemId: string, options?: StoreReadOptions): Promise<string[]> {
+    throwIfStoreReadAborted(options);
+    const matchPattern = `${this.keyPrefix}${ThreadKeys.detail('*')}`;
+    const threadIds = new Set<string>();
+    let cursor = '0';
+
+    do {
+      throwIfStoreReadAborted(options);
+      const [nextCursor, rawKeys] = (await awaitStoreRead(
+        this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200),
+        options,
+      )) as [string, string[]];
+      cursor = nextCursor;
+      const batchThreadIds = await this.filterBacklogItemThreadIds(rawKeys, backlogItemId, options);
+      for (const threadId of batchThreadIds) threadIds.add(threadId);
+    } while (cursor !== '0');
+
+    return [...threadIds];
+  }
+
+  private async filterBacklogItemThreadIds(
+    rawKeys: readonly string[],
+    backlogItemId: string,
+    options?: StoreReadOptions,
+  ): Promise<string[]> {
+    if (rawKeys.length === 0) return [];
+    const keys = rawKeys.map((rawKey) => this.stripKeyPrefix(rawKey));
+    const typePipeline = this.redis.multi();
+    for (const key of keys) typePipeline.type(key);
+    const typeResults = await awaitStoreRead(typePipeline.exec(), options);
+    const detailKeys = keys.filter((_key, index) => typeResults?.[index]?.[1] === 'hash');
+    if (detailKeys.length === 0) return [];
+
+    const detailPipeline = this.redis.multi();
+    for (const key of detailKeys) detailPipeline.hmget(key, 'id', 'backlogItemId');
+    const detailResults = await awaitStoreRead(detailPipeline.exec(), options);
+    return (detailResults ?? []).flatMap((result) => {
+      const fields = result?.[1];
+      if (!Array.isArray(fields)) return [];
+      const [threadId, linkedBacklogItemId] = fields as [string | null, string | null];
+      return threadId && linkedBacklogItemId === backlogItemId ? [threadId] : [];
+    });
+  }
+
   async unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): Promise<boolean> {
     const key = ThreadKeys.detail(threadId);
     if (!expectedBacklogItemId) {

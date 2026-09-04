@@ -137,6 +137,46 @@ test(
 );
 
 test(
+  'retirement detaches a system thread whose owner index entry was lost',
+  { skip: redisIsolationSkipReason(REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'external project retirement sparse system-thread index');
+    const fixture = await createFixture();
+    const { app, redis, backlogStore, threadStore, projectId, item } = fixture;
+
+    try {
+      const systemThread = await threadStore.ensureThread(
+        'project-feature-plan:legacy-project:legacy-item',
+        'Legacy feature thread',
+      );
+      await threadStore.indexForUser(systemThread.id, 'owner-redis');
+      await threadStore.linkBacklogItem(systemThread.id, item.id);
+      await redis.zrem('threads:user:owner-redis', systemThread.id);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: 'F007',
+          expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
+          reason: 'retired from the authoritative project roadmap',
+          mode: 'import-reconciliation',
+        },
+      });
+
+      assert.equal(response.statusCode, 204, response.body);
+      assert.equal(await backlogStore.get(item.id, 'owner-redis'), null);
+      assert.equal((await threadStore.get(systemThread.id))?.backlogItemId, undefined);
+    } finally {
+      await app.close();
+      await redis.quit();
+    }
+  },
+);
+
+test(
   'an in-flight dispatch lock rejects retirement without mutating related state',
   { skip: redisIsolationSkipReason(REDIS_URL) },
   async () => {

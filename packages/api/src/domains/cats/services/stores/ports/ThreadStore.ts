@@ -616,6 +616,8 @@ export interface IThreadStore {
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
+  /** Finds every persisted thread detail that still points at a backlog item, independent of sidebar indexes. */
+  listBacklogItemThreadIds(backlogItemId: string, options?: StoreReadOptions): string[] | Promise<string[]>;
   /** Removes the reverse backlog reference without deleting the thread or its messages. */
   unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): boolean | Promise<boolean>;
   /**
@@ -1075,6 +1077,16 @@ export class ThreadStore implements IThreadStore {
   linkBacklogItem(threadId: string, backlogItemId: string): void {
     const thread = this.get(threadId);
     if (thread) thread.backlogItemId = backlogItemId;
+  }
+
+  listBacklogItemThreadIds(backlogItemId: string, options?: StoreReadOptions): string[] {
+    throwIfStoreReadAborted(options);
+    const result: string[] = [];
+    for (const thread of this.threads.values()) {
+      throwIfStoreReadAborted(options);
+      if (thread.backlogItemId === backlogItemId) result.push(thread.id);
+    }
+    return result;
   }
 
   unlinkBacklogItem(threadId: string, expectedBacklogItemId?: string): boolean {
