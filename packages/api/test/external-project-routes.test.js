@@ -45,6 +45,11 @@ describe('External Project Routes', () => {
           workflowSops.set(backlogItemId, restored);
           return restored;
         },
+        async restoreSnapshot(snapshot) {
+          if (workflowSops.has(snapshot.backlogItemId)) return false;
+          workflowSops.set(snapshot.backlogItemId, structuredClone(snapshot));
+          return true;
+        },
         async delete(backlogItemId) {
           if (workflowSopDeleteError) throw workflowSopDeleteError;
           return workflowSops.delete(backlogItemId);
@@ -1039,6 +1044,49 @@ describe('External Project Routes', () => {
     assert.ok(backlogStore.get(item.id));
   });
 
+  test('DELETE refuses a retired feature when the matching item is not importer-managed', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'manual-retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] Manual retrospective',
+      summary: 'user-authored history that happens to reuse the feature tag',
+      priority: 'p2',
+      tags: ['feature:f007'],
+      createdBy: 'user',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        reason: 'Manual records must never be selected by importer reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.match(removed.json().error, /not importer-managed/i);
+    assert.ok(backlogStore.get(item.id));
+  });
+
   test('DELETE detaches every owned thread that references the retired backlog item', async () => {
     const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
@@ -1126,7 +1174,7 @@ describe('External Project Routes', () => {
     });
     const thread = threadStore.create('user1', 'historical');
     threadStore.linkBacklogItem(thread.id, item.id);
-    workflowSops.set(item.id, {
+    const originalWorkflowSop = {
       backlogItemId: item.id,
       featureId: 'F007',
       sopDefinitionId: 'development',
@@ -1143,7 +1191,8 @@ describe('External Project Routes', () => {
       version: 1,
       updatedAt: item.updatedAt,
       updatedBy: 'user1',
-    });
+    };
+    workflowSops.set(item.id, structuredClone(originalWorkflowSop));
 
     const removed = await app.inject({
       method: 'DELETE',
@@ -1159,7 +1208,7 @@ describe('External Project Routes', () => {
     assert.equal(removed.statusCode, 409);
     assert.ok(backlogStore.get(item.id));
     assert.equal(threadStore.get(thread.id)?.backlogItemId, item.id);
-    assert.equal(workflowSops.get(item.id)?.featureId, 'F007');
+    assert.deepEqual(workflowSops.get(item.id), originalWorkflowSop);
   });
 
   test('DELETE keeps backlog and thread links intact when workflow cleanup fails', async () => {

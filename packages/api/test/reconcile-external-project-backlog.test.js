@@ -8,8 +8,22 @@ import {
 test('reconcile refreshes first, deletes only allowlisted retired features, and verifies the final set', async () => {
   let items = [
     { id: 'item-f001', title: '[F001] stale', priority: 'p2', status: 'open', updatedAt: 1, tags: ['feature:f001'] },
-    { id: 'item-f005', title: '[F005] stale', priority: 'p2', status: 'open', updatedAt: 2, tags: ['feature:f005'] },
-    { id: 'item-f007', title: '[F007] stale', priority: 'p2', status: 'open', updatedAt: 3, tags: ['feature:f007'] },
+    {
+      id: 'item-f005',
+      title: '[F005] stale',
+      priority: 'p2',
+      status: 'open',
+      updatedAt: 2,
+      tags: ['source:docs-backlog', 'feature:f005'],
+    },
+    {
+      id: 'item-f007',
+      title: '[F007] stale',
+      priority: 'p2',
+      status: 'open',
+      updatedAt: 3,
+      tags: ['source:docs-backlog', 'feature:f007'],
+    },
   ];
   const requests = [];
   const fetchImpl = async (url, init = {}) => {
@@ -48,6 +62,35 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       .filter((request) => request.init.method === 'DELETE')
       .map((request) => JSON.parse(request.init.body).expectedFeatureId),
     ['F005', 'F007'],
+  );
+});
+
+test('reconcile refuses to retire a manual item that only shares the feature tag', async () => {
+  const items = [
+    {
+      id: 'manual-f007',
+      title: '[F007] Manual retrospective',
+      priority: 'p2',
+      status: 'open',
+      updatedAt: 7,
+      tags: ['feature:f007'],
+    },
+  ];
+  const fetchImpl = async (url) =>
+    url.endsWith('/import-backlog')
+      ? new Response(JSON.stringify({ imported: 0, refreshed: 0 }), { status: 200 })
+      : new Response(JSON.stringify({ items }), { status: 200 });
+
+  await assert.rejects(
+    reconcileExternalProjectBacklog({
+      apiUrl: 'http://127.0.0.1:3004',
+      userId: 'default-user',
+      projectId: 'traqen-project',
+      retireFeatureIds: ['F007'],
+      expectedActiveFeatureIds: [],
+      fetchImpl,
+    }),
+    /not importer-managed/i,
   );
 });
 

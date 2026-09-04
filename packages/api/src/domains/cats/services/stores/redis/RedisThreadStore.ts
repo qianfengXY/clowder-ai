@@ -600,6 +600,16 @@ export class RedisThreadStore implements IThreadStore {
     return Number(removed) > 0;
   }
 
+  async restoreBacklogItemLink(threadId: string, backlogItemId: string): Promise<boolean> {
+    const restored = await this.redis.eval(
+      "if redis.call('EXISTS', KEYS[1]) == 0 or redis.call('HEXISTS', KEYS[1], 'backlogItemId') == 1 then return 0 else redis.call('HSET', KEYS[1], 'backlogItemId', ARGV[1]); return 1 end",
+      1,
+      ThreadKeys.detail(threadId),
+      backlogItemId,
+    );
+    return Number(restored) === 1;
+  }
+
   async setMentionRoutingFeedback(
     threadId: string,
     catId: CatId,

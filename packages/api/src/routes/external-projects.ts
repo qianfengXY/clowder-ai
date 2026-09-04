@@ -33,8 +33,8 @@ export interface ExternalProjectRoutesOptions {
   externalProjectStore: ExternalProjectStore;
   needAuditFrameStore: NeedAuditFrameStore;
   backlogStore: IBacklogStore;
-  threadStore?: Pick<IThreadStore, 'get' | 'list' | 'linkBacklogItem' | 'unlinkBacklogItem'>;
-  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert' | 'delete'>;
+  threadStore?: Pick<IThreadStore, 'get' | 'list' | 'unlinkBacklogItem' | 'restoreBacklogItemLink'>;
+  workflowSopStore?: Pick<IWorkflowSopStore, 'get' | 'upsert' | 'delete' | 'restoreSnapshot'>;
 }
 
 function sameTags(left: readonly string[], right: readonly string[]): boolean {
@@ -358,6 +358,11 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     if (!itemFeatureId || itemFeatureId !== retireRequest.expectedFeatureId) {
       return reply.status(409).send({ error: 'Backlog item feature identity changed before it could be removed' });
     }
+    if (!isManagedImportItem(item)) {
+      return reply
+        .status(409)
+        .send({ error: 'Backlog item is not importer-managed and cannot be retired by reconciliation' });
+    }
 
     // Importer tags are editable backlog data, not deletion authority. The current
     // project catalogs are the source of truth for whether a feature is retired.
@@ -410,7 +415,9 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const detachedThreadIds: string[] = [];
     const restoreDetachedThreads = async (): Promise<void> => {
       for (const threadId of detachedThreadIds) {
-        await opts.threadStore?.linkBacklogItem(threadId, item.id);
+        if (!(await opts.threadStore?.restoreBacklogItemLink(threadId, item.id))) {
+          throw new Error(`Thread ${threadId} changed before its backlog link could be restored`);
+        }
       }
     };
 
@@ -418,20 +425,9 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     let workflowSopDeleted = false;
     const restoreWorkflowSop = async (): Promise<void> => {
       if (!workflowSopDeleted || !workflowSop) return;
-      await opts.workflowSopStore?.upsert(
-        item.id,
-        workflowSop.featureId,
-        {
-          sopDefinitionId: workflowSop.sopDefinitionId,
-          stage: workflowSop.stage,
-          batonHolder: workflowSop.batonHolder,
-          nextSkill: workflowSop.nextSkill,
-          resumeCapsule: workflowSop.resumeCapsule,
-          checks: workflowSop.checks,
-        },
-        workflowSop.updatedBy,
-        userId,
-      );
+      if (!(await opts.workflowSopStore?.restoreSnapshot(workflowSop))) {
+        throw new Error('Workflow state changed before its exact snapshot could be restored');
+      }
       workflowSopDeleted = false;
     };
 

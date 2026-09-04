@@ -41,6 +41,10 @@ function featureIdOf(item) {
   return tag?.slice('feature:'.length).toUpperCase() ?? null;
 }
 
+function isManagedImportItem(item) {
+  return item.tags?.includes('source:docs-backlog') || item.tags?.includes('source:extension-catalog');
+}
+
 async function requestJson(options, path, init = {}) {
   const response = await options.fetchImpl(`${options.apiUrl}${path}`, {
     ...init,
@@ -85,6 +89,9 @@ export async function reconcileExternalProjectBacklog(input) {
     if (matches.length > 1) throw new Error(`Refusing to delete duplicate ${featureId} backlog records`);
     const item = matches[0];
     if (!item) continue;
+    if (!isManagedImportItem(item)) {
+      throw new Error(`Refusing to delete ${featureId}: matching backlog item is not importer-managed`);
+    }
     await requestJson(
       options,
       `/api/external-projects/${encodeURIComponent(options.projectId)}/backlog/items/${encodeURIComponent(item.id)}`,
