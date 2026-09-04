@@ -112,6 +112,7 @@ test(
         payload: {
           expectedFeatureId: 'F007',
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
           reason: 'retired from the authoritative project roadmap',
           mode: 'import-reconciliation',
         },
@@ -153,6 +154,7 @@ test(
         payload: {
           expectedFeatureId: 'F007',
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
           reason: 'exercise dispatch exclusion',
           mode: 'import-reconciliation',
         },
@@ -165,6 +167,137 @@ test(
       assert.equal((await threadStore.get(primaryThread.id))?.backlogItemId, item.id);
       await backlogStore.releaseDispatchLock(item.id, lock);
     } finally {
+      await app.close();
+      await redis.quit();
+    }
+  },
+);
+
+test(
+  'a same-millisecond backlog mutation advances the server revision and rejects stale retirement',
+  { skip: redisIsolationSkipReason(REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'external project retirement monotonic revision');
+    const fixture = await createFixture();
+    const { app, redis, backlogStore, projectId, item } = fixture;
+    const originalDateNow = Date.now;
+
+    try {
+      Date.now = () => item.updatedAt;
+      await backlogStore.suggestClaim(item.id, {
+        catId: 'cat-idwxwjba',
+        why: 'same-millisecond mutation regression',
+        plan: 'prove the server revision is the destructive CAS',
+        requestedPhase: 'coding',
+      });
+      const changed = await backlogStore.get(item.id, 'owner-redis');
+      assert.equal(changed.updatedAt, item.updatedAt, 'wall-clock timestamp intentionally collides');
+      assert.equal(changed.revision, item.revision + 1);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: 'F007',
+          expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
+          reason: 'stale same-millisecond snapshot must fail closed',
+          mode: 'import-reconciliation',
+        },
+      });
+
+      assert.equal(response.statusCode, 409, response.body);
+      assert.match(response.json().error, /backlog_conflict/);
+      assert.equal((await backlogStore.get(item.id, 'owner-redis'))?.status, 'suggested');
+    } finally {
+      Date.now = originalDateNow;
+      await app.close();
+      await redis.quit();
+    }
+  },
+);
+
+test(
+  'a delayed stale writer advances the server revision and cannot reuse an inspected retirement snapshot',
+  { skip: redisIsolationSkipReason(REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'external project retirement concurrent revision');
+    const fixture = await createFixture();
+    const { app, redis, backlogStore, projectId, item } = fixture;
+    const originalDateNow = Date.now;
+    const originalWriteItem = backlogStore.writeItem.bind(backlogStore);
+    let staleWriteReached;
+    let releaseStaleWrite;
+    const reached = new Promise((resolve) => {
+      staleWriteReached = resolve;
+    });
+    const release = new Promise((resolve) => {
+      releaseStaleWrite = resolve;
+    });
+
+    try {
+      Date.now = () => item.updatedAt;
+      await backlogStore.suggestClaim(item.id, {
+        catId: 'cat-idwxwjba',
+        why: 'prepare approved item for a concurrent dispatch-progress mutation',
+        plan: 'prove every completed mutation advances an atomic server revision',
+        requestedPhase: 'coding',
+      });
+      await backlogStore.decideClaim(item.id, { decision: 'approve', decidedBy: 'owner-redis' });
+
+      backlogStore.writeItem = async (nextItem) => {
+        staleWriteReached();
+        await release;
+        return originalWriteItem(nextItem);
+      };
+      const staleMutation = backlogStore.updateDispatchProgress(item.id, {
+        updatedBy: 'owner-redis',
+        dispatchAttemptId: 'stale-attempt',
+      });
+      await reached;
+
+      const concurrentStore = new backlogStore.constructor(redis);
+      await concurrentStore.updateDispatchProgress(item.id, {
+        updatedBy: 'owner-redis',
+        pendingThreadId: 'newer-thread',
+      });
+      const inspected = await concurrentStore.get(item.id, 'owner-redis');
+      const inspectedRevision = inspected.revision ?? inspected.audit.length;
+
+      releaseStaleWrite();
+      await staleMutation;
+      const current = await concurrentStore.get(item.id, 'owner-redis');
+      assert.equal(current.updatedAt, inspected.updatedAt, 'wall-clock timestamp intentionally collides');
+      assert.equal(
+        current.audit.length,
+        inspected.audit.length,
+        'stale writers can replace an equal-length audit tail',
+      );
+      assert.equal(current.dispatchAttemptId, 'stale-attempt');
+      assert.equal(current.pendingThreadId, 'newer-thread');
+      assert.equal(current.revision, inspectedRevision + 1, 'the server revision must still advance atomically');
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: 'F007',
+          expectedUpdatedAt: inspected.updatedAt,
+          expectedRevision: inspectedRevision,
+          reason: 'a mutation completed after operator inspection',
+          mode: 'import-reconciliation',
+        },
+      });
+
+      assert.equal(response.statusCode, 409, response.body);
+      assert.match(response.json().error, /backlog_conflict/);
+      assert.ok(await concurrentStore.get(item.id, 'owner-redis'));
+    } finally {
+      backlogStore.writeItem = originalWriteItem;
+      releaseStaleWrite?.();
+      Date.now = originalDateNow;
       await app.close();
       await redis.quit();
     }
@@ -204,6 +337,7 @@ test(
         payload: {
           expectedFeatureId: 'F007',
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
           reason: 'exercise concurrent SOP guard',
           mode: 'import-reconciliation',
         },

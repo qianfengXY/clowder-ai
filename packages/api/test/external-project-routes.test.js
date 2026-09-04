@@ -40,7 +40,11 @@ describe('External Project Routes', () => {
         async retire(input) {
           const item = backlogStore.get(input.itemId, input.userId);
           if (!item) return 'missing';
-          if (item.projectId !== input.projectId || item.updatedAt !== input.expectedUpdatedAt) {
+          if (
+            item.projectId !== input.projectId ||
+            item.updatedAt !== input.expectedUpdatedAt ||
+            (item.revision ?? item.audit.length) !== input.expectedRevision
+          ) {
             return 'backlog_conflict';
           }
           if (
@@ -941,6 +945,7 @@ describe('External Project Routes', () => {
         featureId: 'F004',
         source: 'docs-backlog',
       },
+      dependencies: { blockedBy: ['F001'] },
     });
     const retired = backlogStore.create({
       userId: 'user1',
@@ -957,6 +962,24 @@ describe('External Project Routes', () => {
         source: 'docs-backlog',
       },
     });
+    const originalRefreshMetadata = backlogStore.refreshMetadata.bind(backlogStore);
+    let injectedConcurrentDependencyUpdate = false;
+    backlogStore.refreshMetadata = (itemId, input) => {
+      if (itemId === stale.id && !injectedConcurrentDependencyUpdate) {
+        injectedConcurrentDependencyUpdate = true;
+        const live = backlogStore.get(itemId);
+        originalRefreshMetadata(itemId, {
+          title: live.title,
+          summary: live.summary,
+          priority: live.priority,
+          tags: live.tags,
+          dependencies: { blockedBy: ['F999'] },
+          refreshedBy: 'user1',
+        });
+      }
+      assert.equal(input.dependencies, undefined, 'catalog refresh must preserve live dependency state');
+      return originalRefreshMetadata(itemId, input);
+    };
 
     const imported = await app.inject({
       method: 'POST',
@@ -967,6 +990,7 @@ describe('External Project Routes', () => {
     assert.equal(imported.statusCode, 200);
     assert.equal(imported.json().refreshed, 1);
     assert.equal(backlogStore.get(stale.id)?.title, '[F004] Change Impact Analysis');
+    assert.deepEqual(backlogStore.get(stale.id)?.dependencies, { blockedBy: ['F999'] });
     assert.equal(backlogStore.get(retired.id)?.status, 'open');
   });
 
@@ -1059,6 +1083,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F004',
         expectedUpdatedAt: legacy.updatedAt,
+        expectedRevision: legacy.revision,
         reason: 'verified legacy Traqen row',
         confirmation: 'ADOPT LEGACY IMPORT F004 wrong-item',
       },
@@ -1073,6 +1098,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F004',
         expectedUpdatedAt: legacy.updatedAt,
+        expectedRevision: legacy.revision,
         reason: 'verified legacy Traqen row',
         confirmation: `ADOPT LEGACY IMPORT F004 ${legacy.id}`,
       },
@@ -1147,6 +1173,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        expectedRevision: backlogStore.get(item.id).revision,
         reason: 'Retired from the authoritative project roadmap',
         mode: 'import-reconciliation',
       },
@@ -1196,6 +1223,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F004',
         expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
         reason: 'Spoofed importer provenance must not authorize deletion',
         mode: 'operator-confirmed',
         confirmation: `PERMANENTLY DELETE F004 ${item.id}`,
@@ -1241,6 +1269,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
         reason: 'Manual records must never be selected by importer reconciliation',
         mode: 'import-reconciliation',
       },
@@ -1285,6 +1314,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
         reason: 'operator-confirmed legacy retirement',
         mode: 'operator-confirmed',
         confirmation: 'PERMANENTLY DELETE F007 another-item',
@@ -1300,6 +1330,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
         reason: 'operator-confirmed legacy retirement',
         mode: 'operator-confirmed',
         confirmation: `PERMANENTLY DELETE F007 ${item.id}`,
@@ -1365,6 +1396,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        expectedRevision: backlogStore.get(item.id).revision,
         reason: 'Retired from the authoritative project roadmap',
         mode: 'import-reconciliation',
       },
@@ -1436,6 +1468,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt - 1,
+        expectedRevision: item.revision,
         reason: 'Stale snapshots must never authorize permanent deletion',
         mode: 'import-reconciliation',
       },
@@ -1491,6 +1524,7 @@ describe('External Project Routes', () => {
       payload: {
         expectedFeatureId: 'F007',
         expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
         reason: 'Retired from the authoritative project roadmap',
         mode: 'import-reconciliation',
       },
@@ -1559,6 +1593,7 @@ describe('External Project Routes', () => {
         payload: {
           expectedFeatureId: featureId,
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
           reason: `Co-creator confirmed ${featureId} is a legacy imported row`,
           confirmation: `ADOPT LEGACY IMPORT ${featureId} ${item.id}`,
         },
@@ -1585,6 +1620,7 @@ describe('External Project Routes', () => {
         payload: {
           expectedFeatureId: featureId,
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
           reason: `Co-creator authorized retirement of ${featureId}`,
           mode: 'operator-confirmed',
           confirmation: `PERMANENTLY DELETE ${featureId} ${item.id}`,

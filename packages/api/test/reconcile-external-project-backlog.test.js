@@ -13,7 +13,9 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       priority: 'p2',
       status: 'open',
       updatedAt: 1,
+      revision: 1,
       tags: ['source:docs-backlog', 'feature:f001'],
+      audit: [{ id: 'audit-f001-created' }],
     },
     {
       id: 'item-f005',
@@ -21,7 +23,9 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       priority: 'p2',
       status: 'open',
       updatedAt: 2,
+      revision: 1,
       tags: ['source:docs-backlog', 'feature:f005'],
+      audit: [{ id: 'audit-f005-created' }],
       importOrigin: {
         kind: 'external-project-catalog',
         projectId: 'traqen-project',
@@ -35,7 +39,9 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       priority: 'p2',
       status: 'open',
       updatedAt: 3,
+      revision: 1,
       tags: ['source:docs-backlog', 'feature:f007'],
+      audit: [{ id: 'audit-f007-created' }],
       importOrigin: {
         kind: 'external-project-catalog',
         projectId: 'traqen-project',
@@ -53,6 +59,8 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       items[index] = {
         ...items[index],
         updatedAt: 2,
+        revision: items[index].revision + 1,
+        audit: [...items[index].audit, { id: 'audit-f001-adopted' }],
         importOrigin: {
           kind: 'external-project-catalog',
           projectId: 'traqen-project',
@@ -71,6 +79,7 @@ test('reconcile refreshes first, deletes only allowlisted retired features, and 
       const payload = JSON.parse(init.body);
       const item = items.find((candidate) => candidate.id === itemId);
       assert.equal(payload.expectedUpdatedAt, item.updatedAt);
+      assert.equal(payload.expectedRevision, item.revision);
       items = items.filter((candidate) => candidate.id !== itemId);
       return new Response(null, { status: 204 });
     }
@@ -111,7 +120,9 @@ test('reconcile refuses to retire a manual item that only shares the feature tag
       priority: 'p2',
       status: 'open',
       updatedAt: 7,
+      revision: 1,
       tags: ['source:docs-backlog', 'feature:f007'],
+      audit: [{ id: 'audit-legacy-created' }],
     },
   ];
   const fetchImpl = async (url) =>
@@ -132,7 +143,7 @@ test('reconcile refuses to retire a manual item that only shares the feature tag
   );
 });
 
-test('reconcile retires a legacy row only with an exact operator-confirmed feature allowlist', async () => {
+test('CLI reconciles an explicitly empty active catalog and retires only operator-confirmed legacy rows', async () => {
   let items = [
     {
       id: 'legacy-f007',
@@ -140,6 +151,7 @@ test('reconcile retires a legacy row only with an exact operator-confirmed featu
       priority: 'p2',
       status: 'open',
       updatedAt: 7,
+      revision: 1,
       tags: ['source:docs-backlog', 'feature:f007'],
     },
   ];
@@ -156,20 +168,28 @@ test('reconcile retires a legacy row only with an exact operator-confirmed featu
     return new Response(JSON.stringify({ items }), { status: 200 });
   };
 
-  const result = await reconcileExternalProjectBacklog({
-    apiUrl: 'http://127.0.0.1:3004',
-    userId: 'default-user',
-    projectId: 'traqen-project',
-    retireFeatureIds: ['F007'],
-    expectedActiveFeatureIds: [],
-    operatorConfirmedLegacyFeatureIds: ['F007'],
-    fetchImpl,
-  });
+  const parsed = parseReconcileArguments([
+    '--api-url',
+    'http://127.0.0.1:3004',
+    '--user-id',
+    'default-user',
+    '--project-id',
+    'traqen-project',
+    '--retire',
+    'F007',
+    '--expect-active',
+    'none',
+    '--confirm-legacy-retire',
+    'F007',
+  ]);
+  assert.deepEqual(parsed.expectedActiveFeatureIds, []);
+  const result = await reconcileExternalProjectBacklog({ ...parsed, fetchImpl });
 
   assert.deepEqual(result.removed, ['F007']);
   assert.deepEqual(deletePayload, {
     expectedFeatureId: 'F007',
     expectedUpdatedAt: 7,
+    expectedRevision: 1,
     reason: 'Explicit post-deploy retirement reconciliation for F007',
     mode: 'operator-confirmed',
     confirmation: 'PERMANENTLY DELETE F007 legacy-f007',

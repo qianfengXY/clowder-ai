@@ -9,6 +9,7 @@ export interface ExternalProjectBacklogRetirementInput {
   readonly userId: string;
   readonly projectId: string;
   readonly expectedUpdatedAt: number;
+  readonly expectedRevision: number;
   readonly requiredImportOrigin?: BacklogImportOrigin;
   readonly expectedWorkflowSop: WorkflowSop | null;
   readonly candidateThreadIds: readonly string[];
@@ -37,6 +38,11 @@ if redis.call('HGET', backlogKey, 'id') == false then return -1 end
 if redis.call('HGET', backlogKey, 'userId') ~= ARGV[1] then return -2 end
 if redis.call('HGET', backlogKey, 'projectId') ~= ARGV[2] then return -2 end
 if redis.call('HGET', backlogKey, 'updatedAt') ~= ARGV[3] then return -2 end
+local backlogAuditOk, backlogAudit = pcall(cjson.decode, redis.call('HGET', backlogKey, 'audit') or '[]')
+local backlogRevisionRaw = redis.call('HGET', backlogKey, 'revision')
+local backlogRevision = backlogRevisionRaw and tonumber(backlogRevisionRaw)
+  or (backlogAuditOk and type(backlogAudit) == 'table' and #backlogAudit or nil)
+if not backlogRevision or backlogRevision ~= tonumber(ARGV[10]) then return -2 end
 if redis.call('EXISTS', KEYS[3]) == 1 then return -5 end
 
 local requiredOriginRaw = ARGV[5]
@@ -107,6 +113,7 @@ export class RedisExternalProjectBacklogRetirementStore implements IExternalProj
         expectedSop ? String(expectedSop.version) : '',
         expectedSop ? String(expectedSop.updatedAt) : '',
         JSON.stringify([...new Set(input.candidateThreadIds)]),
+        String(input.expectedRevision),
       ),
     );
     switch (result) {

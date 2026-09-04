@@ -93,7 +93,6 @@ async function migrateLegacyExtensionItem(input: {
     summary: canonicalInput.summary,
     priority: canonicalInput.priority,
     tags: canonicalInput.tags,
-    ...(input.item.dependencies ? { dependencies: input.item.dependencies } : {}),
     refreshedBy: input.userId,
   });
   if (!refreshed) throw new Error(`Legacy extension backlog item disappeared during migration: ${input.item.id}`);

@@ -19,7 +19,8 @@ function optionalFlag(argv, name) {
   return value;
 }
 
-function parseFeatureIds(value, label) {
+function parseFeatureIds(value, label, options = {}) {
+  if (options.allowNone && value.trim().toLowerCase() === 'none') return [];
   const ids = [
     ...new Set(
       value
@@ -39,7 +40,9 @@ export function parseReconcileArguments(argv) {
   const userId = requiredFlag(argv, '--user-id');
   const projectId = requiredFlag(argv, '--project-id');
   const retireFeatureIds = parseFeatureIds(requiredFlag(argv, '--retire'), '--retire');
-  const expectedActiveFeatureIds = parseFeatureIds(requiredFlag(argv, '--expect-active'), '--expect-active');
+  const expectedActiveFeatureIds = parseFeatureIds(requiredFlag(argv, '--expect-active'), '--expect-active', {
+    allowNone: true,
+  });
   const confirmedLegacyValue = optionalFlag(argv, '--confirm-legacy-retire');
   const operatorConfirmedLegacyFeatureIds = confirmedLegacyValue
     ? parseFeatureIds(confirmedLegacyValue, '--confirm-legacy-retire')
@@ -78,6 +81,13 @@ function isManagedImportItem(item, projectId, featureId) {
     item.importOrigin.featureId === featureId &&
     (item.importOrigin.source === 'docs-backlog' || item.importOrigin.source === 'extension-catalog')
   );
+}
+
+function revisionOf(item) {
+  if (!Number.isSafeInteger(item.revision) || item.revision < 1) {
+    throw new Error(`Backlog item ${item.id} has no server-owned mutation revision`);
+  }
+  return item.revision;
 }
 
 async function requestJson(options, path, init = {}) {
@@ -119,6 +129,7 @@ function buildRetirementRequest(options, items, featureId, confirmedLegacyIds) {
     payload: {
       expectedFeatureId: featureId,
       expectedUpdatedAt: item.updatedAt,
+      expectedRevision: revisionOf(item),
       reason: `Explicit post-deploy retirement reconciliation for ${featureId}`,
       mode: importerManaged ? 'import-reconciliation' : 'operator-confirmed',
       ...(!importerManaged && operatorConfirmedLegacy
@@ -147,6 +158,7 @@ async function adoptLegacyImportOrigins(options, items) {
         body: JSON.stringify({
           expectedFeatureId: featureId,
           expectedUpdatedAt: item.updatedAt,
+          expectedRevision: revisionOf(item),
           reason: `Explicit post-deploy legacy import adoption for ${featureId}`,
           confirmation: `ADOPT LEGACY IMPORT ${featureId} ${item.id}`,
         }),

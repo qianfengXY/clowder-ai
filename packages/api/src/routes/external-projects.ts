@@ -77,6 +77,7 @@ function isManagedImportItem(item: BacklogItem, projectId: string, featureId: st
 interface AdoptImportOriginRequest {
   readonly expectedFeatureId: string;
   readonly expectedUpdatedAt: number;
+  readonly expectedRevision: number;
   readonly reason: string;
   readonly confirmation: string;
 }
@@ -90,6 +91,9 @@ function parseAdoptImportOriginRequest(body: unknown): AdoptImportOriginRequest 
     typeof candidate.expectedUpdatedAt !== 'number' ||
     !Number.isSafeInteger(candidate.expectedUpdatedAt) ||
     candidate.expectedUpdatedAt < 0 ||
+    typeof candidate.expectedRevision !== 'number' ||
+    !Number.isSafeInteger(candidate.expectedRevision) ||
+    candidate.expectedRevision < 1 ||
     typeof candidate.reason !== 'string' ||
     candidate.reason.trim().length === 0 ||
     typeof candidate.confirmation !== 'string'
@@ -99,6 +103,7 @@ function parseAdoptImportOriginRequest(body: unknown): AdoptImportOriginRequest 
   return {
     expectedFeatureId: candidate.expectedFeatureId.trim().toUpperCase(),
     expectedUpdatedAt: candidate.expectedUpdatedAt,
+    expectedRevision: candidate.expectedRevision,
     reason: candidate.reason.trim(),
     confirmation: candidate.confirmation.trim(),
   };
@@ -107,6 +112,7 @@ function parseAdoptImportOriginRequest(body: unknown): AdoptImportOriginRequest 
 interface RetireBacklogItemRequest {
   readonly expectedFeatureId: string;
   readonly expectedUpdatedAt: number;
+  readonly expectedRevision: number;
   readonly reason: string;
   readonly mode: 'import-reconciliation' | 'operator-confirmed';
   readonly confirmation?: string;
@@ -121,6 +127,9 @@ function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest 
     typeof candidate.expectedUpdatedAt !== 'number' ||
     !Number.isSafeInteger(candidate.expectedUpdatedAt) ||
     candidate.expectedUpdatedAt < 0 ||
+    typeof candidate.expectedRevision !== 'number' ||
+    !Number.isSafeInteger(candidate.expectedRevision) ||
+    candidate.expectedRevision < 1 ||
     typeof candidate.reason !== 'string' ||
     candidate.reason.trim().length === 0 ||
     (candidate.mode !== 'import-reconciliation' && candidate.mode !== 'operator-confirmed') ||
@@ -131,6 +140,7 @@ function parseRetireBacklogItemRequest(body: unknown): RetireBacklogItemRequest 
   return {
     expectedFeatureId: candidate.expectedFeatureId.trim().toUpperCase(),
     expectedUpdatedAt: candidate.expectedUpdatedAt,
+    expectedRevision: candidate.expectedRevision,
     reason: candidate.reason.trim(),
     mode: candidate.mode,
     ...(typeof candidate.confirmation === 'string' ? { confirmation: candidate.confirmation.trim() } : {}),
@@ -268,7 +278,8 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     const adoption = parseAdoptImportOriginRequest(request.body);
     if (!adoption) {
       return reply.status(400).send({
-        error: 'expectedFeatureId, expectedUpdatedAt, reason, and confirmation are required to adopt legacy data',
+        error:
+          'expectedFeatureId, expectedUpdatedAt, expectedRevision, reason, and confirmation are required to adopt legacy data',
       });
     }
     if (adoption.confirmation !== `ADOPT LEGACY IMPORT ${adoption.expectedFeatureId} ${backlogItemId}`) {
@@ -310,6 +321,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       userId,
       projectId: project.id,
       expectedUpdatedAt: adoption.expectedUpdatedAt,
+      expectedRevision: adoption.expectedRevision,
       importOrigin: origin,
       adoptedBy: userId,
       reason: adoption.reason,
@@ -409,7 +421,6 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
           summary: importInput.summary,
           priority: importInput.priority,
           tags: importInput.tags,
-          ...(existing.dependencies ? { dependencies: existing.dependencies } : {}),
           ...(needsStatusUpgrade ? { importStatus: mappedStatus } : {}),
           refreshedBy: userId,
         });
@@ -480,7 +491,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
     if (!retireRequest) {
       return reply.status(400).send({
         error:
-          'expectedFeatureId, expectedUpdatedAt, reason, and mode are required to permanently remove a backlog item',
+          'expectedFeatureId, expectedUpdatedAt, expectedRevision, reason, and mode are required to permanently remove a backlog item',
       });
     }
 
@@ -550,6 +561,7 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
       userId,
       projectId: project.id,
       expectedUpdatedAt: retireRequest.expectedUpdatedAt,
+      expectedRevision: retireRequest.expectedRevision,
       ...(importReconciliation && item.importOrigin ? { requiredImportOrigin: item.importOrigin } : {}),
       expectedWorkflowSop: workflowSop,
       candidateThreadIds,

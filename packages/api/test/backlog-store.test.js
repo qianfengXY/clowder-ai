@@ -877,6 +877,29 @@ describe('BacklogStore markDone', () => {
     assert.equal(refreshed.audit.length, beforeAuditLength, 'should not append audit entry');
     assert.equal(refreshed.updatedAt, beforeUpdatedAt, 'should not update timestamp');
   });
+
+  test('refreshMetadata treats omitted dependencies as preserve-current and remains a no-op', () => {
+    const item = store.create({
+      userId: 'u1',
+      title: 'Same',
+      summary: 'Same',
+      priority: 'p2',
+      tags: [],
+      createdBy: 'user',
+      dependencies: { related: ['f010'] },
+    });
+    const refreshed = store.refreshMetadata(item.id, {
+      title: item.title,
+      summary: item.summary,
+      priority: item.priority,
+      tags: item.tags,
+      refreshedBy: 'u1',
+    });
+
+    assert.strictEqual(refreshed, item);
+    assert.deepEqual(refreshed.dependencies, { related: ['f010'] });
+    assert.equal(refreshed.revision, item.revision);
+  });
 });
 
 describe('BacklogStore create with initialStatus=done', () => {

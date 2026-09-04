@@ -37,6 +37,7 @@ export type BacklogAuditAction =
   | 'suggested'
   | 'approved'
   | 'rejected'
+  | 'dispatch_progressed'
   | 'dispatched'
   | 'dispatch_phase_corrected'
   | 'done'
@@ -88,6 +89,8 @@ export interface BacklogItem {
   readonly kickoffMessageId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** Server-owned monotonic mutation counter. Legacy records are hydrated from their audit length. */
+  readonly revision?: number;
   readonly approvedAt?: number;
   readonly dispatchedAt?: number;
   readonly doneAt?: number;
@@ -127,6 +130,8 @@ export interface AdoptBacklogImportOriginInput {
   readonly userId: string;
   readonly projectId: string;
   readonly expectedUpdatedAt: number;
+  /** Server-owned monotonic mutation revision. */
+  readonly expectedRevision: number;
   readonly importOrigin: BacklogImportOrigin;
   readonly adoptedBy: string;
   readonly reason: string;

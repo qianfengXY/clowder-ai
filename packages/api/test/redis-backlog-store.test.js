@@ -116,6 +116,8 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     assert.equal(first.id, 'task:task-f287');
     assert.equal(second.id, first.id);
+    assert.equal(first.revision, 1);
+    assert.equal(second.revision, 1);
     assert.equal((await store.listByUser('default-user')).length, 1);
     assert.deepEqual(first.tags, ['source:task', 'feature:f287']);
   });
@@ -140,6 +142,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     });
 
     assert.equal(created.projectId, 'project-traqen');
+    assert.equal(created.revision, 1);
     assert.equal((await store.get(created.id))?.projectId, 'project-traqen');
     assert.deepEqual((await store.get(created.id))?.importOrigin, created.importOrigin);
     assert.deepEqual((await store.get(created.id))?.dependencies, { blockedBy: ['F007'] });
@@ -161,6 +164,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       userId: 'default-user',
       projectId: 'project-traqen',
       expectedUpdatedAt: created.updatedAt,
+      expectedRevision: created.revision,
       importOrigin: {
         kind: 'external-project-catalog',
         projectId: 'project-traqen',
@@ -174,6 +178,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const adopted = await store.adoptImportOrigin(created.id, input);
     assert.deepEqual(adopted?.importOrigin, input.importOrigin);
     assert.ok(adopted.updatedAt > created.updatedAt);
+    assert.equal(adopted.revision, created.revision + 1);
     assert.equal(adopted.audit.at(-1).action, 'import_origin_adopted');
     assert.equal(
       await store.adoptImportOrigin(created.id, input),
@@ -181,6 +186,33 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       'stale or repeated adoption cannot overwrite origin',
     );
     assert.deepEqual((await store.get(created.id))?.importOrigin, input.importOrigin);
+  });
+
+  it('hydrates a legacy record revision and atomically advances it on the next mutation', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const created = await store.create({
+      userId: 'default-user',
+      title: '[F002] legacy revision',
+      summary: 'created before the explicit revision field existed',
+      priority: 'p1',
+      tags: ['source:docs-backlog', 'feature:f002'],
+      createdBy: 'user',
+      projectId: 'project-traqen',
+    });
+    await redis.hdel(`backlog:item:${created.id}`, 'revision');
+
+    const legacy = await store.get(created.id);
+    assert.equal(legacy.revision, legacy.audit.length);
+    const refreshed = await store.refreshMetadata(created.id, {
+      title: '[F002] Deterministic Evidence',
+      summary: legacy.summary,
+      priority: legacy.priority,
+      tags: legacy.tags,
+      refreshedBy: 'default-user',
+    });
+
+    assert.equal(refreshed.revision, legacy.revision + 1);
+    assert.equal(await redis.hget(`backlog:item:${created.id}`, 'revision'), String(refreshed.revision));
   });
 
   it('refreshMetadata cannot overwrite a concurrent lifecycle transition', async (t) => {
@@ -271,6 +303,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       finalItem?.audit.map((entry) => entry.action),
       ['created', 'refreshed', 'suggested', 'approved', 'dispatched'],
     );
+    assert.equal(finalItem?.revision, created.revision + 4);
   });
 
   it('delete removes only the exact owner/project item and clears its list and dispatch lock', async (t) => {
@@ -291,6 +324,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         userId: 'default-user',
         projectId: 'another-project',
         expectedUpdatedAt: created.updatedAt,
+        expectedRevision: created.revision,
       }),
       null,
       'a project mismatch must leave the record intact',
@@ -302,6 +336,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         userId: 'default-user',
         projectId: 'project-traqen',
         expectedUpdatedAt: created.updatedAt - 1,
+        expectedRevision: created.revision,
       }),
       null,
       'a stale snapshot must leave the record intact',
@@ -312,6 +347,7 @@ describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       userId: 'default-user',
       projectId: 'project-traqen',
       expectedUpdatedAt: created.updatedAt,
+      expectedRevision: created.revision,
     });
     assert.equal(removed?.id, created.id);
     assert.equal(await store.get(created.id), null);

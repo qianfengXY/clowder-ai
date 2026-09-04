@@ -37,6 +37,7 @@ local fields = cjson.decode(ARGV[1])
 for field, value in pairs(fields) do
   redis.call('HSET', KEYS[1], field, value)
 end
+redis.call('HSET', KEYS[1], 'revision', '1')
 redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
 
 local ttl = tonumber(ARGV[4])
@@ -90,6 +91,8 @@ else
   auditEntry.detail = 'docs-backlog-sync'
 end
 table.insert(audit, auditEntry)
+redis.call('HSETNX', key, 'revision', tostring(#audit - 1))
+redis.call('HINCRBY', key, 'revision', 1)
 
 redis.call('HSET', key,
   'title', title,
@@ -124,15 +127,20 @@ if redis.call('HEXISTS', key, 'importOrigin') == 1 then return -4 end
 local auditRaw = redis.call('HGET', key, 'audit')
 local auditOk, audit = pcall(cjson.decode, auditRaw or '[]')
 if not auditOk or type(audit) ~= 'table' then return -5 end
-local entryOk, auditEntry = pcall(cjson.decode, ARGV[6])
+local revisionRaw = redis.call('HGET', key, 'revision')
+local revision = revisionRaw and tonumber(revisionRaw) or #audit
+if not revision or revision ~= tonumber(ARGV[4]) then return -3 end
+local entryOk, auditEntry = pcall(cjson.decode, ARGV[7])
 if not entryOk or type(auditEntry) ~= 'table' then return -5 end
 table.insert(audit, auditEntry)
 
 redis.call('HSET', key,
-  'importOrigin', ARGV[4],
-  'updatedAt', ARGV[5],
+  'importOrigin', ARGV[5],
+  'updatedAt', ARGV[6],
   'audit', cjson.encode(audit)
 )
+if not revisionRaw then redis.call('HSET', key, 'revision', tostring(revision)) end
+redis.call('HINCRBY', key, 'revision', 1)
 return 1
 `;
 
@@ -143,7 +151,8 @@ return 1
  * ARGV[1] = expected userId
  * ARGV[2] = expected projectId
  * ARGV[3] = expected updatedAt
- * ARGV[4] = itemId
+ * ARGV[4] = expected server-owned mutation revision
+ * ARGV[5] = itemId
  *
  * return: 1 deleted, 0 missing or outside the exact owner/project scope
  */
@@ -160,8 +169,14 @@ end
 if redis.call('HGET', KEYS[1], 'updatedAt') ~= ARGV[3] then
   return 0
 end
+local auditOk, audit = pcall(cjson.decode, redis.call('HGET', KEYS[1], 'audit') or '[]')
+local revisionRaw = redis.call('HGET', KEYS[1], 'revision')
+local revision = revisionRaw and tonumber(revisionRaw) or (auditOk and type(audit) == 'table' and #audit or nil)
+if not revision or revision ~= tonumber(ARGV[4]) then
+  return 0
+end
 redis.call('DEL', KEYS[1])
-redis.call('ZREM', KEYS[2], ARGV[4])
+redis.call('ZREM', KEYS[2], ARGV[5])
 redis.call('DEL', KEYS[3])
 return 1
 `;
@@ -215,6 +230,8 @@ if not okEntry or type(auditEntry) ~= 'table' then
   return -4
 end
 table.insert(audit, auditEntry)
+redis.call('HSETNX', key, 'revision', tostring(#audit - 1))
+redis.call('HINCRBY', key, 'revision', 1)
 
 redis.call('HSET', key,
   'status', 'open',
@@ -270,6 +287,8 @@ local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
 if okEntry and type(auditEntry) == 'table' then
   table.insert(audit, auditEntry)
 end
+redis.call('HSETNX', key, 'revision', tostring(math.max(0, #audit - 1)))
+redis.call('HINCRBY', key, 'revision', 1)
 
 local leaseObj = {
   ownerCatId = catId,
@@ -344,6 +363,8 @@ local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
 if okEntry and type(auditEntry) == 'table' then
   table.insert(audit, auditEntry)
 end
+redis.call('HSETNX', key, 'revision', tostring(math.max(0, #audit - 1)))
+redis.call('HINCRBY', key, 'revision', 1)
 
 lease['heartbeatAt'] = now
 lease['expiresAt'] = expiresAt
@@ -408,6 +429,8 @@ local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
 if okEntry and type(auditEntry) == 'table' then
   table.insert(audit, auditEntry)
 end
+redis.call('HSETNX', key, 'revision', tostring(math.max(0, #audit - 1)))
+redis.call('HINCRBY', key, 'revision', 1)
 
 lease['state'] = 'released'
 lease['releasedAt'] = now
@@ -471,6 +494,8 @@ local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
 if okEntry and type(auditEntry) == 'table' then
   table.insert(audit, auditEntry)
 end
+redis.call('HSETNX', key, 'revision', tostring(math.max(0, #audit - 1)))
+redis.call('HINCRBY', key, 'revision', 1)
 
 lease['state'] = 'reclaimed'
 lease['reclaimedAt'] = now
@@ -541,6 +566,8 @@ local okEntry, auditEntry = pcall(cjson.decode, auditEntryRaw)
 if okEntry and type(auditEntry) == 'table' then
   table.insert(audit, auditEntry)
 end
+redis.call('HSETNX', key, 'revision', tostring(math.max(0, #audit - 1)))
+redis.call('HINCRBY', key, 'revision', 1)
 
 redis.call('HSET', key,
   'status', 'dispatched',
@@ -629,6 +656,8 @@ local auditEntry = {
   detail = expectedThreadId .. ':' .. previousPhase .. '→' .. threadPhase .. '; ' .. reason
 }
 table.insert(audit, auditEntry)
+redis.call('HSETNX', key, 'revision', tostring(#audit - 1))
+redis.call('HINCRBY', key, 'revision', 1)
 
 redis.call('HSET', key,
   'dispatchedThreadPhase', threadPhase,
@@ -701,7 +730,7 @@ export class RedisBacklogStore implements IBacklogStore {
       pipeline.expire(BacklogKeys.userList(item.userId), this.ttlSeconds);
     }
     await pipeline.exec();
-    return item;
+    return (await this.get(item.id)) ?? { ...item, revision: 1 };
   }
 
   async ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): Promise<BacklogItem> {
@@ -774,6 +803,7 @@ export class RedisBacklogStore implements IBacklogStore {
         input.userId,
         input.projectId,
         String(input.expectedUpdatedAt),
+        String(input.expectedRevision),
         JSON.stringify(input.importOrigin),
         String(now),
         auditEntry,
@@ -800,6 +830,7 @@ export class RedisBacklogStore implements IBacklogStore {
       input.userId,
       input.projectId,
       String(input.expectedUpdatedAt),
+      String(input.expectedRevision),
       itemId,
     );
     return Number(deleted) === 1 ? existing : null;
@@ -873,7 +904,7 @@ export class RedisBacklogStore implements IBacklogStore {
     };
 
     await this.writeItem(updated);
-    return updated;
+    return this.get(itemId);
   }
 
   async decideClaim(itemId: string, input: DecideBacklogClaimInput): Promise<BacklogItem | null> {
@@ -907,7 +938,7 @@ export class RedisBacklogStore implements IBacklogStore {
         audit: [...existing.audit, rejectAudit],
       };
       await this.writeItem(updated);
-      return updated;
+      return this.get(itemId);
     }
 
     const approvedSuggestionBase = {
@@ -933,7 +964,7 @@ export class RedisBacklogStore implements IBacklogStore {
       audit: [...existing.audit, approveAudit],
     };
     await this.writeItem(updated);
-    return updated;
+    return this.get(itemId);
   }
 
   async updateDispatchProgress(itemId: string, input: UpdateBacklogDispatchProgressInput): Promise<BacklogItem | null> {
@@ -950,9 +981,19 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(input.pendingThreadId ? { pendingThreadId: input.pendingThreadId } : {}),
       ...(input.kickoffMessageId ? { kickoffMessageId: input.kickoffMessageId } : {}),
       updatedAt: now,
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'dispatch_progressed',
+          actor: makeUserActor(input.updatedBy),
+          timestamp: now,
+          detail: 'dispatch checkpoint',
+        },
+      ],
     };
     await this.writeItem(updated);
-    return updated;
+    return this.get(itemId);
   }
 
   async markDispatched(itemId: string, input: DispatchBacklogItemInput): Promise<BacklogItem | null> {
@@ -995,7 +1036,7 @@ export class RedisBacklogStore implements IBacklogStore {
       ],
     };
     await this.writeItem(updated);
-    return updated;
+    return this.get(itemId);
   }
 
   async correctDispatchedPhase(
@@ -1057,7 +1098,7 @@ export class RedisBacklogStore implements IBacklogStore {
       ],
     };
     await this.writeItem(updated);
-    return updated;
+    return this.get(itemId);
   }
 
   async reopen(itemId: string, input: ReopenBacklogItemInput): Promise<BacklogItem | null> {
@@ -1285,6 +1326,8 @@ export class RedisBacklogStore implements IBacklogStore {
     const key = BacklogKeys.detail(item.id);
     const pipeline = this.redis.multi();
     pipeline.hset(key, this.serializeItem(item));
+    pipeline.hsetnx(key, 'revision', String(item.revision ?? 0));
+    pipeline.hincrby(key, 'revision', 1);
     if (this.ttlSeconds !== null) {
       pipeline.expire(key, this.ttlSeconds);
       pipeline.expire(BacklogKeys.userList(item.userId), this.ttlSeconds);
@@ -1336,6 +1379,10 @@ export class RedisBacklogStore implements IBacklogStore {
     const dependencies = data.dependencies
       ? this.parseJson(data.dependencies, null as BacklogItem['dependencies'] | null)
       : null;
+    const audit = this.parseJson(data.audit, [] as BacklogItem['audit']);
+    const persistedRevision = Number.parseInt(data.revision ?? '', 10);
+    const revision =
+      Number.isSafeInteger(persistedRevision) && persistedRevision > 0 ? persistedRevision : Math.max(1, audit.length);
     return {
       id: data.id ?? '',
       userId: data.userId ?? '',
@@ -1347,7 +1394,8 @@ export class RedisBacklogStore implements IBacklogStore {
       tags: this.parseJson(data.tags, []),
       createdAt: Number.parseInt(data.createdAt ?? '0', 10),
       updatedAt: Number.parseInt(data.updatedAt ?? '0', 10),
-      audit: this.parseJson(data.audit, []),
+      revision,
+      audit,
       ...(suggestion ? { suggestion } : {}),
       ...(lease ? { lease } : {}),
       ...(data.dispatchedThreadId ? { dispatchedThreadId: data.dispatchedThreadId } : {}),
