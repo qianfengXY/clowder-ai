@@ -45,14 +45,48 @@ describe(
 
     after(async () => {
       if (redis && connected) {
-        await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*']);
+        await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*', 'backlog:item:item-*']);
         await redis.quit();
       }
     });
 
     beforeEach(async (t) => {
       if (!connected) return t.skip('Redis not connected');
-      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*']);
+      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*', 'backlog:item:item-*']);
+      const parentIds = [
+        ...Array.from({ length: 10 }, (_, index) => `item-${index + 1}`),
+        ...['1', 'replay', 'a', 'b', 'complete', 'race', 'ttl', 'bind', 'conflict', 'bind-race'].map(
+          (suffix) => `item-managed-${suffix}`,
+        ),
+      ];
+      for (const id of parentIds) {
+        await redis.hset(`backlog:item:${id}`, { id, userId: 'owner-1' });
+      }
+    });
+
+    it('rejects a missing or differently owned parent without creating SOP or managed work', async () => {
+      for (const [id, owner] of [
+        ['item-missing', 'owner-1'],
+        ['item-1', 'other-owner'],
+      ]) {
+        await assert.rejects(() => store.upsert(id, 'F073', {}, 'opus', owner), {
+          name: 'WorkflowSopBacklogConflictError',
+          code: 'backlog_write_conflict',
+        });
+      }
+      assert.deepEqual(await redis.keys('workflow:sop:*'), []);
+      assert.deepEqual(await redis.keys('managed-work:*'), []);
+    });
+
+    it('rejects owner mismatch on an existing SOP without changing either owner admission', async () => {
+      const sop = await store.upsert('item-1', 'F073', {}, 'opus', 'owner-1');
+      const admission = await store.getManagedWorkAdmission('owner-1', 'item-1');
+      await assert.rejects(() => store.upsert('item-1', 'F073', { stage: 'impl' }, 'opus', 'other-owner'), {
+        code: 'backlog_write_conflict',
+      });
+      assert.deepEqual(await store.get('item-1'), sop);
+      assert.deepEqual(await store.getManagedWorkAdmission('owner-1', 'item-1'), admission);
+      assert.equal(await store.getManagedWorkAdmission('other-owner', 'item-1'), null);
     });
 
     it('atomically admits an eligible first-create with an unbound attempt #1', async () => {

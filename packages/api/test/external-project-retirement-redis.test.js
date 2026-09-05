@@ -9,7 +9,7 @@ import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers
 const REDIS_URL = process.env.REDIS_URL;
 const H = { 'x-cat-cafe-user': 'owner-redis' };
 
-async function createFixture(retirementStoreWrapper) {
+async function createFixture(retirementStoreWrapper, { withWorkflow = true } = {}) {
   const [
     { createRedisClient },
     { ExternalProjectStore },
@@ -19,6 +19,7 @@ async function createFixture(retirementStoreWrapper) {
     { RedisWorkflowSopStore },
     { RedisExternalProjectBacklogRetirementStore },
     { externalProjectRoutes },
+    { workflowSopRoutes },
   ] = await Promise.all([
     import('@cat-cafe/shared/utils'),
     import('../dist/domains/projects/external-project-store.js'),
@@ -28,6 +29,7 @@ async function createFixture(retirementStoreWrapper) {
     import('../dist/domains/cats/services/stores/redis/RedisWorkflowSopStore.js'),
     import('../dist/domains/projects/external-project-backlog-retirement-store.js'),
     import('../dist/routes/external-projects.js'),
+    import('../dist/routes/workflow-sop.js'),
   ]);
   const keyPrefix = `cat-cafe-test:external-retirement:${process.pid}:${Date.now()}:${Math.random()}:`;
   const redis = createRedisClient({ url: REDIS_URL, keyPrefix });
@@ -48,6 +50,7 @@ async function createFixture(retirementStoreWrapper) {
     workflowSopStore,
     backlogRetirementStore,
   });
+  await app.register(workflowSopRoutes, { backlogStore, workflowSopStore });
 
   const sourcePath = await mkdtemp(join(tmpdir(), 'external-retirement-redis-'));
   await mkdir(join(sourcePath, 'docs'), { recursive: true });
@@ -81,18 +84,88 @@ async function createFixture(retirementStoreWrapper) {
   const secondaryThread = await threadStore.create('owner-redis', 'secondary F007 thread');
   await threadStore.linkBacklogItem(primaryThread.id, item.id);
   await threadStore.linkBacklogItem(secondaryThread.id, item.id);
-  await workflowSopStore.upsert(
-    item.id,
-    'F007',
-    {
-      stage: 'discussion',
-      resumeCapsule: { goal: 'retire safely', currentFocus: 'retirement' },
-    },
-    'cat-idwxwjba',
-    'owner-redis',
-  );
+  if (withWorkflow)
+    await workflowSopStore.upsert(
+      item.id,
+      'F007',
+      {
+        stage: 'discussion',
+        resumeCapsule: { goal: 'retire safely', currentFocus: 'retirement' },
+      },
+      'cat-idwxwjba',
+      'owner-redis',
+    );
 
   return { app, redis, backlogStore, threadStore, workflowSopStore, projectId, item, primaryThread, secondaryThread };
+}
+
+for (const withWorkflow of [false, true]) {
+  test(
+    `retirement rejects a delayed workflow ${withWorkflow ? 'update' : 'first-create'} without recreating state`,
+    { skip: redisIsolationSkipReason(REDIS_URL), timeout: 15000 },
+    async () => {
+      assertRedisIsolationOrThrow(REDIS_URL, 'retirement delayed workflow write');
+      const fixture = await createFixture(undefined, { withWorkflow });
+      const { app, redis, backlogStore, workflowSopStore, projectId, item } = fixture;
+      const originalEval = redis.eval.bind(redis);
+      const reached = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      redis.eval = async (script, ...args) => {
+        if (script.includes('MANAGED_WORK_CONFLICT:missing_authenticated_owner')) {
+          reached.resolve();
+          await release.promise;
+        }
+        return originalEval(script, ...args);
+      };
+      let pending;
+      try {
+        const admissionBefore = await workflowSopStore.getManagedWorkAdmission('owner-redis', item.id);
+        pending = Promise.resolve(
+          app.inject({
+            method: 'PUT',
+            url: `/api/backlog/${item.id}/workflow-sop`,
+            headers: H,
+            payload: { featureId: 'F007', stage: 'impl' },
+          }),
+        );
+        await Promise.race([
+          reached.promise,
+          pending.then((response) => {
+            throw new Error(`write never reached store: ${response.body}`);
+          }),
+        ]);
+        const retired = await app.inject({
+          method: 'DELETE',
+          url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+          headers: H,
+          payload: {
+            expectedFeatureId: 'F007',
+            expectedUpdatedAt: item.updatedAt,
+            expectedRevision: item.revision,
+            mode: 'import-reconciliation',
+            reason: 'retire before delayed write',
+          },
+        });
+        assert.equal(retired.statusCode, 204, retired.body);
+        release.resolve();
+        const delayed = await pending;
+        assert.equal(delayed.statusCode, 409, delayed.body);
+        assert.equal(delayed.json().code, 'backlog_write_conflict');
+        assert.equal(await backlogStore.get(item.id, 'owner-redis'), null);
+        assert.equal(await workflowSopStore.get(item.id), null);
+        assert.deepEqual(
+          await workflowSopStore.getManagedWorkAdmission('owner-redis', item.id),
+          admissionBefore,
+          'no new admission or attempt may be created; existing execution history is preserved',
+        );
+      } finally {
+        release.resolve();
+        if (pending) await pending;
+        await app.close();
+        await redis.quit();
+      }
+    },
+  );
 }
 
 test(

@@ -6,7 +6,10 @@ import type { IBacklogStore } from '../domains/cats/services/stores/ports/Backlo
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
-import { VersionConflictError } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
+import {
+  VersionConflictError,
+  WorkflowSopBacklogConflictError,
+} from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { requireCallbackAuth, requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
@@ -374,6 +377,9 @@ export function registerCallbackWorkflowSopRoutes(
       const sop = await workflowSopStore.upsert(resolvedBacklogItemId, featureId, input, updatedBy, record.userId);
       return sop;
     } catch (err) {
+      if (err instanceof WorkflowSopBacklogConflictError) {
+        return reply.status(409).send({ error: err.message, code: err.code });
+      }
       if (err instanceof VersionConflictError) {
         reply.status(409);
         return { error: 'Version conflict', currentState: err.currentState };
