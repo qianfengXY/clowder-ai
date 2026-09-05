@@ -46,11 +46,11 @@ export class ProjectReviewHubService {
     if (binding === 'automatic') await this.threadStore.ensureThread(threadId, title);
     if (wasDeleted) await this.threadStore.restore(threadId);
     if (binding === 'automatic') {
+      await this.threadStore.indexForUser(threadId, userId);
       await Promise.all([
         this.threadStore.updateTitle(threadId, title),
         this.threadStore.updateProjectPath(threadId, project.sourcePath),
         this.threadStore.linkBacklogItem(threadId, item.id),
-        this.threadStore.indexForUser(threadId, userId),
       ]);
     } else {
       await this.threadStore.indexForUser(threadId, userId);

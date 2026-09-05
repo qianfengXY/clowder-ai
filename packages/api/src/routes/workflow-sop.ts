@@ -3,7 +3,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
-import { VersionConflictError } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
+import {
+  VersionConflictError,
+  WorkflowSopBacklogConflictError,
+} from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { validateFeatureBinding } from './callback-workflow-sop-routes.js';
 
@@ -107,6 +110,9 @@ export const workflowSopRoutes: FastifyPluginAsync<WorkflowSopRoutesOptions> = a
       const sop = await workflowSopStore.upsert(request.params.itemId, featureId, input, userId, userId);
       return sop;
     } catch (err) {
+      if (err instanceof WorkflowSopBacklogConflictError) {
+        return reply.status(409).send({ error: err.message, code: err.code });
+      }
       if (err instanceof VersionConflictError) {
         reply.status(409);
         return { error: 'Version conflict', currentState: err.currentState };

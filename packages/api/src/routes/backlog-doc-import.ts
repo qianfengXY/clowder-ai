@@ -14,6 +14,7 @@ import { gitListFeatureDocs, readBacklogContent, readFeatureDocContent } from '.
 export interface BacklogFeatureRow {
   id: string;
   name: string;
+  priority?: BacklogPriority;
   status: string;
   owner: string;
   link?: string;
@@ -24,6 +25,7 @@ export interface BacklogFeatureRow {
 const BACKLOG_COLUMN_ALIASES = {
   id: ['id'],
   name: ['名称', 'name', 'feature'],
+  priority: ['priority', '优先级'],
   status: ['status', '状态'],
   owner: ['owner'],
   link: ['link', 'spec'],
@@ -75,6 +77,8 @@ export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeature
   const headerCells = normalizeHeaderCells(lines[headerIndex] ?? '');
   const idCol = resolveBacklogColumn(headerCells, 'id');
   const nameCol = resolveBacklogColumn(headerCells, 'name');
+  const resolvedPriorityCol = resolveBacklogColumn(headerCells, 'priority');
+  const priorityCol = resolvedPriorityCol >= 0 ? resolvedPriorityCol : undefined;
   const statusCol = resolveBacklogColumn(headerCells, 'status');
   const ownerCol = resolveBacklogColumn(headerCells, 'owner');
   const resolvedLinkCol = resolveBacklogColumn(headerCells, 'link');
@@ -96,9 +100,15 @@ export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeature
     seen.add(id);
 
     const link = linkCol != null ? extractLink(cells[linkCol] ?? '') : undefined;
+    const priorityCell = priorityCol != null ? (cells[priorityCol]?.trim() ?? '') : '';
+    const rawPriority = priorityCell.toLowerCase();
+    if (rawPriority && !/^p[0-3]$/.test(rawPriority)) {
+      throw new Error(`Invalid priority for ${id}: ${priorityCell}`);
+    }
     rows.push({
       id,
       name: cells[nameCol]?.trim() ?? '',
+      ...(rawPriority ? { priority: rawPriority as BacklogPriority } : {}),
       status: cells[statusCol]?.trim() ?? 'idea',
       owner: cells[ownerCol]?.trim() ?? '三猫',
       ...(link ? { link } : {}),
@@ -159,7 +169,7 @@ export function buildBacklogInputFromFeature(
     userId,
     title,
     summary,
-    priority: statusToPriority(row.status),
+    priority: row.priority ?? statusToPriority(row.status),
     tags: [
       isExtension ? 'source:extension-catalog' : 'source:docs-backlog',
       `feature:${row.id.toLowerCase()}`,

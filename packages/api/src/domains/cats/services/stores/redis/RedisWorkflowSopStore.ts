@@ -9,7 +9,8 @@ import {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IWorkflowSopStore } from '../ports/WorkflowSopStore.js';
-import { VersionConflictError } from '../ports/WorkflowSopStore.js';
+import { VersionConflictError, WorkflowSopBacklogConflictError } from '../ports/WorkflowSopStore.js';
+import { BacklogKeys } from '../redis-keys/backlog-keys.js';
 import { deriveWorkflowSopAdmissionIds, ManagedWorkKeys } from '../redis-keys/managed-work-keys.js';
 import { WorkflowSopKeys } from '../redis-keys/workflow-sop-keys.js';
 import { bindManagedWorkAttemptInRedis } from './managed-work-attempt-binding.js';
@@ -41,6 +42,7 @@ function normalizeWorkflowSop(raw: WorkflowSop): WorkflowSop {
  * KEYS[1] = workflow:sop:{backlogItemId}
  * KEYS[2] = managed-work:admission:{workId}
  * KEYS[3] = managed-work:attempt:{attemptId}
+ * KEYS[4] = backlog:item:{backlogItemId}, the live parent shared with retirement
  * ARGV[1] = expectedVersion (-1 = skip CAS)
  * ARGV[2] = new SOP JSON string
  * ARGV[3] = TTL seconds (-1 = no TTL)
@@ -61,6 +63,12 @@ local existing = redis.call('GET', key)
 local incoming = cjson.decode(newJson)
 if ownerUserId == '' then
   return 'MANAGED_WORK_CONFLICT:missing_authenticated_owner'
+end
+-- Every write, including an apparent first-create after retirement, must check
+-- the live parent before creating SOP or managed-work state in this transaction.
+if redis.call('HGET', KEYS[4], 'id') ~= incoming.backlogItemId
+  or redis.call('HGET', KEYS[4], 'userId') ~= ownerUserId then
+  return 'BACKLOG_CONFLICT'
 end
 if existing and incoming.version == 1 then
   return 'EXISTING:' .. existing
@@ -248,10 +256,11 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
 
     const result = (await this.redis.eval(
       CAS_UPSERT_LUA,
-      3,
+      4,
       key,
       ManagedWorkKeys.admission(workId),
       ManagedWorkKeys.attempt(attemptId),
+      BacklogKeys.detail(backlogItemId),
       String(expectedVersion),
       JSON.stringify(sop),
       String(ttl),
@@ -260,6 +269,7 @@ export class RedisWorkflowSopStore implements IWorkflowSopStore {
       JSON.stringify(attempt),
     )) as string;
 
+    if (result === 'BACKLOG_CONFLICT') throw new WorkflowSopBacklogConflictError();
     if (result.startsWith('CONFLICT:')) {
       const current = normalizeWorkflowSop(JSON.parse(result.slice('CONFLICT:'.length)) as WorkflowSop);
       throw new VersionConflictError(current);

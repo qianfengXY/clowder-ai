@@ -11,22 +11,72 @@ describe('External Project Routes', () => {
   let app;
   /** @type {import('../dist/domains/cats/services/stores/ports/BacklogStore.js').BacklogStore} */
   let backlogStore;
+  /** @type {import('../dist/domains/cats/services/stores/ports/ThreadStore.js').ThreadStore} */
+  let threadStore;
+  const workflowSops = new Map();
+  let workflowSopDeleteError;
 
   beforeEach(async () => {
     const { ExternalProjectStore } = await import('../dist/domains/projects/external-project-store.js');
     const { IntentCardStore } = await import('../dist/domains/projects/intent-card-store.js');
     const { NeedAuditFrameStore } = await import('../dist/domains/projects/need-audit-frame-store.js');
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { externalProjectRoutes } = await import('../dist/routes/external-projects.js');
     const { intentCardRoutes } = await import('../dist/routes/intent-card-routes.js');
 
     const externalProjectStore = new ExternalProjectStore();
     backlogStore = new BacklogStore();
+    threadStore = new ThreadStore();
+    workflowSops.clear();
+    workflowSopDeleteError = null;
     app = Fastify();
     await app.register(externalProjectRoutes, {
       externalProjectStore,
       needAuditFrameStore: new NeedAuditFrameStore(),
       backlogStore,
+      threadStore,
+      backlogRetirementStore: {
+        async retire(input) {
+          const item = backlogStore.get(input.itemId, input.userId);
+          if (!item) return 'missing';
+          if (
+            item.projectId !== input.projectId ||
+            item.updatedAt !== input.expectedUpdatedAt ||
+            (item.revision ?? item.audit.length) !== input.expectedRevision
+          ) {
+            return 'backlog_conflict';
+          }
+          if (
+            input.requiredImportOrigin &&
+            JSON.stringify(item.importOrigin) !== JSON.stringify(input.requiredImportOrigin)
+          ) {
+            return 'provenance_mismatch';
+          }
+          const sop = workflowSops.get(item.id) ?? null;
+          if (JSON.stringify(sop) !== JSON.stringify(input.expectedWorkflowSop)) return 'workflow_conflict';
+          if (workflowSopDeleteError) throw workflowSopDeleteError;
+          for (const thread of threadStore.list(input.userId)) {
+            if (thread.backlogItemId === item.id) threadStore.unlinkBacklogItem(thread.id, item.id);
+          }
+          workflowSops.delete(item.id);
+          return backlogStore.delete(item.id, input) ? 'deleted' : 'backlog_conflict';
+        },
+      },
+      workflowSopStore: {
+        async get(backlogItemId) {
+          return workflowSops.get(backlogItemId) ?? null;
+        },
+        async upsert(backlogItemId, featureId, input, updatedBy) {
+          const restored = { backlogItemId, featureId, ...input, updatedBy };
+          workflowSops.set(backlogItemId, restored);
+          return restored;
+        },
+        async delete(backlogItemId) {
+          if (workflowSopDeleteError) throw workflowSopDeleteError;
+          return workflowSops.delete(backlogItemId);
+        },
+      },
     });
     await app.register(intentCardRoutes, {
       externalProjectStore,
@@ -785,7 +835,7 @@ describe('External Project Routes', () => {
     assert.equal(patchRes.json().card.originalText, 'T');
   });
 
-  test('import-backlog skips orphan when bound item exists for same feature', async () => {
+  test('import-backlog refreshes a bound importer item without backfilling its orphan', async () => {
     const { mkdtemp, writeFile, mkdir } = await import('node:fs/promises');
     const { join } = await import('node:path');
     const { tmpdir } = await import('node:os');
@@ -831,10 +881,16 @@ describe('External Project Routes', () => {
       tags: ['source:docs-backlog', 'feature:f001'],
       createdBy: 'user',
       projectId,
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F001',
+        source: 'docs-backlog',
+      },
     });
     assert.equal(bound.projectId, projectId);
 
-    // 3. Import backlog — should skip F001 (bound item exists), NOT backfill orphan
+    // 3. Import backlog — refresh the managed bound item, but never backfill its orphan.
     const importRes = await app.inject({
       method: 'POST',
       url: `/api/external-projects/${projectId}/import-backlog`,
@@ -843,12 +899,755 @@ describe('External Project Routes', () => {
     assert.equal(importRes.statusCode, 200);
     const body = importRes.json();
     assert.equal(body.imported, 0);
-    assert.equal(body.skipped, 1);
+    assert.equal(body.refreshed, 1);
+    assert.equal(body.skipped, 0);
     assert.equal(body.orphans, 1);
 
-    // 4. Verify orphan remains unassigned (no auto-backfill in hot path)
+    // 4. Verify orphan remains unassigned (no auto-backfill in hot path).
+    assert.equal(backlogStore.get(bound.id)?.title, '[F001] Test Feature');
     const orphanAfter = backlogStore.get(orphan.id);
     assert.equal(orphanAfter.projectId, undefined);
+  });
+
+  test('import-backlog refreshes a stale imported name without deleting a source-absent feature', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'import-refresh-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | in-progress | Maine Coon | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const stale = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] Claim review',
+      summary: 'old source text',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004', 'status:in-progress'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F004',
+        source: 'docs-backlog',
+      },
+      dependencies: { blockedBy: ['F001'] },
+    });
+    const retired = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] Project relaunch discovery',
+      summary: 'historical source text',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007', 'status:in-progress'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
+    });
+    const originalRefreshMetadata = backlogStore.refreshMetadata.bind(backlogStore);
+    let injectedConcurrentDependencyUpdate = false;
+    backlogStore.refreshMetadata = (itemId, input) => {
+      if (itemId === stale.id && !injectedConcurrentDependencyUpdate) {
+        injectedConcurrentDependencyUpdate = true;
+        const live = backlogStore.get(itemId);
+        originalRefreshMetadata(itemId, {
+          title: live.title,
+          summary: live.summary,
+          priority: live.priority,
+          tags: live.tags,
+          dependencies: { blockedBy: ['F999'] },
+          refreshedBy: 'user1',
+        });
+      }
+      assert.equal(input.dependencies, undefined, 'catalog refresh must preserve live dependency state');
+      return originalRefreshMetadata(itemId, input);
+    };
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+
+    assert.equal(imported.statusCode, 200);
+    assert.equal(imported.json().refreshed, 1);
+    assert.equal(backlogStore.get(stale.id)?.title, '[F004] Change Impact Analysis');
+    assert.deepEqual(backlogStore.get(stale.id)?.dependencies, { blockedBy: ['F999'] });
+    assert.equal(backlogStore.get(retired.id)?.status, 'open');
+  });
+
+  test('import-backlog never refreshes a public item that only spoofs catalog tags', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'import-tag-spoof-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Priority | Feature | Status | Owner | Link |',
+        '|---|---|---|---|---|---|',
+        '| F004 | P0 | Change Impact Analysis | done | CodeX | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/backlog/items`,
+      headers: H,
+      payload: {
+        title: '[F004] private manual work',
+        summary: 'must not be overwritten',
+        priority: 'p3',
+        tags: ['source:docs-backlog', 'feature:f004', 'status:done'],
+        createdBy: 'user',
+      },
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    const item = created.json();
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+
+    assert.equal(imported.statusCode, 200, imported.body);
+    assert.equal(imported.json().refreshed, 0);
+    assert.equal(imported.json().imported, 0);
+    assert.equal(imported.json().skipped, 1);
+    assert.deepEqual(backlogStore.get(item.id), item);
+    assert.equal(backlogStore.get(item.id)?.importOrigin, undefined);
+  });
+
+  test('legacy import adoption requires exact confirmation and appends immutable provenance audit', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'import-adoption-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Feature | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | CodeX | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const legacy = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] Claim review',
+      summary: 'old source text',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004'],
+      createdBy: 'user',
+    });
+    const endpoint = `/api/external-projects/${projectId}/backlog/items/${legacy.id}/adopt-import-origin`;
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: endpoint,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: legacy.updatedAt,
+        expectedRevision: legacy.revision,
+        reason: 'verified legacy Traqen row',
+        confirmation: 'ADOPT LEGACY IMPORT F004 wrong-item',
+      },
+    });
+    assert.equal(rejected.statusCode, 400);
+    assert.equal(backlogStore.get(legacy.id)?.importOrigin, undefined);
+
+    const adopted = await app.inject({
+      method: 'POST',
+      url: endpoint,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: legacy.updatedAt,
+        expectedRevision: legacy.revision,
+        reason: 'verified legacy Traqen row',
+        confirmation: `ADOPT LEGACY IMPORT F004 ${legacy.id}`,
+      },
+    });
+    assert.equal(adopted.statusCode, 200, adopted.body);
+    assert.equal(adopted.json().adopted, true);
+    assert.deepEqual(adopted.json().item.importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F004',
+      source: 'docs-backlog',
+    });
+    assert.equal(adopted.json().item.audit.at(-1).action, 'import_origin_adopted');
+  });
+
+  test('DELETE external backlog item removes an imported feature and detaches its thread', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | Maine Coon | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] Project relaunch discovery',
+      summary: 'retired feature',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007', 'status:in-progress'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
+    });
+    const thread = threadStore.create('user1', 'F007 historical discussion');
+    threadStore.linkBacklogItem(thread.id, item.id);
+    backlogStore.suggestClaim(item.id, {
+      catId: 'cat-4v94tazw',
+      why: 'Historical feature thread',
+      plan: 'remove retired feature',
+      requestedPhase: 'coding',
+    });
+    backlogStore.decideClaim(item.id, { decision: 'approve', decidedBy: 'user1', note: 'historical fixture' });
+    backlogStore.markDispatched(item.id, {
+      threadId: thread.id,
+      threadPhase: 'coding',
+      dispatchedBy: 'user1',
+    });
+    workflowSops.set(item.id, { backlogItemId: item.id });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        expectedRevision: backlogStore.get(item.id).revision,
+        reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 204);
+    assert.equal(backlogStore.get(item.id), null);
+    assert.equal(threadStore.get(thread.id)?.backlogItemId, undefined);
+    assert.equal(workflowSops.has(item.id), false);
+  });
+
+  test('DELETE refuses an active feature even when a manual item spoofs importer tags', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'active-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | 名称 | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F004 | Change Impact Analysis | spec | Maine Coon | [F004](features/F004.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] user-created task',
+      summary: 'manual item with spoofed source tag',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f004'],
+      createdBy: 'user',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F004',
+        expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
+        reason: 'Spoofed importer provenance must not authorize deletion',
+        mode: 'operator-confirmed',
+        confirmation: `PERMANENTLY DELETE F004 ${item.id}`,
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.match(removed.json().error, /active project catalog/i);
+    assert.ok(backlogStore.get(item.id));
+  });
+
+  test('DELETE refuses a retired feature when the matching item is not importer-managed', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'manual-retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] Manual retrospective',
+      summary: 'user-authored history that happens to reuse the feature tag',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
+        reason: 'Manual records must never be selected by importer reconciliation',
+        mode: 'import-reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.match(removed.json().error, /immutable importer provenance/i);
+    assert.ok(backlogStore.get(item.id));
+  });
+
+  test('DELETE legacy retirement requires the exact feature and item confirmation', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'legacy-confirmed-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | Feature | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] legacy imported row',
+      summary: 'created before immutable import provenance existed',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+    });
+
+    const wrongConfirmation = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
+        reason: 'operator-confirmed legacy retirement',
+        mode: 'operator-confirmed',
+        confirmation: 'PERMANENTLY DELETE F007 another-item',
+      },
+    });
+    assert.equal(wrongConfirmation.statusCode, 400);
+    assert.ok(backlogStore.get(item.id));
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
+        reason: 'operator-confirmed legacy retirement',
+        mode: 'operator-confirmed',
+        confirmation: `PERMANENTLY DELETE F007 ${item.id}`,
+      },
+    });
+    assert.equal(removed.statusCode, 204, removed.body);
+    assert.equal(backlogStore.get(item.id), null);
+  });
+
+  test('DELETE detaches every owned thread that references the retired backlog item', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'multi-thread-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
+    });
+    const primary = threadStore.create('user1', 'primary');
+    const additional = threadStore.create('user1', 'additional');
+    threadStore.linkBacklogItem(primary.id, item.id);
+    threadStore.linkBacklogItem(additional.id, item.id);
+    backlogStore.suggestClaim(item.id, {
+      catId: 'cat-4v94tazw',
+      why: 'historical',
+      plan: 'retire',
+      requestedPhase: 'brainstorm',
+    });
+    backlogStore.decideClaim(item.id, { decision: 'approve', decidedBy: 'user1' });
+    backlogStore.markDispatched(item.id, {
+      threadId: primary.id,
+      threadPhase: 'brainstorm',
+      dispatchedBy: 'user1',
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: backlogStore.get(item.id).updatedAt,
+        expectedRevision: backlogStore.get(item.id).revision,
+        reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 204);
+    assert.equal(threadStore.get(primary.id)?.backlogItemId, undefined);
+    assert.equal(threadStore.get(additional.id)?.backlogItemId, undefined);
+  });
+
+  test('DELETE rejects a stale item snapshot without mutating thread or workflow state', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'stale-retired-feature-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
+    });
+    const thread = threadStore.create('user1', 'historical');
+    threadStore.linkBacklogItem(thread.id, item.id);
+    const originalWorkflowSop = {
+      backlogItemId: item.id,
+      featureId: 'F007',
+      sopDefinitionId: 'development',
+      stage: 'discussion',
+      batonHolder: 'user1',
+      nextSkill: null,
+      resumeCapsule: { goal: 'retire', done: [], currentFocus: 'cleanup' },
+      checks: {
+        remoteMainSynced: 'unknown',
+        qualityGatePassed: 'unknown',
+        reviewApproved: 'unknown',
+        visionGuardDone: 'unknown',
+      },
+      version: 1,
+      updatedAt: item.updatedAt,
+      updatedBy: 'user1',
+    };
+    workflowSops.set(item.id, structuredClone(originalWorkflowSop));
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt - 1,
+        expectedRevision: item.revision,
+        reason: 'Stale snapshots must never authorize permanent deletion',
+        mode: 'import-reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 409);
+    assert.ok(backlogStore.get(item.id));
+    assert.equal(threadStore.get(thread.id)?.backlogItemId, item.id);
+    assert.deepEqual(workflowSops.get(item.id), originalWorkflowSop);
+  });
+
+  test('DELETE keeps backlog and thread links intact when workflow cleanup fails', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'workflow-failure-delete-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      ['| ID | 名称 | Status | Owner | Link |', '|---|---|---|---|---|'].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F007] retired feature',
+      summary: 'retired',
+      priority: 'p2',
+      tags: ['source:docs-backlog', 'feature:f007'],
+      createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'F007',
+        source: 'docs-backlog',
+      },
+    });
+    const thread = threadStore.create('user1', 'historical');
+    threadStore.linkBacklogItem(thread.id, item.id);
+    workflowSops.set(item.id, { backlogItemId: item.id });
+    workflowSopDeleteError = new Error('injected workflow cleanup failure');
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+      headers: H,
+      payload: {
+        expectedFeatureId: 'F007',
+        expectedUpdatedAt: item.updatedAt,
+        expectedRevision: item.revision,
+        reason: 'Retired from the authoritative project roadmap',
+        mode: 'import-reconciliation',
+      },
+    });
+
+    assert.equal(removed.statusCode, 500);
+    assert.ok(backlogStore.get(item.id));
+    assert.equal(threadStore.get(thread.id)?.backlogItemId, item.id);
+    assert.equal(workflowSops.has(item.id), true);
+  });
+
+  test('Traqen reconciliation refreshes canonical titles and priorities and removes only F005/F007', async () => {
+    const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'traqen-reconciliation-test-'));
+    await mkdir(join(tmpDir, 'docs'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'docs', 'ROADMAP.md'),
+      [
+        '| ID | Priority | Feature | Status | Owner | Source | Spec |',
+        '|---|---|---|---|---|---|---|',
+        '| F001 | P0 | Workspace & Source Truth | spec | CodeX | approved | [F001](features/F001.md) |',
+        '| F002 | P0 | Deterministic Evidence & API Structure | spec | TBD | confirmed | [F002](features/F002.md) |',
+        '| F003 | P1 | Agent Candidates & Reviewed Business Function Tree | spec | TBD | confirmed | [F003](features/F003.md) |',
+        '| F004 | P0 | Change Impact Analysis | spec | TBD | confirmed | [F004](features/F004.md) |',
+        '| F006 | P2 | Workspace capability settings | spec | TBD | authorized | [F006](features/F006.md) |',
+      ].join('\n'),
+    );
+    const projectRes = await app.inject({
+      method: 'POST',
+      url: '/api/external-projects',
+      headers: H,
+      payload: { name: 'Traqen', description: '', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
+    });
+    const projectId = projectRes.json().project.id;
+    const oldNames = {
+      F001: 'Workspace and legacy-system analysis foundation',
+      F002: 'Feature and API traceability',
+      F003: 'Traceability graph',
+      F004: 'Claim review',
+      F005: 'Change impact',
+      F006: 'Workspace capability settings',
+      F007: 'Project relaunch discovery',
+    };
+    for (const [featureId, name] of Object.entries(oldNames)) {
+      backlogStore.create({
+        userId: 'user1',
+        projectId,
+        title: `[${featureId}] ${name}`,
+        summary: 'stale persisted snapshot',
+        priority: 'p2',
+        tags: ['source:docs-backlog', `feature:${featureId.toLowerCase()}`, 'status:spec'],
+        createdBy: 'user',
+      });
+    }
+
+    for (const featureId of ['F001', 'F002', 'F003', 'F004', 'F006']) {
+      const item = backlogStore
+        .listByUser('user1')
+        .find((candidate) => candidate.tags.includes(`feature:${featureId.toLowerCase()}`));
+      const adopted = await app.inject({
+        method: 'POST',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}/adopt-import-origin`,
+        headers: H,
+        payload: {
+          expectedFeatureId: featureId,
+          expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
+          reason: `Co-creator confirmed ${featureId} is a legacy imported row`,
+          confirmation: `ADOPT LEGACY IMPORT ${featureId} ${item.id}`,
+        },
+      });
+      assert.equal(adopted.statusCode, 200, adopted.body);
+    }
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${projectId}/import-backlog`,
+      headers: H,
+    });
+    assert.equal(imported.statusCode, 200);
+    assert.equal(imported.json().refreshed, 5);
+
+    for (const featureId of ['F005', 'F007']) {
+      const item = backlogStore
+        .listByUser('user1')
+        .find((candidate) => candidate.tags.includes(`feature:${featureId.toLowerCase()}`));
+      const removed = await app.inject({
+        method: 'DELETE',
+        url: `/api/external-projects/${projectId}/backlog/items/${item.id}`,
+        headers: H,
+        payload: {
+          expectedFeatureId: featureId,
+          expectedUpdatedAt: item.updatedAt,
+          expectedRevision: item.revision,
+          reason: `Co-creator authorized retirement of ${featureId}`,
+          mode: 'operator-confirmed',
+          confirmation: `PERMANENTLY DELETE ${featureId} ${item.id}`,
+        },
+      });
+      assert.equal(removed.statusCode, 204);
+    }
+
+    const finalItems = backlogStore
+      .listByUser('user1')
+      .filter((item) => item.projectId === projectId)
+      .map((item) => ({
+        featureId: item.tags
+          .find((tag) => tag.startsWith('feature:'))
+          .slice('feature:'.length)
+          .toUpperCase(),
+        title: item.title,
+        priority: item.priority,
+      }))
+      .sort((left, right) => left.featureId.localeCompare(right.featureId));
+    assert.deepEqual(finalItems, [
+      { featureId: 'F001', title: '[F001] Workspace & Source Truth', priority: 'p0' },
+      { featureId: 'F002', title: '[F002] Deterministic Evidence & API Structure', priority: 'p0' },
+      { featureId: 'F003', title: '[F003] Agent Candidates & Reviewed Business Function Tree', priority: 'p1' },
+      { featureId: 'F004', title: '[F004] Change Impact Analysis', priority: 'p0' },
+      { featureId: 'F006', title: '[F006] Workspace capability settings', priority: 'p2' },
+    ]);
   });
 
   test('import-backlog creates a project-bound replacement for orphaned historical data', async () => {
@@ -909,6 +1708,12 @@ describe('External Project Routes', () => {
     const projectItems = backlogStore.listByUser('user1').filter((item) => item.projectId === projectId);
     assert.equal(projectItems.length, 1);
     assert.equal(projectItems[0].title, '[F002] Solo Feature');
+    assert.deepEqual(projectItems[0].importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F002',
+      source: 'docs-backlog',
+    });
   });
 
   test('import-backlog exposes EXT catalog entries and preserves legacy Desktop loop identity', async () => {
@@ -957,6 +1762,12 @@ describe('External Project Routes', () => {
       priority: 'p1',
       tags: ['source:docs-backlog', 'feature:f289', 'status:implementation'],
       createdBy: 'user',
+      importOrigin: {
+        kind: 'external-project-catalog',
+        projectId,
+        featureId: 'EXT-001',
+        source: 'extension-catalog',
+      },
     });
 
     const importRes = await app.inject({
@@ -973,5 +1784,11 @@ describe('External Project Routes', () => {
     assert.equal(extension?.id, legacy.id);
     assert.ok(extension?.tags.includes('feature-kind:extension'));
     assert.ok(upstream);
+    assert.deepEqual(upstream.importOrigin, {
+      kind: 'external-project-catalog',
+      projectId,
+      featureId: 'F289',
+      source: 'docs-backlog',
+    });
   });
 });

@@ -9,6 +9,14 @@ export class VersionConflictError extends Error {
   }
 }
 
+export class WorkflowSopBacklogConflictError extends Error {
+  readonly code = 'backlog_write_conflict';
+  constructor() {
+    super('Backlog item no longer exists or belongs to a different owner');
+    this.name = 'WorkflowSopBacklogConflictError';
+  }
+}
+
 export class ManagedWorkExecutorConflictError extends Error {
   readonly code = 'MANAGED_WORK_EXECUTOR_CONFLICT';
   constructor(readonly executorId: string) {

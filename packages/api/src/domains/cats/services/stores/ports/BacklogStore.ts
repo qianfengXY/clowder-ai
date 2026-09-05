@@ -1,5 +1,6 @@
 import type {
   AcquireBacklogLeaseInput,
+  AdoptBacklogImportOriginInput,
   AtomicDispatchInput,
   BacklogDependencies,
   BacklogItem,
@@ -24,6 +25,14 @@ import type { IThreadStore } from './ThreadStore.js';
 
 const MAX_BACKLOG_ITEMS = 1000;
 
+function currentBacklogRevision(item: BacklogItem): number {
+  return item.revision ?? Math.max(1, item.audit.length);
+}
+
+function nextBacklogRevision(item: BacklogItem): number {
+  return currentBacklogRevision(item) + 1;
+}
+
 const EVICTION_PRIORITY: Record<BacklogStatus, number> = {
   done: 0,
   dispatched: 0,
@@ -46,6 +55,16 @@ export interface EnsureTaskBackedBacklogItemInput {
   readonly title: string;
   readonly summary: string;
   readonly createdBy: CreateBacklogItemInput['createdBy'];
+}
+
+/** Exact owner/project scope required for permanent removal of an imported backlog record. */
+export interface DeleteBacklogItemInput {
+  readonly userId: string;
+  readonly projectId: string;
+  /** Compare-and-delete guard so an operator cannot remove a record that changed after inspection. */
+  readonly expectedUpdatedAt: number;
+  /** Monotonic compare-and-delete guard maintained by the store. */
+  readonly expectedRevision: number;
 }
 
 export function taskBacklogItemId(taskId: string): string {
@@ -73,6 +92,7 @@ export function buildTaskBackedBacklogItem(input: EnsureTaskBackedBacklogItemInp
     createdBy: input.createdBy,
     createdAt: now,
     updatedAt: now,
+    revision: 1,
     audit: [
       {
         id: generateSortableId(now + 1),
@@ -98,6 +118,11 @@ export interface IBacklogStore {
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
+  adoptImportOrigin(
+    itemId: string,
+    input: AdoptBacklogImportOriginInput,
+  ): BacklogItem | null | Promise<BacklogItem | null>;
+  delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   get(itemId: string, userId?: string): BacklogItem | null | Promise<BacklogItem | null>;
   listByUser(userId: string): BacklogItem[] | Promise<BacklogItem[]>;
   suggestClaim(itemId: string, input: SuggestBacklogClaimInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -152,10 +177,12 @@ export class BacklogStore implements IBacklogStore {
       tags: [...input.tags],
       status: input.initialStatus ?? 'open',
       createdBy: input.createdBy,
+      ...(input.importOrigin ? { importOrigin: input.importOrigin } : {}),
       ...(input.dependencies ? { dependencies: input.dependencies } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       createdAt: now,
       updatedAt: now,
+      revision: 1,
       audit: [
         {
           id: generateSortableId(now + 1),
@@ -214,7 +241,7 @@ export class BacklogStore implements IBacklogStore {
       existing.summary === input.summary &&
       existing.priority === input.priority &&
       this.sameTags(existing.tags, input.tags) &&
-      this.sameDependencies(existing.dependencies, input.dependencies) &&
+      (input.dependencies === undefined || this.sameDependencies(existing.dependencies, input.dependencies)) &&
       !statusUpgrade;
     if (unchanged) return existing;
 
@@ -228,6 +255,7 @@ export class BacklogStore implements IBacklogStore {
       ...(input.dependencies !== undefined ? { dependencies: input.dependencies } : {}),
       ...(statusUpgrade ? { status: statusUpgrade } : {}),
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -241,6 +269,56 @@ export class BacklogStore implements IBacklogStore {
     };
     this.items.set(itemId, updated);
     return updated;
+  }
+
+  adoptImportOrigin(itemId: string, input: AdoptBacklogImportOriginInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.projectId !== input.projectId ||
+      existing.updatedAt !== input.expectedUpdatedAt ||
+      currentBacklogRevision(existing) !== input.expectedRevision ||
+      input.importOrigin.projectId !== input.projectId ||
+      existing.importOrigin
+    ) {
+      return null;
+    }
+
+    const now = Math.max(Date.now(), existing.updatedAt + 1);
+    const updated: BacklogItem = {
+      ...existing,
+      importOrigin: input.importOrigin,
+      updatedAt: now,
+      revision: nextBacklogRevision(existing),
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'import_origin_adopted',
+          actor: makeUserActor(input.adoptedBy),
+          timestamp: now,
+          detail: `${input.importOrigin.featureId}: ${input.reason}`,
+        },
+      ],
+    };
+    this.items.set(itemId, updated);
+    return updated;
+  }
+
+  delete(itemId: string, input: DeleteBacklogItemInput): BacklogItem | null {
+    const existing = this.items.get(itemId);
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.projectId !== input.projectId ||
+      existing.updatedAt !== input.expectedUpdatedAt ||
+      currentBacklogRevision(existing) !== input.expectedRevision
+    ) {
+      return null;
+    }
+    this.items.delete(itemId);
+    return existing;
   }
 
   get(itemId: string, userId?: string): BacklogItem | null {
@@ -287,6 +365,7 @@ export class BacklogStore implements IBacklogStore {
         suggestedAt: now,
       },
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -330,6 +409,7 @@ export class BacklogStore implements IBacklogStore {
         status: 'open',
         suggestion: rejectedSuggestion,
         updatedAt: now,
+        revision: nextBacklogRevision(existing),
         audit: [...existing.audit, rejectAudit],
       };
       this.items.set(itemId, updated);
@@ -356,6 +436,7 @@ export class BacklogStore implements IBacklogStore {
       approvedAt: now,
       suggestion: approvedSuggestion,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [...existing.audit, approveAudit],
     };
     this.items.set(itemId, updated);
@@ -376,6 +457,17 @@ export class BacklogStore implements IBacklogStore {
       ...(input.pendingThreadId ? { pendingThreadId: input.pendingThreadId } : {}),
       ...(input.kickoffMessageId ? { kickoffMessageId: input.kickoffMessageId } : {}),
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now + 1),
+          action: 'dispatch_progressed',
+          actor: makeUserActor(input.updatedBy),
+          timestamp: now,
+          detail: 'dispatch checkpoint',
+        },
+      ],
     };
     this.items.set(itemId, updated);
     return updated;
@@ -409,6 +501,7 @@ export class BacklogStore implements IBacklogStore {
       pendingThreadId: existing.pendingThreadId ?? input.threadId,
       dispatchedAt: now,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -485,6 +578,7 @@ export class BacklogStore implements IBacklogStore {
       ...existing,
       dispatchedThreadPhase: input.threadPhase,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -553,6 +647,7 @@ export class BacklogStore implements IBacklogStore {
       ...existing,
       lease: nextLease,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -595,6 +690,7 @@ export class BacklogStore implements IBacklogStore {
         expiresAt: now + this.normalizeLeaseTtl(input.ttlMs),
       },
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -635,6 +731,7 @@ export class BacklogStore implements IBacklogStore {
         releasedBy: input.actorId,
       },
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -675,6 +772,7 @@ export class BacklogStore implements IBacklogStore {
         reclaimedBy: input.actorId,
       },
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -701,6 +799,7 @@ export class BacklogStore implements IBacklogStore {
       status: 'done',
       doneAt: now,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -729,6 +828,7 @@ export class BacklogStore implements IBacklogStore {
       ...withoutDoneAt,
       status: 'open',
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {
@@ -769,6 +869,7 @@ export class BacklogStore implements IBacklogStore {
       dispatchedThreadPhase: input.threadPhase,
       dispatchedAt: now,
       updatedAt: now,
+      revision: nextBacklogRevision(existing),
       audit: [
         ...existing.audit,
         {

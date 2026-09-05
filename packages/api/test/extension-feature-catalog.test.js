@@ -83,6 +83,7 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
     priority: 'p1',
     tags: ['source:docs-backlog', 'feature:f289', 'status:implementation'],
     createdBy: 'user',
+    dependencies: { blockedBy: ['F001'] },
   });
   const upstream = await backlogStore.create({
     userId: 'owner-1',
@@ -106,6 +107,24 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
       sop = { ...sop, featureId, version: sop.version + 1 };
       return sop;
     },
+  };
+  const originalRefreshMetadata = backlogStore.refreshMetadata.bind(backlogStore);
+  let injectedConcurrentDependencyUpdate = false;
+  backlogStore.refreshMetadata = (itemId, input) => {
+    if (itemId === legacy.id && !injectedConcurrentDependencyUpdate) {
+      injectedConcurrentDependencyUpdate = true;
+      const live = backlogStore.get(itemId);
+      originalRefreshMetadata(itemId, {
+        title: live.title,
+        summary: live.summary,
+        priority: live.priority,
+        tags: live.tags,
+        dependencies: { blockedBy: ['F999'] },
+        refreshedBy: 'owner-1',
+      });
+    }
+    assert.equal(input.dependencies, undefined, 'legacy migration must preserve live dependency state');
+    return originalRefreshMetadata(itemId, input);
   };
 
   const result = await migrateLegacyExtensionItems({
@@ -133,6 +152,7 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
   assert.equal(migrated.title, '[EXT-001] ChatGPT Desktop Development Loop');
   assert.ok(migrated.tags.includes('feature:ext-001'));
   assert.ok(migrated.tags.includes('feature-kind:extension'));
+  assert.deepEqual(migrated.dependencies, { blockedBy: ['F999'] });
   assert.equal(sop.featureId, 'EXT-001');
 
   const untouchedUpstream = await backlogStore.get(upstream.id, 'owner-1');

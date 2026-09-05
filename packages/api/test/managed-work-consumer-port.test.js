@@ -39,16 +39,17 @@ describe(
 
     after(async () => {
       if (!connected) return;
-      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*']);
+      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*', 'backlog:item:*']);
       await redis.quit();
     });
 
     beforeEach(async (t) => {
       if (!connected) return t.skip('Redis not connected');
-      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*']);
+      await cleanupPrefixedRedisKeys(redis, ['workflow:sop:*', 'managed-work:*', 'backlog:item:*']);
     });
 
     async function admit(anchor = 'f289-work') {
+      await redis.hset(`backlog:item:${anchor}`, { id: anchor, userId: 'owner-1' });
       await workflowStore.upsert(anchor, 'EXT-001', {}, 'cat-idwxwjba', 'owner-1');
       return workflowStore.getManagedWorkAdmission('owner-1', anchor);
     }

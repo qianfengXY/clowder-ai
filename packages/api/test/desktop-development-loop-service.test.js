@@ -132,6 +132,7 @@ describe(
     after(async () => {
       if (!connected) return;
       await cleanupPrefixedRedisKeys(redis, [
+        'backlog:item:backlog-1',
         'external-project:*',
         'workflow:sop:*',
         'managed-work:*',
@@ -151,6 +152,7 @@ describe(
       service.desktopTaskLauncher = undefined;
       backlogItems = [];
       await cleanupPrefixedRedisKeys(redis, [
+        'backlog:item:backlog-1',
         'external-project:*',
         'workflow:sop:*',
         'managed-work:*',
@@ -172,6 +174,7 @@ describe(
           allowPullRequest: true,
         },
       });
+      await redis.hset('backlog:item:backlog-1', { id: 'backlog-1', userId: 'owner-1', projectId: project.id });
       await workflowStore.upsert('backlog-1', 'EXT-001', {}, 'cat-codex', 'owner-1');
       const bundle = await workflowStore.getManagedWorkAdmission('owner-1', 'backlog-1');
       backlogItems.push({

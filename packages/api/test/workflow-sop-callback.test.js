@@ -217,6 +217,28 @@ describe('WorkflowSop callback route', () => {
     });
   });
 
+  it('returns a conflict when the backlog is retired before the atomic callback write', async (t) => {
+    const { WorkflowSopBacklogConflictError } = await import(
+      '../dist/domains/cats/services/stores/ports/WorkflowSopStore.js'
+    );
+    t.mock.method(workflowSopStore, 'upsert', async () => {
+      throw new WorkflowSopBacklogConflictError();
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
+      payload: { backlogItemId: 'item-1', featureId: 'F073', stage: 'impl' },
+    });
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'backlog_write_conflict');
+    assert.equal(workflowSopStore.store.size, 0);
+  });
+
   it('serves the canonical SOP through the MCP callback-authenticated drill', async () => {
     threadStore.linkBacklogItem('item-1');
     const created = await app.inject({

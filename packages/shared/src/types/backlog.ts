@@ -32,10 +32,12 @@ export interface BacklogLease {
 
 export type BacklogAuditAction =
   | 'created'
+  | 'import_origin_adopted'
   | 'refreshed'
   | 'suggested'
   | 'approved'
   | 'rejected'
+  | 'dispatch_progressed'
   | 'dispatched'
   | 'dispatch_phase_corrected'
   | 'done'
@@ -58,6 +60,14 @@ export interface BacklogAuditEntry {
   readonly detail?: string;
 }
 
+/** Server-owned provenance for records created by an external-project catalog import. */
+export interface BacklogImportOrigin {
+  readonly kind: 'external-project-catalog';
+  readonly projectId: string;
+  readonly featureId: string;
+  readonly source: 'docs-backlog' | 'extension-catalog';
+}
+
 export interface BacklogItem {
   readonly id: string;
   readonly userId: string;
@@ -68,6 +78,8 @@ export interface BacklogItem {
   readonly tags: readonly string[];
   readonly status: BacklogStatus;
   readonly createdBy: CatId | 'user';
+  /** Immutable import provenance. User-facing create/update APIs never accept this field. */
+  readonly importOrigin?: BacklogImportOrigin;
   readonly suggestion?: BacklogClaimSuggestion;
   readonly lease?: BacklogLease;
   readonly dispatchedThreadId?: string;
@@ -77,6 +89,8 @@ export interface BacklogItem {
   readonly kickoffMessageId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** Server-owned monotonic mutation counter. Legacy records are hydrated from their audit length. */
+  readonly revision?: number;
   readonly approvedAt?: number;
   readonly dispatchedAt?: number;
   readonly doneAt?: number;
@@ -91,6 +105,8 @@ export interface CreateBacklogItemInput {
   readonly priority: BacklogPriority;
   readonly tags: readonly string[];
   readonly createdBy: CatId | 'user';
+  /** Internal-only provenance supplied by the catalog importer. */
+  readonly importOrigin?: BacklogImportOrigin;
   readonly dependencies?: BacklogDependencies;
   /** Optional initial status for import (skips workflow transitions). Defaults to 'open'. */
   readonly initialStatus?: BacklogStatus;
@@ -107,6 +123,18 @@ export interface RefreshBacklogItemInput {
   readonly dependencies?: BacklogDependencies;
   /** Optional status override from import. Only upgrades (open→dispatched), never downgrades. */
   readonly importStatus?: BacklogStatus;
+}
+
+/** Explicit, audited adoption of a pre-provenance catalog import. */
+export interface AdoptBacklogImportOriginInput {
+  readonly userId: string;
+  readonly projectId: string;
+  readonly expectedUpdatedAt: number;
+  /** Server-owned monotonic mutation revision. */
+  readonly expectedRevision: number;
+  readonly importOrigin: BacklogImportOrigin;
+  readonly adoptedBy: string;
+  readonly reason: string;
 }
 
 export interface SuggestBacklogClaimInput {
