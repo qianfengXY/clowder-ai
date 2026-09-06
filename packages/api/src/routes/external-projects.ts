@@ -15,6 +15,11 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
+import {
+  featureNumber,
+  itemFeatureNumbers,
+  ProjectFeatureNumberError,
+} from '../domains/cats/services/stores/shared/project-feature-numbering.js';
 import type { IExternalProjectBacklogRetirementStore } from '../domains/projects/external-project-backlog-retirement-store.js';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { NeedAuditFrameStore } from '../domains/projects/need-audit-frame-store.js';
@@ -420,31 +425,32 @@ export const externalProjectRoutes: FastifyPluginAsync<ExternalProjectRoutesOpti
         continue;
       }
 
-      // 3. Orphan items exist for this featureId but lack provenance evidence.
-      //    Do NOT auto-backfill in the hot path — cross-project misattribution risk;
-      //    create a project-bound replacement instead so imports repair visibility
-      //    without mutating historical items that may belong to another project.
-      if (orphanItems.length > 0) {
-        const input = buildBacklogInputFromFeature(row, userId);
+      // 3. Create a project-bound item without adopting historical orphans.
+      // Concurrent imports/manual creates may occupy the number after our snapshot.
+      const input = buildBacklogInputFromFeature(row, userId);
+      try {
         const imported = await backlogStore.create({
           ...input,
           projectId: project.id,
-          importOrigin: importOriginFor(row, project.id),
+          importOrigin: expectedOrigin,
         });
         existingByFeatureId.set(featureId, imported);
         created++;
-        continue;
+      } catch (error) {
+        if (!(error instanceof ProjectFeatureNumberError)) throw error;
+        const number = featureNumber(row.id);
+        if (number === undefined) throw error;
+        const winner = (await backlogStore.listByUser(userId)).find(
+          (item) =>
+            item.userId === userId && item.projectId === project.id && itemFeatureNumbers(item).includes(number),
+        );
+        // Only a confirmed same-project winner makes this import idempotent.
+        // Preserve its current metadata/provenance, including a manual winner.
+        if (!winner) throw error;
+        existingItems.push(winner);
+        if (hasExactImportOrigin(winner, expectedOrigin)) existingByFeatureId.set(featureId, winner);
+        skipped++;
       }
-
-      // 4. Create new item
-      const input = buildBacklogInputFromFeature(row, userId);
-      const imported = await backlogStore.create({
-        ...input,
-        projectId: project.id,
-        importOrigin: importOriginFor(row, project.id),
-      });
-      existingByFeatureId.set(featureId, imported);
-      created++;
     }
 
     return reply.send({
