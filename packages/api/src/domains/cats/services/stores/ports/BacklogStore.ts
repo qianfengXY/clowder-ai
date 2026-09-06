@@ -20,6 +20,17 @@ import type {
   UpdateBacklogDispatchProgressInput,
 } from '@cat-cafe/shared';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
+import {
+  type AssignProjectFeatureIdInput,
+  featureNumber,
+  itemFeatureNumbers,
+  numberedCreate,
+  ProjectFeatureNumberError,
+  requestedFeatureId,
+  selectFeatureNumber,
+  validateAssignment,
+  withFeatureId,
+} from '../shared/project-feature-numbering.js';
 import { generateSortableId } from './MessageStore.js';
 import type { IThreadStore } from './ThreadStore.js';
 
@@ -115,6 +126,7 @@ export function isMatchingTaskBackedItem(item: BacklogItem, input: EnsureTaskBac
 }
 
 export interface IBacklogStore {
+  assignProjectFeatureId(itemId: string, input: AssignProjectFeatureIdInput): BacklogItem | Promise<BacklogItem>;
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
@@ -156,6 +168,7 @@ export interface IBacklogStore {
 
 export class BacklogStore implements IBacklogStore {
   private readonly items: Map<string, BacklogItem> = new Map();
+  private readonly featureSequences = new Map<string, number>();
   private readonly dispatchedPhaseCorrectionTails = new Map<string, Promise<void>>();
   private readonly maxItems: number;
 
@@ -164,6 +177,35 @@ export class BacklogStore implements IBacklogStore {
   }
 
   create(input: CreateBacklogItemInput): BacklogItem {
+    if (input.projectId && numberedCreate(input)) {
+      const projectId = input.projectId;
+      const key = JSON.stringify([input.userId, projectId]);
+      const used = new Set(
+        [...this.items.values()]
+          .filter((item) => item.userId === input.userId && item.projectId === projectId)
+          .flatMap(itemFeatureNumbers),
+      );
+      const requested = requestedFeatureId(input);
+      // Extension IDs have their own catalog; only F numbers are allocated here.
+      if (!requested?.startsWith('EXT-')) {
+        const number = selectFeatureNumber(
+          requested,
+          used,
+          input.projectFeatureNumbering?.reservedFeatureIds ?? [],
+          this.featureSequences.get(key) ?? 0,
+        );
+        if (input.projectFeatureNumbering) input = withFeatureId(input, `F${String(number).padStart(3, '0')}`);
+        this.featureSequences.set(
+          key,
+          Math.max(
+            this.featureSequences.get(key) ?? 0,
+            number,
+            ...used,
+            ...(input.projectFeatureNumbering?.reservedFeatureIds ?? []).map((id) => featureNumber(id) ?? 0),
+          ),
+        );
+      }
+    }
     this.evictIfNeeded();
 
     const now = Date.now();
@@ -207,6 +249,63 @@ export class BacklogStore implements IBacklogStore {
       ...(input.initialStatus === 'done' ? { doneAt: now } : {}),
     };
     this.items.set(id, item);
+    return item;
+  }
+
+  assignProjectFeatureId(itemId: string, input: AssignProjectFeatureIdInput): BacklogItem {
+    const featureId = validateAssignment(input);
+    const existing = this.items.get(itemId);
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.projectId !== input.projectId ||
+      currentBacklogRevision(existing) !== input.expectedRevision
+    ) {
+      throw new ProjectFeatureNumberError('Backlog item changed or is outside the requested scope');
+    }
+    const previous = requestedFeatureId(existing);
+    if (
+      previous === featureId &&
+      existing.title.startsWith(`[${featureId}] `) &&
+      existing.tags.includes(`feature:${featureId.toLowerCase()}`)
+    )
+      return existing;
+    if (previous || existing.importOrigin || input.reservedFeatureIds.some((id) => id.toUpperCase() === featureId)) {
+      throw new ProjectFeatureNumberError('Only unnumbered manual tasks can receive an unreserved feature ID');
+    }
+    const used = new Set(
+      [...this.items.values()]
+        .filter((item) => item.id !== itemId && item.userId === input.userId && item.projectId === input.projectId)
+        .flatMap(itemFeatureNumbers),
+    );
+    const number = selectFeatureNumber(featureId, used, [], 0);
+    const now = Date.now();
+    const item: BacklogItem = {
+      ...withFeatureId(existing, featureId),
+      updatedAt: now,
+      revision: nextBacklogRevision(existing),
+      audit: [
+        ...existing.audit,
+        {
+          id: generateSortableId(now),
+          action: 'feature_id_assigned',
+          actor: makeUserActor(input.userId),
+          timestamp: now,
+          detail: `${featureId}: ${input.reason}`,
+        },
+      ],
+    };
+    const key = JSON.stringify([input.userId, input.projectId]);
+    this.featureSequences.set(
+      key,
+      Math.max(
+        this.featureSequences.get(key) ?? 0,
+        number,
+        ...used,
+        ...input.reservedFeatureIds.map((id) => featureNumber(id) ?? 0),
+      ),
+    );
+    this.items.set(itemId, item);
     return item;
   }
 

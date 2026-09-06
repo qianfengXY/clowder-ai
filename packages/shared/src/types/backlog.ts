@@ -32,6 +32,7 @@ export interface BacklogLease {
 
 export type BacklogAuditAction =
   | 'created'
+  | 'feature_id_assigned'
   | 'import_origin_adopted'
   | 'refreshed'
   | 'suggested'
@@ -112,6 +113,8 @@ export interface CreateBacklogItemInput {
   readonly initialStatus?: BacklogStatus;
   /** Optional project scope for cross-project backlog (F076). */
   readonly projectId?: string;
+  /** Internal-only: allocate a project number against the server-read catalog. */
+  readonly projectFeatureNumbering?: { readonly reservedFeatureIds: readonly string[] };
 }
 
 export interface RefreshBacklogItemInput {
