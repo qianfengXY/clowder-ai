@@ -43,6 +43,51 @@ function contracts(getStore) {
     for (const item of items) assert.ok(item.title.startsWith(`[${item.tags[0].slice(8).toUpperCase()}] `));
   });
 
+  test('manual creates cannot claim catalog-reserved numbers, while catalog imports remain valid', async () => {
+    const store = getStore();
+    const projectId = 'catalog-reservation';
+    const before = await store.listByUser('number-owner');
+    for (const extra of [
+      { title: '[F006] Manual task' },
+      { tags: ['feature:f006'] },
+      { title: '[f006] Manual task', tags: ['feature:F006'] },
+    ]) {
+      await assert.rejects(
+        async () =>
+          store.create(
+            input({
+              projectId,
+              ...extra,
+              projectFeatureNumbering: { reservedFeatureIds: ['f006'] },
+            }),
+          ),
+        { name: 'ProjectFeatureNumberError' },
+      );
+      assert.deepEqual(await store.listByUser('number-owner'), before);
+    }
+    const imported = await store.create(
+      input({
+        projectId,
+        title: '[F006] Canonical settings',
+        tags: ['feature:f006'],
+        importOrigin: {
+          kind: 'external-project-catalog',
+          projectId,
+          featureId: 'F006',
+          source: 'docs-backlog',
+        },
+      }),
+    );
+    assert.equal(imported.importOrigin.featureId, 'F006');
+    const next = await store.create(
+      input({
+        projectId,
+        projectFeatureNumbering: { reservedFeatureIds: ['F006'] },
+      }),
+    );
+    assert.equal(next.tags[0], 'feature:f007');
+  });
+
   test('assigns F005 to an existing unnumbered dispatched task without losing work', async () => {
     const store = getStore();
     const original = await store.create(input({ projectId: 'legacy' }));
@@ -82,7 +127,7 @@ function contracts(getStore) {
       projectId: 'legacy',
       expectedRevision: assigned.revision,
       featureId: 'F005',
-      reservedFeatureIds: [],
+      reservedFeatureIds: ['F005'],
       reason: 'retry',
     });
     assert.equal(retry.revision, assigned.revision);

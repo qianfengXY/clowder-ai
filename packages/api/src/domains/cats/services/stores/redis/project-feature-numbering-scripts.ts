@@ -25,7 +25,9 @@ for _, id in ipairs(p.reservedFeatureIds) do
   if n then high = math.max(high, n); reserved[n] = true end
 end
 local n = p.number or (high + 1)
-if n < 1 or n > 999 or used[n] then return 'Project feature number is occupied or exhausted' end
+if n < 1 or n > 999 or used[n] or (p.allocate and reserved[n]) then
+  return 'Project feature number is occupied or exhausted'
+end
 local featureId = string.format('F%03d', n)
 local function numberMetadata(title, tags)
   local kept = {}

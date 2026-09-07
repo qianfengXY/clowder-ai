@@ -66,7 +66,13 @@ export function selectFeatureNumber(
 ): number {
   const maximum = Math.max(highWater, 0, ...used, ...reserved.map((id) => featureNumber(id) ?? 0));
   const number = requested ? featureNumber(requested) : maximum + 1;
-  if (number === undefined || number < 1 || number > 999 || used.has(number)) {
+  if (
+    number === undefined ||
+    number < 1 ||
+    number > 999 ||
+    used.has(number) ||
+    reserved.some((id) => featureNumber(id) === number)
+  ) {
     throw new ProjectFeatureNumberError('Project feature number is occupied or exhausted');
   }
   return number;

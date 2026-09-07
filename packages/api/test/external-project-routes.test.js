@@ -994,7 +994,7 @@ describe('External Project Routes', () => {
     assert.equal(backlogStore.get(retired.id)?.status, 'open');
   });
 
-  test('import-backlog never refreshes a public item that only spoofs catalog tags', async () => {
+  test('import-backlog never refreshes a legacy public item that only spoofs catalog tags', async () => {
     const { mkdir, mkdtemp, writeFile } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -1015,20 +1015,17 @@ describe('External Project Routes', () => {
       payload: { name: 'Traqen', sourcePath: tmpDir, backlogPath: 'docs/ROADMAP.md' },
     });
     const projectId = projectRes.json().project.id;
-    const created = await app.inject({
-      method: 'POST',
-      url: `/api/external-projects/${projectId}/backlog/items`,
-      headers: H,
-      payload: {
-        title: '[F004] private manual work',
-        summary: 'must not be overwritten',
-        priority: 'p3',
-        tags: ['source:docs-backlog', 'feature:f004', 'status:done'],
-        createdBy: 'user',
-      },
+    // Legacy records may predate catalog-reservation enforcement. Public tags
+    // must never be treated as importer provenance, even for those records.
+    const item = backlogStore.create({
+      userId: 'user1',
+      projectId,
+      title: '[F004] private manual work',
+      summary: 'must not be overwritten',
+      priority: 'p3',
+      tags: ['source:docs-backlog', 'feature:f004', 'status:done'],
+      createdBy: 'user',
     });
-    assert.equal(created.statusCode, 201, created.body);
-    const item = created.json();
 
     const imported = await app.inject({
       method: 'POST',

@@ -68,6 +68,42 @@ test('manual project creation allocates against the registered catalog and ignor
   assert.equal(duplicate.statusCode, 409, duplicate.body);
 });
 
+test('manual creation rejects catalog identities without preventing their later import', async () => {
+  for (const extra of [
+    { title: '[F006] Manual task' },
+    { tags: ['feature:f006'] },
+    { title: '[f006] Manual task', tags: ['feature:F006'] },
+  ]) {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/external-projects/${project.id}/backlog/items`,
+      headers,
+      payload: { ...payload, ...extra },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'project_feature_number_conflict');
+    assert.equal(store.listByUser('number-owner').length, 0);
+  }
+  const imported = await app.inject({
+    method: 'POST',
+    url: `/api/external-projects/${project.id}/import-backlog`,
+    headers,
+  });
+  assert.equal(imported.statusCode, 200, imported.body);
+  assert.equal(imported.json().imported, 1);
+  const canonical = store.listByUser('number-owner')[0];
+  assert.equal(canonical.title, '[F006] Settings');
+  assert.equal(canonical.importOrigin.featureId, 'F006');
+  const created = await app.inject({
+    method: 'POST',
+    url: `/api/external-projects/${project.id}/backlog/items`,
+    headers,
+    payload,
+  });
+  assert.equal(created.statusCode, 201, created.body);
+  assert.equal(created.json().title, '[F007] Navigation design');
+});
+
 test('the assignment endpoint changes only number metadata and audits the authenticated owner', async () => {
   const before = store.create({ ...payload, userId: 'number-owner', projectId: project.id, createdBy: 'user' });
   const url = `/api/external-projects/${project.id}/backlog/items/${before.id}/feature-id`;

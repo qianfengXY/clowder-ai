@@ -67,6 +67,18 @@ test(
       sourcePath: directory,
       backlogPath: 'BACKLOG.md',
     });
+    const reservedAttempt = await fetch(`${address}/api/external-projects/${project.id}/backlog/items`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title: '[F006] Manual task',
+        summary: 'Must not shadow the catalog',
+        priority: 'p2',
+        tags: [],
+      }),
+    });
+    assert.equal(reservedAttempt.status, 409, await reservedAttempt.text());
+    assert.deepEqual(await store.listByUser('http-number-owner'), []);
     await request('POST', `/api/external-projects/${project.id}/import-backlog`, {});
     const legacy = await store.create({
       userId: 'http-number-owner',
@@ -114,7 +126,7 @@ test(
     assert.equal(created.title, '[F007] 下一项工作');
     assert.equal((await new RedisBacklogStore(redis).get(created.id)).tags[0], 'feature:f007');
     t.diagnostic(
-      `worktree=${process.cwd()} HTTP=${address}; existing task=F005, six-item list verified; next create=F007; history retained`,
+      `worktree=${process.cwd()} HTTP=${address}; reserved F006 rejected; existing task=F005, six-item list verified; next create=F007; history retained`,
     );
   },
 );
