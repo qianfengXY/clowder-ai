@@ -262,6 +262,126 @@ test('a genuinely active lease for the same session remains fail-closed', async 
   }
 });
 
+test('a preempting successor waits for the aborted host to exit before resuming', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 60_000 });
+  const controller = new AbortController();
+  let allowExit;
+  const exited = new Promise((resolve) => {
+    allowExit = resolve;
+  });
+  try {
+    const first = await pool.createSession(
+      sessionOptions({ sessionId: 'thread-preempted', signal: controller.signal }),
+    );
+    hosts[0].close = async () => {
+      hosts[0].closeCalls++;
+      await exited;
+      hosts[0].alive = false;
+    };
+    controller.abort('preempted');
+    let settled = false;
+    const successor = pool.createSession(sessionOptions({ sessionId: 'thread-preempted', invocationId: 'next' }));
+    successor.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await delay(10);
+    assert.equal(settled, false, 'an aborted lease is draining, not a live duplicate');
+    const closing = first.close();
+    await delay(10);
+    assert.equal(hosts.length, 1, 'the old writer must exit before another host starts');
+    assert.equal(settled, false);
+    allowExit();
+    await closing;
+    const resumed = await successor;
+    assert.equal(hosts.length, 2);
+    assert.equal(resumed.reusedSessionHost, false);
+    await resumed.close();
+  } finally {
+    allowExit();
+    await pool.closeAll();
+  }
+});
+
+test('cancelling a successor while the aborted predecessor drains starts no new host', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 60_000 });
+  const previous = new AbortController();
+  const next = new AbortController();
+  try {
+    const first = await pool.createSession(sessionOptions({ sessionId: 'thread-draining', signal: previous.signal }));
+    previous.abort('preempted');
+    const successor = pool.createSession(sessionOptions({ sessionId: 'thread-draining', signal: next.signal }));
+    const rejected = assert.rejects(successor, /successor cancelled/);
+    await delay(5);
+    next.abort(new Error('successor cancelled'));
+    await rejected;
+    assert.equal(hosts.length, 1);
+    await first.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
+test('cancelling a successor during predecessor host exit starts no new host', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 60_000 });
+  const previous = new AbortController();
+  const next = new AbortController();
+  let allowExit;
+  const exited = new Promise((resolve) => {
+    allowExit = resolve;
+  });
+  let closeStarted;
+  const closingStarted = new Promise((resolve) => {
+    closeStarted = resolve;
+  });
+  try {
+    const first = await pool.createSession(sessionOptions({ sessionId: 'thread-exiting', signal: previous.signal }));
+    hosts[0].close = async () => {
+      hosts[0].closeCalls++;
+      closeStarted();
+      await exited;
+      hosts[0].alive = false;
+    };
+    previous.abort('preempted');
+    const successor = pool.createSession(sessionOptions({ sessionId: 'thread-exiting', signal: next.signal }));
+    const rejected = assert.rejects(successor, /successor cancelled during host exit/);
+    const closing = first.close();
+    await closingStarted;
+    assert.equal(pool.getMetrics().activeLeaseCount, 0, 'lease released before the writer actually exits');
+    assert.equal(hosts[0].alive, true);
+    next.abort(new Error('successor cancelled during host exit'));
+    allowExit();
+    await closing;
+    await rejected;
+    assert.equal(hosts.length, 1, 'a cancelled successor must not start another writer');
+  } finally {
+    allowExit();
+    await pool.closeAll();
+  }
+});
+
+test('a waiting successor resumes after the abort fallback retires an abandoned host', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 5 });
+  const controller = new AbortController();
+  try {
+    await pool.createSession(sessionOptions({ sessionId: 'thread-abandoned', signal: controller.signal }));
+    controller.abort('preempted');
+    const pending = pool.createSession(sessionOptions({ sessionId: 'thread-abandoned', invocationId: 'next' }));
+    // Keep the test event loop live while the production fallback timer is unref'ed.
+    const [resumed] = await Promise.all([pending, delay(20)]);
+    assert.equal(hosts[0].closeCalls, 1);
+    assert.equal(hosts[0].alive, false);
+    assert.equal(hosts.length, 2);
+    await resumed.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
 test('concurrent cold resumes for the same native session serialize before host selection', async () => {
   const { pool, hosts } = createHarness();
   try {

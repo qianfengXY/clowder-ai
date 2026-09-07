@@ -25,13 +25,14 @@ export async function retireCodexSessionHost(input: {
   try {
     await waitForHostLeaseRelease(input.entry, input.signal);
     await input.close(input.entry);
+    input.signal?.throwIfAborted();
     codexAppServerHostMigration.add(1, { reason: input.reason, status: 'retired' });
     log.info(fields, '[codex-host] source host retired; native-session migration may proceed');
   } catch (error) {
     const cancelled = input.signal?.aborted === true;
     codexAppServerHostMigration.add(1, { reason: input.reason, status: cancelled ? 'cancelled' : 'failed' });
     const message = cancelled
-      ? '[codex-host] source host retirement wait cancelled; active lease preserved'
+      ? '[codex-host] source host retirement wait cancelled; replacement will not start'
       : '[codex-host] source host retirement failed; migration remains fenced';
     if (cancelled) log.info(fields, message);
     else log.warn({ ...fields, err: error }, message);

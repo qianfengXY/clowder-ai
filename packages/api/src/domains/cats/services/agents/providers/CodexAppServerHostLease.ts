@@ -24,7 +24,11 @@ export type HostCloseReason =
   | 'shutdown'
   | 'warm_cap';
 
-export type HostRetirementReason = 'launch_signature_mismatch' | 'legacy_multi_affinity' | 'owner_unavailable';
+export type HostRetirementReason =
+  | 'launch_signature_mismatch'
+  | 'legacy_multi_affinity'
+  | 'owner_unavailable'
+  | 'aborted_lease';
 
 export interface HostResolution {
   entry: HostEntry | undefined;
@@ -45,6 +49,9 @@ export function resolveHostEntry(
   const owner = sessionOwners.get(sessionId);
   if (!owner) return findIdleHost(entries, sessionOwners, signature);
   if (owner.lease?.sessionId === sessionId) {
+    // A replacement may reach acquisition before the cancelled turn drains.
+    // Retirement waits for both lease release and the exact writer host exit.
+    if (owner.lease.abortObserved) return retirement(owner, 'aborted_lease');
     throw new Error(`Codex session ${sessionId} already has an active host lease`);
   }
   if (owner.signature !== signature) return retirement(owner, 'launch_signature_mismatch');

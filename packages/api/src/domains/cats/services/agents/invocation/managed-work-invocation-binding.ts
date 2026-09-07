@@ -1,5 +1,5 @@
-import type { CatId, ManagedWorkBinding } from '@cat-cafe/shared';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { CatId, ManagedWorkBinding, WorkflowSopAdmissionBundle } from '@cat-cafe/shared';
+import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
@@ -11,6 +11,8 @@ export async function resolveManagedWorkInvocationBinding(input: {
   executorCatId: CatId;
   messageStore: Pick<IMessageStore, 'getById'>;
   triggerMessageId?: string;
+  /** Server-owned A2A source; ordinary causal/reply ids do not grant peer scope. */
+  a2aTriggerMessageId?: string;
   threadStore: IThreadStore | null;
   workflowSopStore?: IWorkflowSopStore;
 }): Promise<ManagedWorkBinding | undefined> {
@@ -19,7 +21,8 @@ export async function resolveManagedWorkInvocationBinding(input: {
   // Review orchestration is server-authored reviewer work, not implementation
   // ownership. Its persisted provenance is minted only by canonical message
   // ingress, so it is safe to exempt without trusting prompt text or callers.
-  if (await hasReviewOrchestrationProvenance(input.messageStore, input.triggerMessageId)) return undefined;
+  const trigger = await readTriggerMessage(input.messageStore, input.a2aTriggerMessageId ?? input.triggerMessageId);
+  if (trigger?.extra?.systemKind === 'review_orchestration') return undefined;
 
   let thread: Awaited<ReturnType<IThreadStore['get']>>;
   try {
@@ -46,19 +49,20 @@ export async function resolveManagedWorkInvocationBinding(input: {
   const workflowSop = await input.workflowSopStore.get(thread.backlogItemId);
   if (workflowSop?.stage === 'kickoff') return undefined;
 
+  // A peer's authenticated handoff is not a request to replace the parent
+  // executor. Keep its invocation unattributed to that attempt. Incumbent
+  // continuations still bind normally; Desktop ownership and unbound races
+  // retain the existing atomic, fail-closed path.
+  if (await isPeerOfBoundExecutor(trigger, input, thread.backlogItemId, input.workflowSopStore)) return undefined;
+
   const bundle = await input.workflowSopStore.bindManagedWorkAttempt(
     input.ownerUserId,
     thread.backlogItemId,
     input.executorCatId,
   );
   if (!bundle) return undefined;
-  if (
-    bundle.admission.ownerUserId !== input.ownerUserId ||
-    bundle.admission.producerRef !== thread.backlogItemId ||
-    bundle.attempt.workId !== bundle.admission.workId ||
-    bundle.attempt.attemptId !== bundle.admission.initialAttemptId ||
-    bundle.attempt.executorCatId !== input.executorCatId
-  ) {
+  assertAdmissionIdentity(bundle, input.ownerUserId, thread.backlogItemId);
+  if (bundle.attempt.executorCatId !== input.executorCatId) {
     throw new Error('Managed-work invocation binding failed closed: admission bundle mismatch');
   }
 
@@ -72,16 +76,63 @@ function isReviewWorkspaceThreadId(threadId: string): boolean {
   return threadId.startsWith('project-feature-review:') || threadId.startsWith('project-review-hub:');
 }
 
-async function hasReviewOrchestrationProvenance(
+function assertAdmissionIdentity(bundle: WorkflowSopAdmissionBundle, ownerUserId: string, backlogItemId: string): void {
+  if (
+    bundle.admission.ownerUserId !== ownerUserId ||
+    bundle.admission.producerKind !== 'workflow_sop_v1' ||
+    bundle.admission.producerRef !== backlogItemId ||
+    bundle.attempt.workId !== bundle.admission.workId ||
+    bundle.attempt.attemptId !== bundle.admission.initialAttemptId ||
+    bundle.attempt.attemptNumber !== 1
+  ) {
+    throw new Error('Managed-work invocation binding failed closed: admission bundle mismatch');
+  }
+}
+
+type PeerTriggerScope = {
+  a2aTriggerMessageId?: string;
+  ownerUserId: string;
+  threadId: string;
+  executorCatId: CatId;
+};
+
+async function isPeerOfBoundExecutor(
+  trigger: StoredMessage | null,
+  input: PeerTriggerScope,
+  backlogItemId: string,
+  store: IWorkflowSopStore,
+): Promise<boolean> {
+  if (!isPersistedPeerTrigger(trigger, input)) return false;
+  const bundle = await store.getManagedWorkAdmission(input.ownerUserId, backlogItemId);
+  if (!bundle) return false;
+  assertAdmissionIdentity(bundle, input.ownerUserId, backlogItemId);
+  const actor = bundle.attempt.executorActor;
+  const incumbentCatId = actor ? (actor.kind === 'cat' ? actor.catId : undefined) : bundle.attempt.executorCatId;
+  return Boolean(incumbentCatId && incumbentCatId !== input.executorCatId);
+}
+
+function isPersistedPeerTrigger(message: StoredMessage | null, input: PeerTriggerScope): boolean {
+  return Boolean(
+    input.a2aTriggerMessageId &&
+      message?.id === input.a2aTriggerMessageId &&
+      message.userId === input.ownerUserId &&
+      message.threadId === input.threadId &&
+      message.catId &&
+      (message.catId !== input.executorCatId ||
+        (message.extra?.crossPost?.sourceThreadId && message.extra.crossPost.sourceThreadId !== message.threadId)) &&
+      (message.mentions.includes(input.executorCatId) || message.extra?.targetCats?.includes(input.executorCatId)),
+  );
+}
+
+async function readTriggerMessage(
   messageStore: Pick<IMessageStore, 'getById'>,
   triggerMessageId: string | undefined,
-): Promise<boolean> {
-  if (!triggerMessageId) return false;
+): Promise<StoredMessage | null> {
+  if (!triggerMessageId) return null;
   try {
-    const message = await messageStore.getById(triggerMessageId);
-    return message?.extra?.systemKind === 'review_orchestration';
+    return await messageStore.getById(triggerMessageId);
   } catch {
     // Fail closed: a provenance read outage must not manufacture an exemption.
-    return false;
+    return null;
   }
 }
