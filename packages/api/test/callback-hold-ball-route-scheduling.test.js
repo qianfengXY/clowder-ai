@@ -274,12 +274,26 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.match(liveTasks[0].params.message, /continue-B/);
   });
 
-  test('retires a prior managed-command carrier before deleting its producer task', async () => {
+  test('preserves the consumed producer receipt after retiring a published managed-command carrier', async () => {
     const order = [];
     const deps = makeStubDeps({
       managedCommandWakeRecovery: {
         async retireReplacedTask(taskId) {
           order.push(`retire:${taskId}`);
+          const prior = deps.dynamicTaskStore.getAll().find((task) => task.id === taskId);
+          prior.params = {
+            ...prior.params,
+            holdLifecycle: {
+              ...prior.params.holdLifecycle,
+              status: 'fired',
+              managedCommand: {
+                ...prior.params.holdLifecycle.managedCommand,
+                state: 'consumed',
+                carrierTerminalReason: 'withdrawn',
+              },
+            },
+          };
+          prior.enabled = false;
           return 'retired';
         },
       },
@@ -288,6 +302,10 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     deps.dynamicTaskStore.remove = (taskId) => {
       order.push(`remove:${taskId}`);
       return originalRemove(taskId);
+    };
+    deps.dynamicTaskStore.updateParamsIfCurrent = (taskId) => {
+      order.push(`rewrite:${taskId}`);
+      return false;
     };
     const app = await createApp(deps);
     const thread = await threadStore.create('user-hb-managed-replace', 'hb-managed-replace');
@@ -308,8 +326,17 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
 
     assert.equal(response.statusCode, 200);
     assert.ok(order.indexOf(`retire:${priorTaskId}`) >= 0);
-    assert.ok(order.indexOf(`remove:${priorTaskId}`) > order.indexOf(`retire:${priorTaskId}`));
-    assert.ok(deps._removedIds.includes(priorTaskId));
+    assert.ok(
+      !order.includes(`rewrite:${priorTaskId}`),
+      'must not overwrite the consumed receipt with a stale snapshot',
+    );
+    assert.ok(!deps._removedIds.includes(priorTaskId));
+    const prior = deps.dynamicTaskStore.getAll().find((task) => task.id === priorTaskId);
+    assert.equal(prior.enabled, false);
+    assert.equal(prior.params.holdLifecycle.status, 'fired');
+    assert.equal(prior.params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.equal(prior.params.holdLifecycle.managedCommand.carrierTerminalReason, 'withdrawn');
+    assert.ok(deps._unregisteredIds.includes(priorTaskId));
   });
 
   test('rolls back a new hold when prior managed-command carrier retirement is unavailable', async () => {

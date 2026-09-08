@@ -72,6 +72,30 @@ export {
   evaluateExternalCaseReplay,
 } from './external-case-closure-eval.js';
 export type {
+  CapabilityEvolutionMeasurementIssuance,
+  CapabilityEvolutionMeasurementIssueInput,
+  CapabilityEvolutionMeasurementIssuer,
+  CapabilityEvolutionMeasurementIssuerOptions,
+} from './measurement/capability-evolution/capability-evolution-measurement-issuer.js';
+export {
+  CAPABILITY_EVOLUTION_MEASUREMENT_BLOCKERS,
+  createCapabilityEvolutionMeasurementIssuer,
+} from './measurement/capability-evolution/capability-evolution-measurement-issuer.js';
+export type {
+  CapabilityEvolutionMeasurementRoleBinding,
+  CapabilityEvolutionMeasurementSource,
+} from './measurement/capability-evolution/capability-evolution-measurement-source.js';
+export {
+  CapabilityEvolutionMeasurementRoleBindingSchema,
+  CapabilityEvolutionMeasurementSourceSchema,
+} from './measurement/capability-evolution/capability-evolution-measurement-source.js';
+export type {
+  CapabilityEvolutionMeasurementSourceRead,
+  CapabilityEvolutionMeasurementSourceRevisionVerification,
+  CapabilityEvolutionMeasurementSourceStore,
+} from './measurement/capability-evolution/capability-evolution-measurement-source-store.js';
+export { createGitCapabilityEvolutionMeasurementSourceStore } from './measurement/capability-evolution/capability-evolution-measurement-source-store.js';
+export type {
   DomainNegativeControlCase,
   DomainNegativeControlCohort,
   DomainNegativeControlResultOptions,
@@ -102,6 +126,15 @@ export {
   parseMeasurementBundleCertificate,
   validateMeasurementBundleResult,
 } from './measurement/measurement-bundle-validation.js';
+export type { MeasurementDecisionProofOwnerObject } from './measurement/measurement-decision-proof-owner-object.js';
+export { MeasurementDecisionProofOwnerObjectSchema } from './measurement/measurement-decision-proof-owner-object.js';
+export type {
+  MeasurementDecisionProofRef,
+  MeasurementDecisionProofResolution,
+  MeasurementDecisionProofResolver,
+} from './measurement/measurement-decision-proof-resolver.js';
+export { createFileMeasurementDecisionProofResolver } from './measurement/measurement-decision-proof-resolver.js';
+export type { MeasurementDecisionProof } from './measurement/measurement-decision-proof-schema.js';
 export type {
   SameVersionReplayOptions,
   SameVersionReplayReport,

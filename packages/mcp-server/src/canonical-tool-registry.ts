@@ -22,6 +22,7 @@ function assertGovernedDefinition(definition: McpToolDefinition): void {
     !candidate.operation ||
     !candidate.implementation?.ref ||
     !candidate.policy?.resourceFamily?.trim() ||
+    !candidate.policy.schemaDelivery?.policy ||
     !candidate.policy.runtimeProfiles?.length ||
     !candidate.actionInventory?.length ||
     !candidate.effectiveRisk ||

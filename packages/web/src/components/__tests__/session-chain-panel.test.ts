@@ -29,6 +29,15 @@ vi.mock('../ContextHealthBar', () => ({
     React.createElement('div', { 'data-testid': `health-bar-${props.catId}` }),
 }));
 
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: ({ threadId }: { threadId: string }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'cloud-conversation-link', 'data-thread-id': threadId },
+      'ChatGPT Conversation',
+    ),
+}));
+
 // useCatData stub — mirrors cat-config.json so SessionChainPanel can pull
 // border/badge colors from cat.color.primary instead of a hardcoded table.
 const MOCK_CATS: Record<string, { id: string; displayName: string; color: { primary: string; secondary: string } }> = {
@@ -117,6 +126,61 @@ function expandSealed() {
 }
 
 describe('F24: SessionChainPanel', () => {
+  it('fails closed instead of crashing when a successful response omits the sessions collection', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    renderPanel('thread-malformed');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('Session Chain 加载失败');
+  });
+
+  it.each([
+    ['null entry', [null]],
+    ['malformed object', [{ id: 'session-without-required-fields' }]],
+  ])('fails closed instead of crashing when a successful response contains a %s', async (_case, sessions) => {
+    mockSessionsResponse(sessions);
+
+    renderPanel('thread-malformed-entry');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('Session Chain 加载失败');
+  });
+
+  it('runs native compaction beside an idle bound Codex session and refreshes canonical session truth', async () => {
+    const active = {
+      id: 's-codex',
+      cliSessionId: 'native-1',
+      catId: 'codex',
+      seq: 0,
+      status: 'active',
+      messageCount: 4,
+      createdAt: Date.now(),
+    };
+    mockSessionsResponse([active]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const compact = container.querySelector<HTMLButtonElement>('[data-testid="compact-native-session-s-codex"]');
+    expect(compact).not.toBeNull();
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/threads/thread-1/sessions/codex/compact-native'
+          ? { ok: true, json: async () => ({ outcome: 'observed', contextEpoch: 2 }) }
+          : { ok: true, json: async () => ({ sessions: [active] }) },
+      ),
+    );
+    act(() => compact?.click());
+    await flushFetch();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-1/sessions/codex/compact-native', {
+      method: 'POST',
+    });
+  });
+
   it('seals an idle active session and refreshes the chain', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
@@ -257,7 +321,7 @@ describe('F24: SessionChainPanel', () => {
     // No session cards, but bind section available
     expect(container.textContent).toContain('0 未封存');
     expect(container.textContent).toContain('0 total');
-    expect(container.textContent).toContain('绑定外部 Session');
+    expect(container.textContent).toContain('绑定 CLI Session');
   });
 
   it('renders a typed access denial instead of presenting a forbidden chain as 0 total', async () => {
@@ -1367,6 +1431,17 @@ describe('F24: SessionChainPanel', () => {
   });
 
   describe('F33: bind new external session', () => {
+    it('keeps cloud conversations in Session Chain and distinguishes them from CLI sessions', async () => {
+      mockSessionsResponse([]);
+
+      renderPanel('thread-1');
+      await flushFetch();
+
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
+      expect(container.textContent).toContain('ChatGPT Conversation');
+      expect(container.textContent).toContain('绑定 CLI Session');
+    });
+
     it('hides bind UI for default thread (system-owned, bind returns 403)', async () => {
       mockSessionsResponse([
         { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
@@ -1375,14 +1450,14 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
       // Neither the per-session "bind..." nor the "绑定外部 Session" should appear
       expect(container.textContent).not.toContain('bind...');
-      expect(container.textContent).not.toContain('绑定外部 Session');
+      expect(container.textContent).not.toContain('绑定 CLI Session');
     });
 
     it('shows bind-new-session button even when no sessions exist', async () => {
       mockSessionsResponse([]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('绑定外部 Session');
+      expect(container.textContent).toContain('绑定 CLI Session');
     });
 
     it('shows bind-new-session button alongside active sessions', async () => {
@@ -1392,7 +1467,7 @@ describe('F24: SessionChainPanel', () => {
       renderPanel('thread-1');
       await flushFetch();
       expect(container.textContent).toContain('Session #1');
-      expect(container.textContent).toContain('绑定外部 Session');
+      expect(container.textContent).toContain('绑定 CLI Session');
     });
 
     it('filters out cats that already have active sessions from dropdown', async () => {
@@ -1404,7 +1479,7 @@ describe('F24: SessionChainPanel', () => {
 
       // Click to expand bind section
       const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) =>
-        btn.textContent?.includes('绑定外部 Session'),
+        btn.textContent?.includes('绑定 CLI Session'),
       );
       expect(bindBtn).not.toBeUndefined();
       act(() => {
@@ -1572,6 +1647,8 @@ describe('F24: SessionChainPanel', () => {
 
       // Collapsed: active card hidden, but header/count still visible
       expect(container.querySelector('[data-testid="session-card-active"]')).toBeNull();
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).toBeNull();
+      expect(container.textContent).not.toContain('绑定 CLI Session');
       expect(container.textContent).toContain('1 未封存');
       expect(container.textContent).toContain('Session Chain');
 
@@ -1582,6 +1659,8 @@ describe('F24: SessionChainPanel', () => {
 
       // Restored: active card visible again
       expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
+      expect(container.textContent).toContain('绑定 CLI Session');
       expect(container.textContent).toContain('Session #1');
     });
 

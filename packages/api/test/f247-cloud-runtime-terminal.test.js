@@ -70,7 +70,7 @@ function makeParallelDeps({ bridge, disposition }) {
       threadStore: makeThreadStore(),
       apiUrl: 'http://localhost:0',
       cloudInvokeBridge: bridge,
-      cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+      cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
       a2aDispatchDispositionService: disposition,
     },
     messageStore: {
@@ -120,6 +120,32 @@ const baseParams = {
 };
 
 describe('F247 cloud runtime terminal contract', () => {
+  it('keeps an A2A needs-binding outcome terminally completed instead of exposing direct-user retry semantics', async () => {
+    ensureGptProRegistered();
+    const disposition = makeDispositionRecorder();
+    const messages = await drain(
+      invokeSingleCat(
+        {
+          registry: new InvocationRegistry(),
+          sessionManager: {},
+          threadStore: makeThreadStore(),
+          apiUrl: 'http://localhost:0',
+          cloudInvokeBridge: {
+            dispatch: async () => ({ kind: 'fallback', reason: 'needs-binding', detail: 'route absent' }),
+          },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
+          a2aDispatchDispositionService: disposition,
+        },
+        baseParams,
+      ),
+    );
+
+    assert.equal(disposition.calls.length, 1);
+    assert.equal(disposition.calls[0].disposition, 'completed');
+    assert.equal(messages.at(-1).type, 'done');
+    assert.equal(messages.at(-1).errorCode, undefined);
+  });
+
   it('waits for the Host bridge outcome, exposes one readable fallback, and terminalizes the exact A2A carrier', async () => {
     ensureGptProRegistered();
     let releaseBridge;
@@ -143,7 +169,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return bridgeOutcome;
             },
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -248,7 +274,7 @@ describe('F247 cloud runtime terminal contract', () => {
               idempotentReplay: false,
             }),
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -361,7 +387,7 @@ describe('F247 cloud runtime terminal contract', () => {
       .map((message) => JSON.parse(message.content))
       .find((payload) => payload.type === 'cloud_bridge_status');
     assert.equal(status.status, 'unavailable');
-    assert.match(status.detail, /provenance or return-binding signer was incomplete/);
+    assert.match(status.detail, /provenance or return-grant store was incomplete/);
     assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
@@ -387,7 +413,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return { kind: 'fallback', reason: 'no-adapter', detail: 'host unavailable' };
             },
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         baseParams,

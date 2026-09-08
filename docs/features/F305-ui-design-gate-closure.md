@@ -1,6 +1,6 @@
 ---
 feature_ids: [F305]
-related_features: [F056, F083, F246, F284, F287, F292, F299, F303]
+related_features: [F056, F083, F246, F284, F287, F292, F299, F303, F310, F315]
 topics: [ui, ux, design-gate, frontend-design, workspace, approval, design-language]
 doc_kind: spec
 created: 2026-08-22
@@ -9,12 +9,12 @@ description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T15:01:32Z
 cvo_signoff: "2026-08-22 — sourceMessageId 0001787410376908-000078-52aceda2：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
-tips_exempt: "内部 UI 设计治理与既有审批体验修正；没有新增用户可发现的产品能力。"
+tips_exempt: "Renewed 2026-09-05 for the F056 KD-37 succession note: it records which parity guard replaces an historical design contract and adds no user-facing action or learning step."
 ---
 
 # F305: UI Design Gate Closure — 先看真页面
 
-> **Status**: done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1 | **Completed**: 2026-08-24
 
 Architecture cell: `harness-eval`
 
@@ -100,7 +100,7 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 4. 作决定必需的上下文；
 5. 工程细节与 Raw 默认折叠。
 
-`GenericApprovalItemCard` 与 F292 `MeetingIntakeCard` 共同消费该 pattern；F246/F292 的业务状态、持久化和决定契约保持不变。
+`GenericApprovalItemCard` 与 F292 `MeetingIntakeCard` 共同消费该 pattern；F246/F292 的业务状态、持久化和决定契约保持不变。F310 后续复用这份呈现默认来做全局 Needs Me Design Gate，但不会让已关闭的 F305 获得 attention lifecycle ownership。
 
 审批是这个 pattern 的**第一个生产验证点**，不是 F305 的永久边界，也不是验证完就丢弃的 spike。后续 Workspace 模块只有在新增或实质改动用户表面时，才经同一个 F083 Design Gate 判断是否复用已经证明的呈现结构；不批量翻修旧页面，也不强迫不同任务共用同一张卡。
 
@@ -157,7 +157,7 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 - [x] **AC-A1**：新增或实质改变用户可见布局/交互会叠加触发 F083 体验确认；架构 lane 不会豁免，trivial 样式修正不误报。
 - [x] **AC-A2**：“先看真页面”可从 Clowder AI skill manifest 进入现有 `feat-lifecycle`，并在该 skill 内恢复真实壳 Design Gate 语义；未新增 skill/stage/registry。
 - [x] **AC-A3**：design-in-context checklist 的结构问题逐项映射 ADR-043/F056，Design Gate 与 review 不复制第二份清单。
-- [x] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。
+- [x] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。（历史契约，当时成立。2026-09-04 F056 KD-37 升级：根 `DESIGN.md` 改为 Google DESIGN.md 规格的**设计意图 / 目标值**真相源，其十六进制值是 F2 迁移目标而非运行时字面值的拷贝；AC-A4 反对的"第二份运行时拷贝会漂移"由 F056 AC-F6 的 parity 守护测试接管。本行不改写，只记录被谁、以什么机制取代。）
 - [x] **AC-A5**：Clowder AI 产品表面不会路由到冲突的通用 `frontend-design` 风格指令，且不修改用户在其他项目中的全局技能。
 - [x] **AC-B1**：Approval / Needs Me 共享 pattern 已由 generic approval、F292 meeting intake 与体验候选共同消费；F246/F292 store、schema 与 action 契约保持不变。
 - [x] **AC-B2**：F292 真实壳首屏只突出一个当前决定、系统建议和必要上下文；建议齐全时编辑表单默认折叠，主操作先于表单，工程细节默认折叠。

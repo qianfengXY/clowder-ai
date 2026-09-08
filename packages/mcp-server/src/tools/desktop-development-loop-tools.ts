@@ -327,7 +327,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'read-project',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -344,7 +343,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'read-work',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -361,7 +359,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'wait-review',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -379,7 +376,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'connect-work',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -396,7 +392,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'heartbeat-work',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -413,7 +408,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'report-implementation',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -430,7 +424,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'record-merge-confirmation',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -447,7 +440,6 @@ export const desktopDevelopmentLoopTools = [
       action: 'report-merge',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles,
-      targetExposure: 'profile-gated',
     },
   }),
 ] as const;
