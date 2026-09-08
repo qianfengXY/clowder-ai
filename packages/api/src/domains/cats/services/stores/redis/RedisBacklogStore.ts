@@ -25,6 +25,18 @@ import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
+import {
+  type AssignProjectFeatureIdInput,
+  featureNumber,
+  numberedCreate,
+  ProjectFeatureNumberError,
+  requestedFeatureId,
+  validateAssignment,
+} from '../shared/project-feature-numbering.js';
+import {
+  ASSIGN_PROJECT_FEATURE_ID_LUA,
+  CREATE_NUMBERED_PROJECT_ITEM_LUA,
+} from './project-feature-numbering-scripts.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 
@@ -723,6 +735,32 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(input.initialStatus === 'done' ? { doneAt: now } : {}),
     };
 
+    if (input.projectId && numberedCreate(input)) {
+      const requested = requestedFeatureId(input);
+      if (!requested?.startsWith('EXT-')) {
+        const result = await this.redis.eval(
+          CREATE_NUMBERED_PROJECT_ITEM_LUA,
+          3,
+          BacklogKeys.detail(item.id),
+          BacklogKeys.userList(input.userId),
+          BacklogKeys.projectFeatureSequence(input.userId, input.projectId),
+          JSON.stringify({
+            id: item.id,
+            userId: input.userId,
+            projectId: input.projectId,
+            number: requested ? featureNumber(requested) : undefined,
+            allocate: Boolean(input.projectFeatureNumbering),
+            reservedFeatureIds: input.projectFeatureNumbering?.reservedFeatureIds ?? [],
+            fields: this.serializeItem(item),
+            ttl: this.ttlSeconds ?? 0,
+          }),
+        );
+        if (result !== '') throw new ProjectFeatureNumberError(String(result));
+        const created = await this.get(item.id);
+        if (!created) throw new ProjectFeatureNumberError('Created project task is no longer available');
+        return created;
+      }
+    }
     await this.writeItem(item);
     const pipeline = this.redis.multi();
     pipeline.zadd(BacklogKeys.userList(item.userId), String(item.createdAt), item.id);
@@ -731,6 +769,35 @@ export class RedisBacklogStore implements IBacklogStore {
     }
     await pipeline.exec();
     return (await this.get(item.id)) ?? { ...item, revision: 1 };
+  }
+
+  async assignProjectFeatureId(itemId: string, input: AssignProjectFeatureIdInput): Promise<BacklogItem> {
+    const featureId = validateAssignment(input);
+    const now = Date.now();
+    const result = await this.redis.eval(
+      ASSIGN_PROJECT_FEATURE_ID_LUA,
+      3,
+      BacklogKeys.detail(itemId),
+      BacklogKeys.userList(input.userId),
+      BacklogKeys.projectFeatureSequence(input.userId, input.projectId),
+      JSON.stringify({
+        ...input,
+        id: itemId,
+        number: featureNumber(featureId),
+        now,
+        audit: {
+          id: generateSortableId(now),
+          action: 'feature_id_assigned',
+          actor: makeUserActor(input.userId),
+          timestamp: now,
+          detail: `${featureId}: ${input.reason}`,
+        },
+      }),
+    );
+    if (result !== '') throw new ProjectFeatureNumberError(String(result));
+    const item = await this.get(itemId, input.userId);
+    if (!item) throw new ProjectFeatureNumberError('Assigned project task is no longer available');
+    return item;
   }
 
   async ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): Promise<BacklogItem> {
