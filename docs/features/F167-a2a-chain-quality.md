@@ -5,7 +5,7 @@ topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
 updated: 2026-09-04
-tips_exempt: "Renewed 2026-09-04 for the Phase R terminal-lineage conflict repair: it makes the existing post_message and cross_post_message coordination surface fail loud instead of closing the wrong chain, without adding a user-invokable action or discovery workflow."
+tips_exempt: "Renewed 2026-09-08 for upstream integration of terminal-lineage repair with fork managed-command carrier retirement: this preserves existing coordination and consumed receipts without adding a user-invokable action or discovery workflow."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"

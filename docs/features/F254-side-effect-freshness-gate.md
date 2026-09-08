@@ -6,7 +6,7 @@ topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, sid
 doc_kind: spec
 created: 2026-06-27
 updated: 2026-09-05
-tips_exempt: Remote-compaction capacity recovery continues the already-authorized task automatically; it adds no user action, setting, or capability to discover.
+tips_exempt: Renewed for the 2026-09-08 upstream integration of remote-compaction recovery with fork durable carrier handling; both continue already-authorized work without adding a user action, setting, or capability to discover.
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截

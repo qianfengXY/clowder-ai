@@ -1,6 +1,6 @@
 ---
 name: request-review
-tips_exempt: F167/F314 keep local review as an internal durable handoff and add provenance guards; no distinct end-user-invocable capability surface
+tips_exempt: Renewed for the 2026-09-08 upstream integration preserving fork multi-cat routing alongside F167/F314 local review and provenance guards; no new end-user action or discovery surface.
 description: >
   Route a change to a non-author local peer when local review is the selected independent validation source.
   Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
