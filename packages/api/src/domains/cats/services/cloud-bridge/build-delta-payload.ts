@@ -17,10 +17,14 @@
  *
  * Renders as:
  *   <thread-runtime v=1 format=json>
- *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "...", "sourceMessageId": "...", "cloudReturnBinding": "..."}
+ *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "...", "sourceMessageId": "..."}
  *   </thread-runtime>
  *
  *   <intent text rendered separately for the cat to read as its message>
+ *
+ *   <cat-cafe-return-contract v=1>
+ *   <fixed server-authored Remote MCP completion instruction>
+ *   </cat-cafe-return-contract>
  */
 
 import type { CloudInvokeDispatchParams } from './types.js';
@@ -37,15 +41,22 @@ export const DELTA_PAYLOAD_MAX_CHARS = 2000;
 /** Sentinel suffix appended after intent truncation. */
 const TRUNCATE_SUFFIX = '...[truncated]';
 
+/**
+ * Query-local completion contract for the cloud cat.
+ *
+ * This is deliberately a fixed literal outside the untrusted runtime JSON and
+ * raw intent. It carries no capability or secret: the API still authorizes the
+ * exact thread/source/cat tuple through the server-custodied one-shot grant.
+ * Repeating the contract on every dispatched turn makes Remote MCP the salient
+ * primary return path instead of relying on the browser observer fallback.
+ */
+const SOURCE_BOUND_MCP_RETURN_CONTRACT = `<cat-cafe-return-contract v=1>
+To complete this request, call cat_cafe_post_message with agentKeyCatId="gpt-pro", threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
+</cat-cafe-return-contract>`;
+
 function assertExactSourceMessageId(sourceMessageId: string): void {
   if (!sourceMessageId || sourceMessageId.length > 512) {
     throw new Error('sourceMessageId must be an exact persisted message ID of at most 512 characters');
-  }
-}
-
-function assertCloudReturnBinding(binding: string): void {
-  if (!binding || binding.length > 800 || !/^cbr1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(binding)) {
-    throw new Error('cloudReturnBinding must be an opaque signed cbr1 token of at most 800 characters');
   }
 }
 
@@ -80,7 +91,6 @@ function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
     calledBy: (params.calledBy as string).slice(0, 32) || 'X',
     intent: floorIntent,
     sourceMessageId: params.sourceMessageId,
-    cloudReturnBinding: params.cloudReturnBinding,
   };
   return renderEnvelope(absoluteFloor, floorIntent);
 }
@@ -102,14 +112,14 @@ function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
  *   5. Last-resort envelope: minimal fields + diagnostic intent.
  *
  * Returns a single string with the JSON-wrapped delta block followed by a
- * blank line and the raw intent text (for the cat to treat as the user
- * message). Caller should call this BEFORE invoking the PinchTab adapter
+ * blank line, the raw intent text (for the cat to treat as the user message),
+ * and the fixed source-bound MCP return contract. Caller should call this
+ * BEFORE invoking the PinchTab adapter
  * so the rendered string is then JSON.stringify'd at the eval boundary
  * (defense in depth — AC-B1c-10).
  */
 export function buildDeltaPayload(params: CloudInvokeDispatchParams): string {
   assertExactSourceMessageId(params.sourceMessageId);
-  assertCloudReturnBinding(params.cloudReturnBinding);
   // Attempt 1: full payload as-is.
   const fitFull = tryFitWithIntentShrink(params);
   if (fitFull) return fitFull;
@@ -193,11 +203,10 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
     calledBy: params.calledBy,
     intent,
     sourceMessageId: params.sourceMessageId,
-    cloudReturnBinding: params.cloudReturnBinding,
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);
-  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}`;
+  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}\n\n${SOURCE_BOUND_MCP_RETURN_CONTRACT}`;
 }
 
 /**

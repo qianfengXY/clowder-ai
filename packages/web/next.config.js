@@ -2,6 +2,7 @@ const withPWA = require('@ducanh2912/next-pwa').default;
 const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
+const pwaDisabled = process.env.NODE_ENV === 'development' && !enablePwaInDev;
 const testDistDir = process.env.CAT_CAFE_WEB_TEST_DIST_DIR;
 const testTsconfigPath = process.env.CAT_CAFE_WEB_TEST_TSCONFIG;
 
@@ -22,7 +23,6 @@ if (Boolean(testDistDir) !== Boolean(testTsconfigPath)) {
 const webBuildRevision = resolveWebBuildRevision();
 const deploymentRevisionRequired =
   process.env.CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED === '1' || process.env.NODE_ENV === 'production';
-
 function resolveApiBaseUrl() {
   // Prefer explicit local port over NEXT_PUBLIC_API_URL: SSR rewrites should
   // hit localhost directly even when the env URL is a public domain (e.g. a
@@ -74,6 +74,7 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? '',
     NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: webBuildRevision ?? '',
     NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: deploymentRevisionRequired ? '1' : '0',
+    NEXT_PUBLIC_CAT_CAFE_PWA_ENABLED: pwaDisabled ? '0' : '1',
   },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
@@ -122,7 +123,7 @@ const nextConfig = {
 
 module.exports = withPWA({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
+  disable: pwaDisabled,
   reloadOnOnline: false,
   // The app shell contains hashed chunk references. Precaching `/` can keep a
   // mobile client on an old build indefinitely after a production restart.

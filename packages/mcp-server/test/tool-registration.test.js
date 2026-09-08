@@ -282,6 +282,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_propose_session_handoff',
       'cat_cafe_propose_profile_update',
       'cat_cafe_propose_taste',
+      'cat_cafe_propose_eval_repair',
       'cat_cafe_update_bootcamp_state',
       'cat_cafe_bootcamp_env_check',
       'cat_cafe_update_guide_state',
@@ -303,11 +304,14 @@ describe('MCP Server Tool Registration', () => {
   test('agent-key collab allowlist is the route-principal-backed surface', async () => {
     const { AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
     const expected = [
+      'cat_cafe_advance_evolution_program_change',
       'cat_cafe_backfill_events',
       'cat_cafe_cross_post_message',
+      'cat_cafe_get_evolution_program',
       'cat_cafe_get_message',
       'cat_cafe_get_thread_context',
       'cat_cafe_get_workflow_sop',
+      'cat_cafe_link_evolution_program_observation',
       'cat_cafe_list_events',
       'cat_cafe_list_labels',
       'cat_cafe_list_paw_feel_inbox',
@@ -315,23 +319,32 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_list_threads',
       'cat_cafe_post_message',
       'cat_cafe_preview_open',
+      'cat_cafe_offer_custody',
       'cat_cafe_preview_scheduled_task',
       'cat_cafe_publish_verdict',
       'cat_cafe_record_eval_lifecycle',
       'cat_cafe_read_diary',
       'cat_cafe_read_meeting_artifact',
       'cat_cafe_read_profile',
+      'cat_cafe_read_entrusted_work',
       'cat_cafe_list_diaries',
       'cat_cafe_get_person_memory_proposal_status',
+      'cat_cafe_issue_capability_evolution_measurement',
       'cat_cafe_recall_person_relationship',
       'cat_cafe_drill_person_memory',
       'cat_cafe_register_external_runtime_session',
       'cat_cafe_community_request_guardian',
       'cat_cafe_community_guardian_signoff',
+      'cat_cafe_constitute_evolution_program',
+      'cat_cafe_open_evolution_round',
+      'cat_cafe_record_evolution_evaluation',
       'cat_cafe_register_scheduled_task',
       'cat_cafe_remove_scheduled_task',
+      'cat_cafe_retry_custody_admission',
+      'cat_cafe_start_evolution_program',
       'cat_cafe_teleport',
       'cat_cafe_triage_paw_feel',
+      'cat_cafe_update_evolution_program',
       'cat_cafe_workspace_navigate',
     ];
 
@@ -354,6 +367,21 @@ describe('MCP Server Tool Registration', () => {
     }
 
     assert.deepEqual(offenders, []);
+  });
+
+  test('eval repair proposal is a canonical callback-only resource entry', async () => {
+    const { CANONICAL_TOOL_REGISTRY, AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const definition = CANONICAL_TOOL_REGISTRY.find((candidate) => candidate.name === 'cat_cafe_propose_eval_repair');
+
+    assert.ok(definition);
+    assert.equal(definition.policy.activeState, 'canonical');
+    assert.deepEqual(definition.policy.runtimeProfiles, ['full']);
+    assert.deepEqual(definition.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'resource-entry',
+      admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+    });
+    assert.equal(AGENT_KEY_TOOLS.has(definition.name), false);
   });
 
   test('deprecated file tools are not registered', async () => {

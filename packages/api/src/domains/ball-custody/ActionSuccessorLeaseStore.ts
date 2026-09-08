@@ -1,7 +1,7 @@
 import type {
-  RecoverActiveLocalReviewVerdictInput,
-  RecoverActiveLocalReviewVerdictResult,
-} from './action-successor-local-review-recovery-state-machine.js';
+  RecoverActiveExternalReviewVerdictInput,
+  RecoverActiveExternalReviewVerdictResult,
+} from './action-successor-external-review-recovery-state-machine.js';
 import type {
   ActionCompletionVerdict,
   ActionSuccessorDispatchFailureReason,
@@ -107,8 +107,8 @@ export type ActionSuccessorCommitOutcomeResult =
       lease: ActionSuccessorLease | null;
     };
 
-export type ActionSuccessorLocalReviewRecoveryStoreResult =
-  | RecoverActiveLocalReviewVerdictResult
+export type ActionSuccessorExternalReviewRecoveryStoreResult =
+  | RecoverActiveExternalReviewVerdictResult
   | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
 
 export interface ActionSuccessorLeaseStore {
@@ -128,10 +128,10 @@ export interface ActionSuccessorLeaseStore {
       now: number;
     },
   ): Promise<ActionSuccessorCommitOutcomeResult>;
-  recoverLocalReviewVerdict(
+  recoverExternalReviewVerdict(
     leaseId: string,
-    input: RecoverActiveLocalReviewVerdictInput,
-  ): Promise<ActionSuccessorLocalReviewRecoveryStoreResult>;
+    input: RecoverActiveExternalReviewVerdictInput,
+  ): Promise<ActionSuccessorExternalReviewRecoveryStoreResult>;
   recordCompletionCandidate(
     leaseId: string,
     input: { generation: number; catId: string; evidenceRefs: string[]; now: number },
