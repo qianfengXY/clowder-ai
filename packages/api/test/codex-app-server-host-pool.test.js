@@ -364,6 +364,49 @@ test('cancelling a successor during predecessor host exit starts no new host', a
   }
 });
 
+test('cancelled successors queued behind host retirement never acquire a new writer', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 60_000 });
+  const previous = new AbortController();
+  const nextA = new AbortController();
+  const nextB = new AbortController();
+  let allowExit;
+  const exited = new Promise((resolve) => {
+    allowExit = resolve;
+  });
+  let closeStarted;
+  const closingStarted = new Promise((resolve) => {
+    closeStarted = resolve;
+  });
+  try {
+    const first = await pool.createSession(sessionOptions({ sessionId: 'thread-queued', signal: previous.signal }));
+    hosts[0].close = async () => {
+      hosts[0].closeCalls++;
+      closeStarted();
+      await exited;
+      hosts[0].alive = false;
+    };
+    previous.abort('preempted');
+    const successorA = pool.createSession(sessionOptions({ sessionId: 'thread-queued', signal: nextA.signal }));
+    const rejectedA = assert.rejects(successorA, /cancel A/);
+    const closing = first.close();
+    await closingStarted;
+    const successorB = pool.createSession(sessionOptions({ sessionId: 'thread-queued', signal: nextB.signal }));
+    const rejectedB = assert.rejects(successorB, /cancel B/);
+    nextA.abort(new Error('cancel A'));
+    nextB.abort(new Error('cancel B'));
+    allowExit();
+    await Promise.all([closing, rejectedA, rejectedB]);
+    assert.equal(hosts.length, 1, 'neither cancelled waiter may create a replacement writer');
+    assert.equal(pool.getMetrics().activeLeaseCount, 0);
+    const resumed = await pool.createSession(sessionOptions({ sessionId: 'thread-queued' }));
+    assert.equal(hosts.length, 2, 'cancellation must release the acquisition queue for legitimate recovery');
+    await resumed.close();
+  } finally {
+    allowExit();
+    await pool.closeAll();
+  }
+});
+
 test('a waiting successor resumes after the abort fallback retires an abandoned host', async () => {
   const { pool, hosts } = createHarness({ abortGraceMs: 5 });
   const controller = new AbortController();

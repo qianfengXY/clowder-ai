@@ -54,10 +54,10 @@ export class CodexAppServerHostPool {
     );
   }
   private async createReservedSession(options: AgentCarrierSessionOptions): Promise<AgentCarrierSession> {
-    this.ensureOpen();
+    this.ensureAcquisitionOpen(options.signal);
     const prepared = prepareCodexHostLaunch(options);
     await this.reapDeadEntries();
-    this.ensureOpen();
+    this.ensureAcquisitionOpen(options.signal);
     let resolved = resolveHostEntry(this.entries, this.sessionOwners, prepared.signature, options.sessionId);
     if (resolved.retirement && options.sessionId) {
       await retireCodexSessionHost({
@@ -66,50 +66,57 @@ export class CodexAppServerHostPool {
         ...(options.signal ? { signal: options.signal } : {}),
         close: (entry) => this.closeEntry(entry, 'session_migration'),
       });
-      this.ensureOpen();
+      this.ensureAcquisitionOpen(options.signal);
       resolved = resolveHostEntry(this.entries, this.sessionOwners, prepared.signature, options.sessionId);
     }
     let entry = resolved.entry;
     let reusedSessionHost = resolved.reusedSessionHost;
     let reused = !!entry;
     if (!entry) entry = await this.spawnEntry(prepared);
-    this.ensureOpen();
-    if (!entry.host.isAlive) {
-      await this.closeEntry(entry, 'dead');
-      this.ensureOpen();
-      entry = await this.spawnEntry(prepared);
-      this.ensureOpen();
-      reused = false;
-      reusedSessionHost = false;
-    }
-    let lease: CodexAppServerHostLease;
-    lease = new CodexAppServerHostLease({
-      invocationId: options.invocationId,
-      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-      ...(options.signal ? { signal: options.signal } : {}),
-      ...(this.config.abortGraceMs !== undefined ? { abortGraceMs: this.config.abortGraceMs } : {}),
-      onAbandoned: async () => {
-        if (entry.lease === lease) await this.closeEntry(entry, 'forced');
-      },
-    });
-    entry.lease = lease;
-    if (lease.sessionId) this.sessionOwners.set(lease.sessionId, entry);
-    entry.warm = false;
-    entry.lastUsedAt = Date.now();
-    this.clearIdleTimer(entry);
-    this.metrics.activeLeaseCount++;
-    codexAppServerLeaseActive.add(1);
-    if (reused) {
-      this.metrics.warmHostCount--;
-      this.metrics.warmHitCount++;
-      codexAppServerHostWarmReuse.add(1);
-    }
-
+    let connection: AgentCarrierSession | undefined;
     try {
-      const connection = await this.connectEntry(entry);
+      this.ensureAcquisitionOpen(options.signal);
+      if (!entry.host.isAlive) {
+        await this.closeEntry(entry, 'dead');
+        this.ensureAcquisitionOpen(options.signal);
+        entry = await this.spawnEntry(prepared);
+        this.ensureAcquisitionOpen(options.signal);
+        reused = false;
+        reusedSessionHost = false;
+      }
+      const leasedEntry = entry;
+      let lease: CodexAppServerHostLease;
+      lease = new CodexAppServerHostLease({
+        invocationId: options.invocationId,
+        ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(this.config.abortGraceMs !== undefined ? { abortGraceMs: this.config.abortGraceMs } : {}),
+        onAbandoned: async () => {
+          if (leasedEntry.lease === lease) await this.closeEntry(leasedEntry, 'forced');
+        },
+      });
+      entry.lease = lease;
+      if (lease.sessionId) this.sessionOwners.set(lease.sessionId, entry);
+      entry.warm = false;
+      entry.lastUsedAt = Date.now();
+      this.clearIdleTimer(entry);
+      this.metrics.activeLeaseCount++;
+      codexAppServerLeaseActive.add(1);
+      if (reused) {
+        this.metrics.warmHostCount--;
+        this.metrics.warmHitCount++;
+        codexAppServerHostWarmReuse.add(1);
+      }
+
+      connection = await this.connectEntry(entry);
+      this.ensureAcquisitionOpen(options.signal);
       return this.wrapConnection(entry, lease, connection, reusedSessionHost);
     } catch (error) {
-      await this.closeEntry(entry, 'connect_failed');
+      try {
+        await connection?.close();
+      } finally {
+        await this.closeEntry(entry, options.signal?.aborted ? 'forced' : 'connect_failed');
+      }
       throw error;
     }
   }
@@ -345,7 +352,8 @@ export class CodexAppServerHostPool {
     return true;
   }
 
-  private ensureOpen(): void {
+  private ensureAcquisitionOpen(signal?: AbortSignal): void {
     if (this.closed) throw new Error('Codex app-server host pool is closed');
+    signal?.throwIfAborted();
   }
 }
