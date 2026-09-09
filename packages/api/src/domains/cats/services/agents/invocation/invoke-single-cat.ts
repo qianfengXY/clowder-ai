@@ -1393,6 +1393,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     executorCatId: catId,
     messageStore: deps.messageStore,
     ...(params.executionCausal?.triggerMessageId ? { triggerMessageId: params.executionCausal.triggerMessageId } : {}),
+    ...(params.a2aTriggerMessageId ? { a2aTriggerMessageId: params.a2aTriggerMessageId } : {}),
     threadStore,
     ...(deps.workflowSopStore ? { workflowSopStore: deps.workflowSopStore } : {}),
   });
