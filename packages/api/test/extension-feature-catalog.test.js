@@ -87,13 +87,15 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
   });
   const upstream = await backlogStore.create({
     userId: 'owner-1',
-    projectId: 'project-traqen',
     title: '[F289] Canonical Data Root',
     summary: 'upstream feature metadata',
     priority: 'p1',
     tags: ['source:docs-backlog', 'feature:f289', 'status:in-progress'],
     createdBy: 'user',
   });
+  // Load historical duplicate metadata; the current create contract correctly
+  // rejects a second F289 in the same project before migration can be exercised.
+  backlogStore.items.set(upstream.id, { ...upstream, projectId: 'project-traqen' });
   let sop = {
     backlogItemId: legacy.id,
     featureId: 'F289',
@@ -156,6 +158,7 @@ test('legacy F289 Desktop loop migrates in place without aliasing upstream F289'
   assert.equal(sop.featureId, 'EXT-001');
 
   const untouchedUpstream = await backlogStore.get(upstream.id, 'owner-1');
+  assert.equal(untouchedUpstream.projectId, 'project-traqen');
   assert.equal(untouchedUpstream.title, '[F289] Canonical Data Root');
   assert.ok(untouchedUpstream.tags.includes('feature:f289'));
 });
