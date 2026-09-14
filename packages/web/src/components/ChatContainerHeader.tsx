@@ -1,6 +1,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { startSerialPolling } from '@/utils/serial-polling';
 import { CatCafeLogo } from './icons/CatCafeLogo';
 import { ThreadCatPill } from './ThreadCatPill';
 import { ThreadIndicator } from './ThreadIndicator';
@@ -78,27 +79,24 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
   const router = useRouter();
 
   useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
+    const poller = startSerialPolling(async (signal) => {
       try {
-        const res = await apiFetch(`/api/threads/${threadId}/active-pane`);
-        if (cancelled) return;
-        if (res.ok) {
-          const body = (await res.json()) as { active?: boolean; daemonShortId?: string };
-          setDaemonShortId(body.daemonShortId ?? null);
-        } else {
+        const res = await apiFetch(`/api/threads/${threadId}/active-pane`, { signal });
+        if (signal.aborted) return false;
+        if (!res.ok) {
           setDaemonShortId(null);
+          return false;
         }
+        const body = (await res.json()) as { active?: boolean; daemonShortId?: string };
+        if (signal.aborted) return false;
+        setDaemonShortId(body.daemonShortId ?? null);
+        return true;
       } catch {
-        if (!cancelled) setDaemonShortId(null);
+        if (!signal.aborted) setDaemonShortId(null);
+        return false;
       }
-    };
-    void check();
-    const timer = setInterval(() => void check(), 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    }, 5000);
+    return poller.stop;
   }, [threadId]);
 
   if (!daemonShortId) return null;

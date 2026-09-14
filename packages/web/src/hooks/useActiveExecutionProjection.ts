@@ -1,11 +1,12 @@
 'use client';
 
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
+import { startSerialPolling } from '@/utils/serial-polling';
 
 const ACTIVE_EXECUTION_REFRESH_MS = 4_000;
 
@@ -17,19 +18,24 @@ export async function refreshActiveExecutionProjection(
   anchorThreadId: string,
   projectPath: string,
   signal?: AbortSignal,
-): Promise<void> {
+  afterCurrentGet = false,
+): Promise<boolean> {
   const store = useActiveExecutionStore.getState();
   const requestVersion = store.beginHydration(anchorThreadId);
   try {
-    const response = await apiFetch(activeExecutionResource(projectPath), {
-      signal,
-    });
+    const resource = activeExecutionResource(projectPath);
+    const response = afterCurrentGet
+      ? await apiFetch(resource, { signal }, { afterCurrentGet: true })
+      : await apiFetch(resource, { signal });
     if (!response.ok) throw new Error(`Execution hydration failed (${response.status})`);
     const body = (await response.json()) as ActiveExecutionListResponse;
+    if (signal?.aborted) return false;
     useActiveExecutionStore.getState().applySnapshot(anchorThreadId, requestVersion, body);
+    return true;
   } catch (error) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) return false;
     useActiveExecutionStore.getState().failHydration(anchorThreadId, requestVersion, error);
+    return false;
   }
 }
 
@@ -58,7 +64,8 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
     }
     useActiveExecutionStore.getState().settleCancellation(execution);
     const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
-    if (anchorThreadId && projectPath) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
+    if (anchorThreadId && projectPath)
+      await refreshActiveExecutionProjection(anchorThreadId, projectPath, undefined, true);
   } catch (error) {
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;
@@ -71,6 +78,7 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
  * still discovered. The store retains the last good snapshot on transient error.
  */
 export function useActiveExecutionProjection(anchorThreadId: string, socketConnected: boolean | null): void {
+  const pollerRef = useRef<ReturnType<typeof startSerialPolling> | null>(null);
   const canonicalProjectPath = useSidebarProjectionStore(
     (state) => state.rows.find((row) => row.id === anchorThreadId)?.projectPath,
   );
@@ -81,27 +89,19 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
 
   useEffect(() => {
     if (!projectPath) return;
-    const controller = new AbortController();
-    const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
-    refresh();
-    const interval = window.setInterval(refresh, ACTIVE_EXECUTION_REFRESH_MS);
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
+    const poller = startSerialPolling(
+      (signal) => refreshActiveExecutionProjection(anchorThreadId, projectPath, signal),
+      ACTIVE_EXECUTION_REFRESH_MS,
+    );
+    pollerRef.current = poller;
     return () => {
-      controller.abort();
-      window.clearInterval(interval);
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      poller.stop();
+      pollerRef.current = null;
     };
   }, [anchorThreadId, projectPath]);
 
   useEffect(() => {
     if (socketConnected !== true || !projectPath) return;
-    const controller = new AbortController();
-    void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
-    return () => controller.abort();
-  }, [anchorThreadId, projectPath, socketConnected]);
+    pollerRef.current?.refresh();
+  }, [projectPath, socketConnected]);
 }
