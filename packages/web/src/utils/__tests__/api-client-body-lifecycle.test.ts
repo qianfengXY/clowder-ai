@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-function stalledJson() {
+function stalledJson(init?: ResponseInit) {
   let body!: ReadableStreamDefaultController<Uint8Array>;
   const cancel = vi.fn();
   const response = new Response(
@@ -11,7 +11,7 @@ function stalledJson() {
       },
       cancel,
     }),
-    { headers: { 'content-type': 'application/json' } },
+    { headers: { 'content-type': 'application/json' }, ...init },
   );
   return {
     response,
@@ -32,6 +32,60 @@ describe('finite API response lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    'text/html',
+    'text/plain',
+    null,
+  ])('releases a stalled non-success body with content type %s before it can occupy an HTTP/1.1 slot forever', async (contentType) => {
+    const stalled = stalledJson({
+      status: 502,
+      headers: contentType ? { 'content-type': contentType } : {},
+    });
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        signal = init?.signal;
+        return stalled.response;
+      }),
+    );
+    const { boundedFetch } = await import('../bounded-fetch');
+    let outcome = 'pending';
+    const request = boundedFetch('/api/threads', {}, 500).then(
+      () => {
+        outcome = 'resolved';
+      },
+      (error) => {
+        outcome = error.name;
+      },
+    );
+    await vi.advanceTimersByTimeAsync(501);
+    await request;
+    expect(outcome).toBe('TimeoutError');
+    expect(signal?.aborted).toBe(true);
+    expect(stalled.cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('preserves the status and readable body of a completed HTML error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('<h1>Bad Gateway</h1>', {
+            status: 502,
+            headers: { 'content-type': 'text/html', 'x-proxy-error': 'gateway' },
+          }),
+      ),
+    );
+    const { boundedFetch } = await import('../bounded-fetch');
+    const response = await boundedFetch('/api/threads', {}, 500);
+    expect(response.status).toBe(502);
+    expect(response.headers.get('x-proxy-error')).toBe('gateway');
+    expect(await response.text()).toBe('<h1>Bad Gateway</h1>');
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('bounds stalled JSON bodies even if the transport ignores abort, without replaying a mutation', async () => {

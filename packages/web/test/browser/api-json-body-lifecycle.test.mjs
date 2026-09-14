@@ -22,6 +22,8 @@ test('JSON body deadlines release browser connections and preserve shared reader
   modules.set('/stores/toastStore', 'export const useToastStore = { getState: () => ({ addToast() {} }) };');
   let stalledRequests = 0;
   let closedStalled = 0;
+  let stalledErrors = 0;
+  let closedErrors = 0;
   let sharedRequests = 0;
   let finishShared;
   const server = createServer((req, res) => {
@@ -38,6 +40,13 @@ test('JSON body deadlines release browser connections and preserve shared reader
       res.write('{"ok":');
       res.on('close', () => {
         closedStalled++;
+      });
+    } else if (pathname === '/api/proxy-error') {
+      stalledErrors++;
+      res.writeHead(502, { 'content-type': 'text/html' });
+      res.write('<h1>Bad Gateway');
+      res.on('close', () => {
+        closedErrors++;
       });
     } else if (pathname === '/api/shared') {
       sharedRequests++;
@@ -75,6 +84,22 @@ test('JSON body deadlines release browser connections and preserve shared reader
     assert.equal(stalledRequests, 1, 'a timed-out message must not be replayed');
     await page.waitForFunction(async () => (await globalThis.api.apiFetch('/api/healthy')).ok);
     assert.equal(closedStalled, 1, 'server observes the stalled browser connection closing');
+
+    const proxyErrors = await page.evaluate(async () => {
+      const { boundedFetch } = await import('/utils/bounded-fetch');
+      return await Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          boundedFetch(`/api/proxy-error?i=${i}`, {}, 150).then(
+            () => 'unexpected success',
+            (error) => error.name,
+          ),
+        ),
+      );
+    });
+    assert.deepEqual(proxyErrors, Array(6).fill('TimeoutError'));
+    assert.equal(stalledErrors, 6, 'fill all six HTTP/1.1 connections with incomplete gateway errors');
+    await page.waitForFunction(async () => (await globalThis.api.apiFetch('/api/healthy')).ok);
+    assert.equal(closedErrors, 6, 'gateway error bodies release every browser connection');
 
     await page.evaluate(() => {
       const controller = new AbortController();

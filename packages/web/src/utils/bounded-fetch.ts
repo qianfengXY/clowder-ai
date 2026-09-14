@@ -9,10 +9,10 @@ function timeoutError(): Error {
 }
 
 /**
- * Bound fetch AND finite JSON body delivery, including transports that ignore
+ * Bound fetch AND JSON/error body delivery, including transports that ignore
  * AbortSignal. Buffering JSON before returning also keeps exact-GET coordination
- * alive until the complete representation is available. Streaming and download
- * media types retain their existing headers-only boundary.
+ * alive until the complete representation is available. Successful streaming
+ * and download responses retain their existing headers-only boundary.
  */
 export async function boundedFetch(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const callerSignal = init.signal;
@@ -59,9 +59,12 @@ export async function boundedFetch(input: string, init: RequestInit, timeoutMs: 
         }
         if (!response.body) return response;
         const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-        if (!mediaType || !/^application\/(?:json|[\w.+-]+\+json)$/.test(mediaType)) {
+        if (response.ok && (!mediaType || !/^application\/(?:json|[\w.+-]+\+json)$/.test(mediaType))) {
           return response;
         }
+        // Gateways may send an HTML/plain-text error and then leave its body
+        // open. Callers often inspect only the status: returning at headers
+        // would abandon the timeout while that body occupies an HTTP/1.1 slot.
         // Keep the native Response metadata (URL, redirect, status, headers)
         // and a fresh unread body; do not reconstruct a synthetic response.
         buffered = response.clone();
