@@ -29,7 +29,10 @@ mockSocket.io = { engine: { transport: { name: 'websocket' }, on: vi.fn() } };
 mockSocket.disconnect = vi.fn();
 mockSocket.emit = vi.fn(() => true) as unknown as typeof mockSocket.emit;
 
-vi.mock('socket.io-client', () => ({ io: () => mockSocket }));
+vi.mock('socket.io-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('socket.io-client')>()),
+  io: () => mockSocket,
+}));
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/api-client', () => ({

@@ -31,7 +31,8 @@ mockSocket.connected = true;
 mockSocket.emit = vi.fn(() => true) as unknown as typeof mockSocket.emit;
 mockSocket.disconnect = vi.fn();
 
-vi.mock('socket.io-client', () => ({
+vi.mock('socket.io-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('socket.io-client')>()),
   io: () => mockSocket,
 }));
 

@@ -3,6 +3,7 @@
 import type { ProviderSemanticEvent } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 import {
   bootstrapDebugFromStorage,
   ensureWindowDebugApi,
@@ -431,7 +432,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       // recurring long-poll requests for the lifetime of the page. Corporate
       // networks and HTTP tunnels may still reject WebSocket upgrades, so keep
       // polling as the ordered fallback and try every configured transport.
-      transports: ['websocket', 'polling'],
+      transports: CHAT_SOCKET_TRANSPORTS,
       tryAllTransports: true,
       auth: { userId: userIdRef.current },
     });

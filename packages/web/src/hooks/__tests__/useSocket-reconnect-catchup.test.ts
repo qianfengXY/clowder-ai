@@ -1,3 +1,4 @@
+import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 /**
  * Regression test for reconnect catch-up (#276 intake).
  *
@@ -33,7 +34,8 @@ const mockIo = vi.fn((url: string, options: unknown) => {
   return mockSocket;
 });
 
-vi.mock('socket.io-client', () => ({
+vi.mock('socket.io-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('socket.io-client')>()),
   io: (url: string, options: unknown) => mockIo(url, options),
 }));
 
@@ -264,7 +266,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     expect(mockIo).toHaveBeenCalledWith(
       'http://localhost:3100',
       expect.objectContaining({
-        transports: ['websocket', 'polling'],
+        transports: CHAT_SOCKET_TRANSPORTS,
         tryAllTransports: true,
       }),
     );
