@@ -49,11 +49,12 @@ export async function resolveManagedWorkInvocationBinding(input: {
   const workflowSop = await input.workflowSopStore.get(thread.backlogItemId);
   if (workflowSop?.stage === 'kickoff') return undefined;
 
-  // A peer's authenticated handoff is not a request to replace the parent
-  // executor. Keep its invocation unattributed to that attempt. Incumbent
-  // continuations still bind normally; Desktop ownership and unbound races
-  // retain the existing atomic, fail-closed path.
-  if (await isPeerOfBoundExecutor(trigger, input, thread.backlogItemId, input.workflowSopStore)) return undefined;
+  // Conversation participation is not implementation custody. Both an
+  // authenticated peer handoff and the owner's direct call can address a cat
+  // other than the incumbent. Neither acquires the parent's work identity.
+  // Incumbent continuations, Desktop ownership, and unbound races retain the
+  // existing atomic, fail-closed binding path.
+  if (await isNonExecutorParticipant(trigger, input, thread.backlogItemId, input.workflowSopStore)) return undefined;
 
   const bundle = await input.workflowSopStore.bindManagedWorkAttempt(
     input.ownerUserId,
@@ -89,20 +90,21 @@ function assertAdmissionIdentity(bundle: WorkflowSopAdmissionBundle, ownerUserId
   }
 }
 
-type PeerTriggerScope = {
+type InvocationTriggerScope = {
+  triggerMessageId?: string;
   a2aTriggerMessageId?: string;
   ownerUserId: string;
   threadId: string;
   executorCatId: CatId;
 };
 
-async function isPeerOfBoundExecutor(
+async function isNonExecutorParticipant(
   trigger: StoredMessage | null,
-  input: PeerTriggerScope,
+  input: InvocationTriggerScope,
   backlogItemId: string,
   store: IWorkflowSopStore,
 ): Promise<boolean> {
-  if (!isPersistedPeerTrigger(trigger, input)) return false;
+  if (!isPersistedPeerTrigger(trigger, input) && !isPersistedOwnerTrigger(trigger, input)) return false;
   const bundle = await store.getManagedWorkAdmission(input.ownerUserId, backlogItemId);
   if (!bundle) return false;
   assertAdmissionIdentity(bundle, input.ownerUserId, backlogItemId);
@@ -111,7 +113,27 @@ async function isPeerOfBoundExecutor(
   return Boolean(incumbentCatId && incumbentCatId !== input.executorCatId);
 }
 
-function isPersistedPeerTrigger(message: StoredMessage | null, input: PeerTriggerScope): boolean {
+function isPersistedOwnerTrigger(message: StoredMessage | null, input: InvocationTriggerScope): boolean {
+  // Direct ingress persists the owner and resolved targets on this exact user
+  // message. A causal id alone, prompt text, or a system/connector carrier is
+  // not proof of an owner addressing a participant.
+  return Boolean(
+    !input.a2aTriggerMessageId &&
+      input.triggerMessageId &&
+      message?.id === input.triggerMessageId &&
+      message.userId === input.ownerUserId &&
+      message.threadId === input.threadId &&
+      message.catId === null &&
+      message.origin === undefined &&
+      message.source === undefined &&
+      !message.sourceParseFailure &&
+      message.extra?.systemKind === undefined &&
+      message.extra?.scheduler === undefined &&
+      message.mentions.includes(input.executorCatId),
+  );
+}
+
+function isPersistedPeerTrigger(message: StoredMessage | null, input: InvocationTriggerScope): boolean {
   return Boolean(
     input.a2aTriggerMessageId &&
       message?.id === input.a2aTriggerMessageId &&
