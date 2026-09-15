@@ -17,6 +17,8 @@ import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 
+// These tests mock the provider process. Use the running Node executable only
+// for command discovery so they also run on CI hosts without an installed Codex.
 const { CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 
 async function collect(iterable) {
@@ -112,7 +114,12 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
   const l0CompilerFn = fixedL0('DEV-L0-BODY');
-  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    spawnFn,
+    catId: createCatId('codex'),
+    l0CompilerFn,
+  });
 
   const promise = collect(service.invoke('hi'));
   emitOk(proc);
@@ -134,7 +141,12 @@ test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
   const l0CompilerFn = fixedL0('L0');
-  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    spawnFn,
+    catId: createCatId('codex'),
+    l0CompilerFn,
+  });
 
   const SECRET = 'SECRET-披着专业外衣的不太光彩偏好-R8-PROMPT-BODY';
   const promise = collect(service.invoke(SECRET));
@@ -153,7 +165,12 @@ test('Task 4: per-call argv is cat-scoped (no shared config.toml race)', async (
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const l0CompilerFn = fixedL0(`L0-FOR-${catId}`);
-    const service = new CodexAgentService({ spawnFn, catId: createCatId(catId), l0CompilerFn });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      spawnFn,
+      catId: createCatId(catId),
+      l0CompilerFn,
+    });
     return { proc, spawnFn, l0CompilerFn, service };
   };
   const a = mk('codex');
@@ -178,7 +195,12 @@ test('Task 4 fail-closed: L0 compile failure → error + done, codex not spawned
   const failing = async () => {
     throw new Error('L0 compile exited code=2 for codex: boom');
   };
-  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn: failing });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    spawnFn,
+    catId: createCatId('codex'),
+    l0CompilerFn: failing,
+  });
 
   const msgs = await collect(service.invoke('hi'));
 
@@ -204,7 +226,12 @@ test('Task 4 reserved key: cliConfigArgs CANNOT override system developer_instru
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
   const l0CompilerFn = fixedL0('SYSTEM-L0-CONTENT');
-  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    spawnFn,
+    catId: createCatId('codex'),
+    l0CompilerFn,
+  });
 
   const promise = collect(
     service.invoke('hi', {
@@ -232,7 +259,12 @@ test('Task 4 reserved key: short-form `-c` cannot override system developer_inst
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
   const l0CompilerFn = fixedL0('SYSTEM-L0-CONTENT');
-  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    spawnFn,
+    catId: createCatId('codex'),
+    l0CompilerFn,
+  });
 
   const promise = collect(
     service.invoke('hi', {
@@ -261,7 +293,12 @@ test('Task 4 reserved key: attached config spellings cannot override system deve
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const l0CompilerFn = fixedL0('SYSTEM-L0-CONTENT');
-    const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      spawnFn,
+      catId: createCatId('codex'),
+      l0CompilerFn,
+    });
 
     const promise = collect(service.invoke('hi', { cliConfigArgs: [rawOverride] }));
     emitOk(proc);
