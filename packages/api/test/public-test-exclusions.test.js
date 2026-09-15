@@ -13,7 +13,6 @@ const RECONCILED_EXCLUSIONS = [
   'redis-',
   'session-strategy-phase3',
   'workflow-sop-store',
-  'codex-agent-service',
   'kimi-agent-service',
   'test/memory/',
   'thread-wiring\\.test',
@@ -78,6 +77,7 @@ test('registry retains only audited exclusions and drops re-admitted cases', asy
     assert.ok(entry.audit.matchedFileCount > 0);
   }
   for (const id of [
+    'codex-agent-service',
     'task-progress-store',
     'signal-article-store',
     'cursor-store-atomicity',
@@ -243,6 +243,20 @@ test('resolver re-admits capabilities-route once the product regression is fixed
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.ok(!resolved.excludedFiles.includes('test/capabilities-route.test.js'));
   assert.ok(resolved.selectedFiles.includes('test/capabilities-route.test.js'));
+});
+
+test('resolver re-admits audited Codex provider tests while preserving the Redis resource boundary', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  for (const file of ['test/codex-agent-service.test.js', 'test/codex-agent-service-l0.test.js']) {
+    assert.ok(resolved.selectedFiles.includes(file), `${file} must execute in the public suite`);
+    assert.ok(!resolved.excludedFiles.includes(file));
+  }
+  assert.ok(resolved.excludedFiles.includes('test/workflow-sop-store.test.js'));
+  assert.equal(
+    resolved.registry.entries.find((entry) => entry.id === 'workflow-sop-store').audit.status,
+    'resource_contract',
+  );
 });
 
 test('default expiry date helper uses the configured policy timezone rather than UTC', async () => {
