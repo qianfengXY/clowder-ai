@@ -1,4 +1,4 @@
-import type { TranscriptEvent } from '../../../domains/cats/services/session/TranscriptReader.js';
+import type { TranscriptEvent } from '../../../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { SkillLoadedEvent, ToolEvent } from '../../../domains/cats/services/tool-usage/event-log-types.js';
 import { getCapabilityWakeupRules } from './capability-wakeup-rules.js';
 import type {

@@ -7,7 +7,7 @@ import Fastify from 'fastify';
 
 const { threadsRoutes } = await import('../dist/routes/threads.js');
 const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
 
 describe('GET /api/threads/:threadId/artifacts (F232)', () => {
   let app;

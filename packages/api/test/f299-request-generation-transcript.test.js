@@ -15,7 +15,7 @@ const SESSION = {
 };
 
 before(async () => {
-  ({ TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js'));
+  ({ TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js'));
 });
 
 afterEach(async () => {

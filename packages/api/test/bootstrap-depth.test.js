@@ -23,7 +23,7 @@ describe('SessionBootstrap bootstrapDepth branching', () => {
 
   async function createFixtures(bootstrapDepth) {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
     const { buildSessionBootstrap } = await import('../dist/domains/cats/services/session/SessionBootstrap.js');
 
     const store = new SessionChainStore();

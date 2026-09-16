@@ -24,10 +24,10 @@ describe('F98: Session Query Tools Upgrade', () => {
   });
 
   async function loadModules() {
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
     const { formatEventsChat, formatEventsHandoff } = await import(
-      '../dist/domains/cats/services/session/TranscriptFormatter.js'
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
     );
     return { TranscriptWriter, TranscriptReader, formatEventsChat, formatEventsHandoff };
   }

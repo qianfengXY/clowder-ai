@@ -8,7 +8,7 @@ const { assembleIncrementalContext } = await import('../dist/domains/cats/servic
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
 
 const tempDirs = [];
 

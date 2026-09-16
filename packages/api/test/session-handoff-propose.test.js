@@ -9,7 +9,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
   let handoffStore;
 
   beforeEach(async () => {
-    const mod = await import('../dist/domains/cats/services/session/sessionHandoffPropose.js');
+    const mod = await import('../dist/domains/cats/services/session/handoff/sessionHandoffPropose.js');
     proposeSessionHandoff = mod.proposeSessionHandoff;
     buildHandoffProposalCardBlock = mod.buildHandoffProposalCardBlock;
     const chainMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');

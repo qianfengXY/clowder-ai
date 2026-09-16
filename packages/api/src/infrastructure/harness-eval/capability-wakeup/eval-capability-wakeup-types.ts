@@ -1,5 +1,5 @@
 import type { AuditEvent } from '../../../domains/cats/services/orchestration/EventAuditLog.js';
-import type { TranscriptEvent } from '../../../domains/cats/services/session/TranscriptReader.js';
+import type { TranscriptEvent } from '../../../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { SkillLoadedEvent, ToolEvent } from '../../../domains/cats/services/tool-usage/event-log-types.js';
 
 export type CapabilityName = 'workspace-navigator' | 'rich-messaging' | 'browser-preview' | string;

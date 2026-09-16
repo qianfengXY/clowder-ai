@@ -1,4 +1,4 @@
-import type { TranscriptReader } from '../../cats/services/session/TranscriptReader.js';
+import type { TranscriptReader } from '../../cats/services/session/transcript/TranscriptReader.js';
 import { resolveSignalPaths } from '../config/sources-loader.js';
 import { readArticleDocument } from './article-document.js';
 import { readInboxRecords } from './inbox-records.js';

@@ -25,8 +25,8 @@ import {
   type PresentationCounts,
 } from './context-surface-projection.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
-import type { TranscriptReader } from './TranscriptReader.js';
-import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
+import type { TranscriptReader } from './transcript/TranscriptReader.js';
+import type { ExtractiveDigestV1 } from './transcript/TranscriptWriter.js';
 
 /** Sanitize LLM-generated handoff body before injecting into bootstrap.
  * Prevents prompt injection and ensures handoff content stays data-only. */

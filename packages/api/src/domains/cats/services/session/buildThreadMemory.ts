@@ -16,7 +16,7 @@ import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTimeRange } from '../format-time.js';
 import type { ThreadMemorySourceRef, ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
 import type { DecisionSignals } from './extractDecisionSignals.js';
-import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
+import type { ExtractiveDigestV1 } from './transcript/TranscriptWriter.js';
 
 const MAX_FILES_PER_CATEGORY = 10;
 

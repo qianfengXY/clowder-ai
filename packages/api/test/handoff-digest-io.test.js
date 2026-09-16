@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { TranscriptReader } from '../dist/domains/cats/services/session/TranscriptReader.js';
-import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptReader } from '../dist/domains/cats/services/session/transcript/TranscriptReader.js';
+import { TranscriptWriter } from '../dist/domains/cats/services/session/transcript/TranscriptWriter.js';
 
 describe('handoff digest IO', () => {
   let tempDir;

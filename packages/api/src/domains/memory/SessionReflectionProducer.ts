@@ -1,6 +1,6 @@
 import type { F255PendingCueReceipt, F255PendingCueSink } from '../auto-dream/private-seed-contract.js';
-import { formatEventsChat } from '../cats/services/session/TranscriptFormatter.js';
-import type { TranscriptEvent, TranscriptReader } from '../cats/services/session/TranscriptReader.js';
+import { formatEventsChat } from '../cats/services/session/transcript/TranscriptFormatter.js';
+import type { TranscriptEvent, TranscriptReader } from '../cats/services/session/transcript/TranscriptReader.js';
 import {
   buildReflectionSourceKey,
   isEarlierReflectionSource,

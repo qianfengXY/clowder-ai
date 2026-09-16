@@ -1,6 +1,9 @@
 import type { SessionRecord } from '@cat-cafe/shared';
 import { projectInvocationTerminalEvidence } from '../../../domains/cats/services/session/InvocationTrajectoryProjector.js';
-import type { TranscriptEvent, TranscriptReader } from '../../../domains/cats/services/session/TranscriptReader.js';
+import type {
+  TranscriptEvent,
+  TranscriptReader,
+} from '../../../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { ISessionChainStore } from '../../../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import {

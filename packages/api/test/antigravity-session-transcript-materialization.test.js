@@ -57,8 +57,8 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
       '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
     );
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
 
     const threadId = 'thread-f211-transcript';

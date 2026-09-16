@@ -117,8 +117,8 @@ describe('F299 active and sealed invocation routes', () => {
   async function setup({ thread = { id: 'thread-f299', createdBy: 'user-f299' }, threads, indexedUsers = [] } = {}) {
     dataDir = await mkdtemp(join(tmpdir(), 'f299-trajectory-'));
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
     const { sessionTranscriptRoutes } = await import('../dist/routes/session-transcript.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { InMemoryTurnExecutionStore } = await import(
@@ -1097,7 +1097,7 @@ describe('F299 active and sealed invocation routes', () => {
 
   it('keeps active and sealed identity identical when timestamp and payload collide across invocations', async () => {
     const { sessionChainStore, transcriptReader, transcriptWriter: beforeRestart } = await setup();
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
     const record = await sessionChainStore.create({
       threadId: 'thread-f299',
       catId: 'codex-sol',

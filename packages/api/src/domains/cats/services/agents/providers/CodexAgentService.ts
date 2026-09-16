@@ -72,7 +72,7 @@ import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { CodexActiveWriterRecoveryError } from '../../runtime-session/CodexSessionReplacementProvenance.js';
-import { CliRawArchive } from '../../session/CliRawArchive.js';
+import { CliRawArchive } from '../../session/transcript/CliRawArchive.js';
 import type {
   AgentCarrierSession,
   AgentCarrierSessionOptions,

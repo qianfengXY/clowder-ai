@@ -8,7 +8,7 @@ describe('approveSessionHandoff (commit-point model)', () => {
   let handoffStore;
 
   beforeEach(async () => {
-    const approveMod = await import('../dist/domains/cats/services/session/sessionHandoffApprove.js');
+    const approveMod = await import('../dist/domains/cats/services/session/handoff/sessionHandoffApprove.js');
     approveSessionHandoff = approveMod.approveSessionHandoff;
     const chainMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     chainStore = new chainMod.SessionChainStore();
