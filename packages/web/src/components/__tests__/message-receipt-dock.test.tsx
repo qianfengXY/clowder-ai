@@ -260,7 +260,8 @@ describe('MessageReceiptDock', () => {
       root.render(<MessageReceiptDock receipt={terminalReceipt} messages={[]} getCatLabel={() => '砚砚'} />);
     });
 
-    expect(container.textContent).toContain('系统回执');
+    expect(container.textContent).toContain('跨会话来信 · 本会话处理回执');
+    expect(container.textContent).toContain('接收方在本会话对这条来信的处理情况');
     expect(container.textContent).toContain('砚砚 · 已消费 · terminal 静默结束');
     expect(container.textContent).toContain('协调链已结束，没有新任务，因此无需回复');
     expect(container.querySelector('[data-terminal-consumption="terminal_silent"]')).not.toBeNull();
