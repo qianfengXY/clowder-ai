@@ -12,7 +12,7 @@ vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       uiThinkingExpandedByDefault: false,
-      threads: [],
+      threads: [{ id: 'thread-source', title: '[F006] Workspace capability settings' }],
       currentThreadId: 'thread-target',
       isLoadingThreads: false,
       messages: chatStoreState.messages,
@@ -77,6 +77,35 @@ describe('ChatMessage cross-thread receipt integration', () => {
     resetCoCreatorConfigCacheForTest();
   });
 
+  it('keeps an unknown source identifiable without claiming it is an unnamed conversation', () => {
+    const message: ChatMessageType = {
+      id: 'unknown-source',
+      type: 'assistant',
+      catId: 'codex',
+      content: '协作消息',
+      timestamp: 100,
+      extra: { crossPost: { sourceThreadId: 'thread-unloaded' } },
+    };
+    act(() => root.render(<ChatMessage message={message} threadId="thread-target" getCatById={codexCat} />));
+    const source = container.querySelector('a[href="/thread/thread-unloaded"]');
+    expect(source?.textContent).toContain('跨会话来信 · 来自 会话标题未加载');
+    expect(source?.getAttribute('aria-label')).toContain('thread-unloaded');
+    expect(source?.textContent).not.toContain('未命名对话');
+  });
+
+  it('keeps a local reply free of cross-thread labels and navigation', () => {
+    const message: ChatMessageType = {
+      id: 'local-reply',
+      type: 'assistant',
+      catId: 'codex',
+      content: '本地回复',
+      timestamp: 100,
+    };
+    act(() => root.render(<ChatMessage message={message} threadId="thread-target" getCatById={codexCat} />));
+    expect(container.textContent).not.toContain('跨会话来信');
+    expect(container.querySelector('a[href^="/thread/"]')).toBeNull();
+  });
+
   it('keeps a terminal-silent receipt on the original callback bubble without fabricating a reply', () => {
     const message: ChatMessageType = {
       id: 'cross-thread-terminal-release',
@@ -133,6 +162,12 @@ describe('ChatMessage cross-thread receipt integration', () => {
     expect(container.querySelectorAll('[data-message-id="cross-thread-terminal-release"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-message-id]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="message-receipt-dock"]')).not.toBeNull();
+    const sourceLink = container.querySelector('a[href="/thread/thread-source"]');
+    expect(sourceLink?.textContent).toContain('跨会话来信 · 来自');
+    expect(sourceLink?.getAttribute('aria-label')).toContain('[F006] Workspace capability settings');
+    const receipt = container.querySelector('[data-testid="message-receipt-dock"]');
+    expect(receipt?.textContent).toContain('本会话处理回执');
+    expect(receipt?.textContent).toContain('接收方在本会话对这条来信的处理情况');
     expect(container.querySelector('[data-terminal-consumption="terminal_silent"]')).not.toBeNull();
     expect(container.textContent).toContain('砚砚 · 已消费 · terminal 静默结束');
     expect(container.textContent).toContain('协调链已结束，没有新任务，因此无需回复');
