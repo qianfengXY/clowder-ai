@@ -15,7 +15,7 @@ import {
 import { CURRENT_RELATIONSHIP_PROFILE_URI, renderUserCapsuleSection } from '@cat-cafe/shared/profile-contract';
 import type { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { encodeProfileSourceRef } from '../../session/request-generation-source-policy.js';
-import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
+import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/transcript/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { PreparedProviderRequestV1, ProviderRequestGenerationCommitV1 } from '../../types.js';
 

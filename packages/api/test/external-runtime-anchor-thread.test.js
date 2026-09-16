@@ -15,8 +15,8 @@ afterEach(async () => {
 async function buildApp() {
   const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
   const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
-  const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
-  const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+  const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
+  const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
   const { sessionChainRoutes } = await import('../dist/routes/session-chain.js');
   const { sessionTranscriptRoutes } = await import('../dist/routes/session-transcript.js');
 

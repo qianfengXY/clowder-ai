@@ -39,7 +39,7 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
-import { CliRawArchive } from '../../session/CliRawArchive.js';
+import { CliRawArchive } from '../../session/transcript/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
   AgentMessage,

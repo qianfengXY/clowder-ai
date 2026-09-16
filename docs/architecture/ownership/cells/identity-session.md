@@ -28,7 +28,7 @@ code_anchors:
   - packages/api/src/domains/cats/services/session/CanonicalInvocationTrajectoryResolver.ts
   - packages/api/src/domains/cats/services/session/RequestGenerationProjector.ts
   - packages/api/src/domains/cats/services/session/request-generation-source-policy.ts
-  - packages/api/src/domains/cats/services/session/TranscriptWriter.ts
+  - packages/api/src/domains/cats/services/session/transcript/TranscriptWriter.ts
   - packages/api/src/routes/session-chain.ts
   - packages/api/src/routes/session-transcript.ts
   - packages/api/src/routes/invocation-trajectory-routes.ts

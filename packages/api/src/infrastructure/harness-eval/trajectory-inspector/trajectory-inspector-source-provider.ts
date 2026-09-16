@@ -1,5 +1,8 @@
 import type { SessionRecord } from '@cat-cafe/shared';
-import type { TranscriptEvent, TranscriptReader } from '../../../domains/cats/services/session/TranscriptReader.js';
+import type {
+  TranscriptEvent,
+  TranscriptReader,
+} from '../../../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { ISessionChainStore } from '../../../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import { reduceTrajectoryInspectorEpisodes } from './trajectory-inspector-reducer.js';

@@ -1,4 +1,4 @@
-import type { TranscriptEvent } from '../../../domains/cats/services/session/TranscriptReader.js';
+import type { TranscriptEvent } from '../../../domains/cats/services/session/transcript/TranscriptReader.js';
 
 export const TRAJECTORY_SCAN_CONCURRENCY = 2;
 

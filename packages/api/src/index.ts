@@ -166,8 +166,8 @@ import {
 } from './domains/cats/services/session/PresentationLedger.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
-import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
-import { TranscriptWriter } from './domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptReader } from './domains/cats/services/session/transcript/TranscriptReader.js';
+import { TranscriptWriter } from './domains/cats/services/session/transcript/TranscriptWriter.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCommunityIssueDraftStore } from './domains/cats/services/stores/factories/CommunityIssueDraftStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';

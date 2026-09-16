@@ -12,8 +12,8 @@
  */
 
 import type { CatHandoffNote, CatId, SessionHandoffProposal } from '@cat-cafe/shared';
-import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
-import type { ISessionHandoffProposalStore } from '../stores/ports/SessionHandoffProposalStore.js';
+import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
+import type { ISessionHandoffProposalStore } from '../../stores/ports/SessionHandoffProposalStore.js';
 
 export interface SessionHandoffApproveDeps {
   handoffProposalStore: ISessionHandoffProposalStore;
