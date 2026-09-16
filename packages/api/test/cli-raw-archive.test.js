@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
-const { CliRawArchive } = await import('../dist/domains/cats/services/session/CliRawArchive.js');
+const { CliRawArchive } = await import('../dist/domains/cats/services/session/transcript/CliRawArchive.js');
 
 const TEST_ARCHIVE_DIR = './test-cli-raw-archive';
 

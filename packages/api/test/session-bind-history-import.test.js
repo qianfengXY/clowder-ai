@@ -20,8 +20,8 @@ describe('Session bind history import', () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
     const { sessionChainRoutes } = await import('../dist/routes/session-chain.js');
     const { messagesRoutes } = await import('../dist/routes/messages.js');
 
@@ -156,7 +156,7 @@ describe('Session bind history import', () => {
   test('#1329 backfill inspects only the requesting owner session chain', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { backfillBoundSessionHistory } = await import(
-      '../dist/domains/cats/services/session/BoundSessionHistoryImporter.js'
+      '../dist/domains/cats/services/session/transcript/BoundSessionHistoryImporter.js'
     );
     const sessionChainStore = new SessionChainStore();
     const ownerA = sessionChainStore.create({

@@ -3,8 +3,8 @@ import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../stores/ports/TurnExecutionStore.js';
 import { projectRequestGenerations } from './RequestGenerationProjector.js';
-import type { TranscriptEvent } from './TranscriptReader.js';
 import { filterThreadRecords, resolveThreadAccess, threadAccessDeniedBody } from './thread-access-policy.js';
+import type { TranscriptEvent } from './transcript/TranscriptReader.js';
 
 interface InvocationSession {
   id: string;

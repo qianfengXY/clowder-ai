@@ -8,7 +8,7 @@ describe('recoverStaleHandoffProposal (crash-window backfill)', () => {
   let handoffStore;
 
   beforeEach(async () => {
-    const mod = await import('../dist/domains/cats/services/session/sessionHandoffApprove.js');
+    const mod = await import('../dist/domains/cats/services/session/handoff/sessionHandoffApprove.js');
     recover = mod.recoverStaleHandoffProposal;
     const chainMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     chainStore = new chainMod.SessionChainStore();

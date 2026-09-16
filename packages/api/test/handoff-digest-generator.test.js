@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { generateHandoffDigest } from '../dist/domains/cats/services/session/HandoffDigestGenerator.js';
+import { generateHandoffDigest } from '../dist/domains/cats/services/session/handoff/HandoffDigestGenerator.js';
 
 describe('HandoffDigestGenerator', () => {
   // Shared test data

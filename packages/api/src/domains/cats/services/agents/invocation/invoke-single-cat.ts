@@ -568,7 +568,7 @@ import { mintDeliveryReceipt } from '../../session/delivery-receipt.js';
 import type { PresentationLedger } from '../../session/PresentationLedger.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
-import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
+import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/transcript/TranscriptWriter.js';
 import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type {
@@ -1116,7 +1116,7 @@ export interface InvocationDeps {
   /** F24 Phase C: Transcript writer for event collection + flush on seal */
   readonly transcriptWriter?: TranscriptWriter;
   /** F24 Phase D: Transcript reader for reading sealed session data */
-  readonly transcriptReader?: import('../../session/TranscriptReader.js').TranscriptReader;
+  readonly transcriptReader?: import('../../session/transcript/TranscriptReader.js').TranscriptReader;
   /** F065: Task store for bootstrap task snapshot injection */
   readonly taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
   /** F073 P4: Workflow SOP store for SOP stage hint injection */

@@ -11,8 +11,6 @@
 import type { FastifyInstance } from 'fastify';
 import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
 import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
-import { mergeTranscriptEventSources } from '../domains/cats/services/session/TranscriptEventEnvelope.js';
-import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
 import {
   canReadThreadRecord,
   filterThreadRecords,
@@ -20,6 +18,8 @@ import {
   threadAccessDeniedBody,
   threadRecordAccessDeniedBody,
 } from '../domains/cats/services/session/thread-access-policy.js';
+import { mergeTranscriptEventSources } from '../domains/cats/services/session/transcript/TranscriptEventEnvelope.js';
+import { formatEventsChat } from '../domains/cats/services/session/transcript/TranscriptFormatter.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { registerInvocationTrajectoryRoutes } from './invocation-trajectory-routes.js';
 import {

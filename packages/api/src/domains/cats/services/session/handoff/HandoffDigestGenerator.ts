@@ -6,8 +6,8 @@
  * Hard timeout via AbortController. All failures degrade gracefully (return null).
  */
 
-import { buildProviderEndpoint } from '../../../../config/provider-endpoint.js';
-import type { HandoffInvocationSummary } from './TranscriptFormatter.js';
+import { buildProviderEndpoint } from '../../../../../config/provider-endpoint.js';
+import type { HandoffInvocationSummary } from '../transcript/TranscriptFormatter.js';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';

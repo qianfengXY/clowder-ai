@@ -19,8 +19,8 @@ import { join } from 'node:path';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
-} from '../agents/invocation/CollaborationContinuityCapsule.js';
-import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+} from '../../agents/invocation/CollaborationContinuityCapsule.js';
+import { stripLeakedToolCallPayload } from '../../agents/routing/route-helpers.js';
 import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 

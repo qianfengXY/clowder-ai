@@ -19,7 +19,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import {
   buildHandoffProposalCardBlock,
   proposeSessionHandoff,
-} from '../domains/cats/services/session/sessionHandoffPropose.js';
+} from '../domains/cats/services/session/handoff/sessionHandoffPropose.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ISessionHandoffProposalStore } from '../domains/cats/services/stores/ports/SessionHandoffProposalStore.js';

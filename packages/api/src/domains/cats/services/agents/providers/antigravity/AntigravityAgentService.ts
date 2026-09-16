@@ -22,7 +22,7 @@ import {
 import { normalizeModel } from '../../../../../../infrastructure/telemetry/model-normalizer.js';
 import type { RuntimeSessionMetadata } from '../../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../../runtime-session/RuntimeSessionStore.js';
-import type { TranscriptReader } from '../../../session/TranscriptReader.js';
+import type { TranscriptReader } from '../../../session/transcript/TranscriptReader.js';
 import type {
   AgentMessage,
   AgentService,

@@ -11,7 +11,7 @@ import {
   requestGenerationObservedEventSchema,
   requestGenerationTerminalEventSchema,
 } from '@cat-cafe/shared';
-import type { TranscriptEvent } from './TranscriptReader.js';
+import type { TranscriptEvent } from './transcript/TranscriptReader.js';
 
 export type RequestGenerationSourceStateResolver = (
   sourceRef: RequestGenerationSourceRef,

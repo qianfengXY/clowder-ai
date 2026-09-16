@@ -30,9 +30,11 @@ describe('handoff view pagination', () => {
   });
 
   async function loadModules() {
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
-    const { formatEventsHandoff } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
+    const { formatEventsHandoff } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     return { TranscriptWriter, TranscriptReader, formatEventsHandoff };
   }
 

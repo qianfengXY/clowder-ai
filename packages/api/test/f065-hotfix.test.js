@@ -166,7 +166,9 @@ describe('P1: Handoff digest sanitize', () => {
 
 describe('P2-2: Input token cap', () => {
   test('buildPromptContent truncates when input exceeds cap', async () => {
-    const { buildPromptContent } = await import('../dist/domains/cats/services/session/HandoffDigestGenerator.js');
+    const { buildPromptContent } = await import(
+      '../dist/domains/cats/services/session/handoff/HandoffDigestGenerator.js'
+    );
     // Create large inputs
     const largeSummaries = Array.from({ length: 50 }, (_, i) => ({
       invocationId: `inv-${i}`,
@@ -191,7 +193,7 @@ describe('P2-2: Input token cap', () => {
   });
 
   test('generator system prompt includes no-directives constraint', async () => {
-    const { SYSTEM_PROMPT } = await import('../dist/domains/cats/services/session/HandoffDigestGenerator.js');
+    const { SYSTEM_PROMPT } = await import('../dist/domains/cats/services/session/handoff/HandoffDigestGenerator.js');
     assert.ok(
       SYSTEM_PROMPT.toLowerCase().includes('do not include directives'),
       'System prompt should forbid directives',
