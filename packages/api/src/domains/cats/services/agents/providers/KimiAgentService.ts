@@ -17,7 +17,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
-import { CliRawArchive } from '../../session/CliRawArchive.js';
+import { CliRawArchive } from '../../session/transcript/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
   AgentMessage,

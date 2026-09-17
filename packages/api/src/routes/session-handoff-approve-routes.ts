@@ -20,12 +20,12 @@ import { requireAnchoredPublication } from '../domains/approval-hub/requireAncho
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import type { SessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import {
   approveSessionHandoff,
   recoverStaleHandoffProposal,
   type SessionHandoffApproveDeps,
-} from '../domains/cats/services/session/sessionHandoffApprove.js';
+} from '../domains/cats/services/session/handoff/sessionHandoffApprove.js';
+import type { SessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ISessionHandoffProposalStore } from '../domains/cats/services/stores/ports/SessionHandoffProposalStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';

@@ -12,6 +12,8 @@ import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
+// These tests mock the provider process. Use the running Node executable only
+// for command discovery so they also run on CI hosts without an installed Codex.
 const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
   '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
 );
@@ -243,7 +245,12 @@ async function collectCodexSpawnArgs(workingDirectory) {
   const runtimeRoot = makeTempDir('.tmp-codex-spawn-runtime-root-');
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn,
+    model: 'gpt-5.3-codex',
+  });
 
   try {
     writeMcpDistStubs(runtimeRoot, CAT_CAFE_SPLIT_ENTRYPOINTS);
@@ -358,7 +365,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('yields session_init, text, and done on basic success', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('Hello'));
 
@@ -388,7 +395,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('uses exec resume when sessionId is provided', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const promise = collect(service.invoke('Continue', { sessionId: 'existing-thread-456' }));
     emitCodexEvents(proc, [
@@ -441,7 +453,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
@@ -624,7 +641,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
@@ -703,7 +725,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const projectDir = makeTempDir('.tmp-codex-managed-shadow-project-');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -779,7 +806,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -884,7 +916,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -980,7 +1017,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -1095,7 +1137,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -1220,7 +1267,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -1318,7 +1370,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     // Set a real env var for the placeholder to resolve against
     const envKey = 'TEST_MCP_BEARER_PLACEHOLDER_TOKEN';
@@ -1411,7 +1468,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const projectDir = makeTempDir('.tmp-codex-disabled-streamable-project-');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(runtimeRoot, [
@@ -1526,7 +1588,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+      const service = new CodexAgentService({
+        cliCommand: process.execPath,
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        model: 'gpt-5.3-codex',
+      });
 
       await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
         await withRuntimeRootEnv(runtimeRoot, async () => {
@@ -1619,7 +1686,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+      const service = new CodexAgentService({
+        cliCommand: process.execPath,
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        model: 'gpt-5.3-codex',
+      });
 
       await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
         await withRuntimeRootEnv(runtimeRoot, async () => {
@@ -1702,7 +1774,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const projectDir = makeTempDir('.tmp-codex-external-env-');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(projectDir);
@@ -1756,7 +1833,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const toolPath = join(toolDir, 'server');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(projectDir);
@@ -1806,7 +1888,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const dataPath = join(toolDir, 'data.json');
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     try {
       writeMcpDistStubs(projectDir);
@@ -1865,7 +1952,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('does not include resume when no sessionId', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const promise = collect(service.invoke('hello'));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -1889,6 +1981,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const records = [];
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       carrierMode: 'exec_json',
@@ -1909,6 +2002,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       model: 'gpt-5.3-codex',
@@ -1940,6 +2034,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       model: 'gpt-5.3-codex',
@@ -1971,6 +2066,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-unknown-codex',
@@ -1993,6 +2089,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-sol',
@@ -2014,6 +2111,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-codex',
@@ -2037,6 +2135,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
       const service = new CodexAgentService({
+        cliCommand: process.execPath,
         l0CompilerFn: fakeL0Compiler,
         spawnFn,
         catId: 'runtime-sol',
@@ -2062,7 +2161,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('F291 inheritance omits service_tier and still blocks raw cliConfigArgs bypass', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+    });
 
     const promise = collect(service.invoke('hello', { cliConfigArgs: ['-c service_tier="fast"'] }));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-speed-inherit' }]);
@@ -2102,7 +2206,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     for (const { name, options, expected } of cases) {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+      const service = new CodexAgentService({
+        cliCommand: process.execPath,
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        model: 'gpt-5.6-sol',
+      });
 
       const promise = collect(service.invoke('hello', options));
       emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-speed-attached-${name}` }]);
@@ -2117,7 +2226,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('F291 suppresses a typed Fast request in API-key mode', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+    });
 
     const promise = collect(
       service.invoke('hello', {
@@ -2150,6 +2264,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
       const service = new CodexAgentService({
+        cliCommand: process.execPath,
         l0CompilerFn: fakeL0Compiler,
         spawnFn,
         catId: 'runtime-sol',
@@ -2203,6 +2318,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         const proc = createMockProcess();
         const spawnFn = createMockSpawnFn(proc);
         const service = new CodexAgentService({
+          cliCommand: process.execPath,
           l0CompilerFn: fakeL0Compiler,
           spawnFn,
           catId: 'runtime-sol',
@@ -2241,6 +2357,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-sol',
@@ -2296,6 +2413,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-sol',
@@ -2333,6 +2451,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       catId: 'runtime-sol',
@@ -2376,6 +2495,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
       const service = new CodexAgentService({
+        cliCommand: process.execPath,
         l0CompilerFn: fakeL0Compiler,
         spawnFn,
         catId: 'runtime-sol',
@@ -2419,6 +2539,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         const proc = createMockProcess();
         const spawnFn = createMockSpawnFn(proc);
         const service = new CodexAgentService({
+          cliCommand: process.execPath,
           l0CompilerFn: fakeL0Compiler,
           spawnFn,
           catId: 'runtime-sol',
@@ -2458,7 +2579,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
     const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
 
     try {
@@ -2476,7 +2602,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('does not add --skip-git-repo-check inside a git repository', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const promise = collect(service.invoke('hello', { workingDirectory: process.cwd() }));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-git-root' }]);
@@ -2510,7 +2641,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     try {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+      const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
       const promise = collect(service.invoke('configurable'));
       emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config' }]);
@@ -2542,7 +2673,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     try {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+      const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
       const promise = collect(service.invoke('resume configurable', { sessionId: 'thread-config-resume' }));
       emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config-resume' }]);
@@ -2570,7 +2701,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     try {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+      const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
       const promise = collect(service.invoke('fallback'));
       emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-fallback' }]);
@@ -2596,7 +2727,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('new session includes --add-dir .git for git write access', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('hello'));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -2612,7 +2743,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('resume session does NOT include --add-dir but preserves sandbox mode via config', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('Continue', { sessionId: 'old-session-123' }));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'old-session-123' }]);
@@ -2627,7 +2758,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('custom provider: model passed via --config as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'qwen-plus' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'qwen-plus',
+    });
 
     // Emit events after a tick to ensure generator has started consuming
     const promise = collect(
@@ -2655,6 +2791,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     // Model like "google/gemini-3-flash-preview" (OpenRouter format) — must NOT be stripped
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       model: 'google/gemini-3-flash-preview',
@@ -2684,7 +2821,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('no custom provider: model is passed as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const promise = collect(service.invoke('test no custom'));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-no-custom' }]);
@@ -2700,7 +2842,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('oauth default provider preserves the built-in OpenAI transport', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
     try {
@@ -2735,7 +2882,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('oauth HTTPS fallback remains available through an explicit transport override', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+    });
 
     const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
     try {
@@ -2760,7 +2912,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('handles multiple agent_message items', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('Multi'));
 
@@ -2788,6 +2940,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       model: 'gpt-5.6-sol',
@@ -2820,6 +2973,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       spawnFn,
       model: 'gpt-5.6-sol',
@@ -2852,7 +3006,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('Multi-turn'));
 
@@ -2903,7 +3057,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('maps command_execution and file_change items into tool events', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('With tools'));
 
@@ -2945,7 +3099,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     proc.kill = mock.fn(() => true);
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('crash'));
 
@@ -2965,7 +3119,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     proc.kill = mock.fn(() => true);
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('reconnect failure', { invocationId: 'inv-reconnect-failure' }));
 
@@ -3021,7 +3175,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('exit code 1 after turn.completed does NOT yield error (semanticDone canonical)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('review this'));
 
@@ -3053,7 +3207,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('exit code 1 with item.completed but NO turn.completed yields error (Sol Phase H regression)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('review this'));
 
@@ -3085,7 +3239,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('exit code 1 after transient reconnect + turn.completed does NOT yield error', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('review this after reconnect', { invocationId: 'inv-reconnect-success' }));
 
@@ -3137,7 +3291,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('reconnect survives resumable turn.failed noise and ends recovered after the next completed turn', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(
       service.invoke('resume after reconnect failure noise', {
@@ -3188,7 +3342,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('upstream_policy_reject archive 97449e4b classifies + yields error', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('crawl HN scraper'));
 
@@ -3229,7 +3383,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('semanticDone contract: prior turn.failed noise then turn.completed in same stream = silent success', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('long research task'));
 
@@ -3282,7 +3436,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('does NOT suppress exit code 1 when substantive output is followed by compact failure', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('continue this'));
 
@@ -3314,7 +3468,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('does NOT suppress exit code 1 when only thread.started (no substantive output)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('review this'));
 
@@ -3332,7 +3486,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const proc = createMockProcess();
     proc.kill = mock.fn(() => true);
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('hi'));
 
@@ -3353,7 +3507,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('passes cwd from workingDirectory option', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('hi', { workingDirectory: '/my/project' }));
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
@@ -3366,7 +3520,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('oauth mode (default) does not forward OPENAI_API_KEY to codex child env', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const originalApiKey = process.env.OPENAI_API_KEY;
     const originalAuthMode = process.env.CODEX_AUTH_MODE;
@@ -3392,7 +3546,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('api_key mode via callbackEnv keeps OPENAI_API_KEY for codex child env', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(
       service.invoke('api-key test', {
@@ -3414,7 +3568,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const originalAuthMode = process.env.CODEX_AUTH_MODE;
     try {
@@ -3442,7 +3596,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('callbackEnv model override takes precedence over constructor model', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.4' });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.4',
+    });
 
     const promise = collect(
       service.invoke('model override test', {
@@ -3463,7 +3622,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('all messages have catId codex', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('check'));
 
@@ -3484,7 +3643,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('ignores turn.started/unknown controls and finalizes the signature after a completed stream', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('test'));
 
@@ -3514,7 +3673,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('maps command execution lifecycle into tool_use and tool_result', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('run tool'));
 
@@ -3564,7 +3723,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
     const rawArchive = { append: mock.fn(async () => {}) };
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      auditLog,
+      rawArchive,
+    });
 
     const promise = collect(
       service.invoke('run tool', {
@@ -3623,7 +3788,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
     const rawArchive = { append: mock.fn(async () => {}) };
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      auditLog,
+      rawArchive,
+    });
 
     const promise = collect(
       service.invoke('raw trace', {
@@ -3656,7 +3827,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
     const rawArchive = { append: mock.fn(async () => {}) };
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      auditLog,
+      rawArchive,
+    });
 
     const promise = collect(service.invoke('no audit context'));
 
@@ -3695,7 +3872,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
     const rawArchive = { append: mock.fn(async () => {}) };
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      auditLog,
+      rawArchive,
+    });
 
     const promise = collect(
       service.invoke('deep redact', {
@@ -3740,7 +3923,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('systemPrompt is preserved and codex --image is used when contentBlocks contain images', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(
       service.invoke('describe this image', {
@@ -3769,7 +3952,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('fresh exec with --image inserts "--" before prompt to avoid varargs swallowing prompt', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(
       service.invoke('please describe this image path handling', {
@@ -3795,7 +3978,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('resume exec with --image inserts "--" before prompt', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(
       service.invoke('resume image argument handling', {
@@ -3824,7 +4007,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('F8: turn.completed usage is captured into done metadata', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('test'));
 
@@ -3860,7 +4043,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       lastCachedInputTokens: 122_880,
       lastOutputTokens: 617,
     }));
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, contextSnapshotResolver });
+    const service = new CodexAgentService({
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      contextSnapshotResolver,
+    });
 
     const promise = collect(service.invoke('test context telemetry'));
 
@@ -3912,7 +4100,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       _emitter: emitter,
     };
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const startMs = Date.now();
     const promise = collect(service.invoke('test'));
@@ -3965,7 +4153,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     try {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);
-      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+      const service = new CodexAgentService({ cliCommand: process.execPath, l0CompilerFn: fakeL0Compiler, spawnFn });
 
       const promise = collect(service.invoke('generate an image', { uploadDir }));
 

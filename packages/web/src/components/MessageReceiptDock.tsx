@@ -207,9 +207,14 @@ export function MessageReceiptDock({
     <section
       data-testid="message-receipt-dock"
       className="mt-3 border-t border-cafe pt-2 text-xs text-cafe-secondary"
-      aria-label="本条消息的处理回执"
+      aria-label={isCrossThreadDelivery ? '跨会话来信在本会话的处理回执' : '本条消息的处理回执'}
     >
-      <div className="mb-1.5 font-medium text-cafe-muted">{isCrossThreadDelivery ? '系统回执' : '处理回执'}</div>
+      <div className="mb-1.5 font-medium text-cafe-muted">
+        {isCrossThreadDelivery ? '跨会话来信 · 本会话处理回执' : '处理回执'}
+      </div>
+      {isCrossThreadDelivery && (
+        <p className="mb-1.5 text-cafe-muted">以下状态表示接收方在本会话对这条来信的处理情况。</p>
+      )}
       <div className="ml-1 border-l-2 border-cafe pl-3">
         {receipt.targets.map((target) => {
           const reminder = latestReminderForTarget(receipt, target.catId);

@@ -1,6 +1,6 @@
 import type { CatId, SessionRecord } from '@cat-cafe/shared';
-import type { AppendMessageInput, IMessageStore } from '../stores/ports/MessageStore.js';
-import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
+import type { AppendMessageInput, IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { TranscriptEvent, TranscriptReader } from './TranscriptReader.js';
 
 export interface HistoryImportResult {

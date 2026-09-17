@@ -12,7 +12,7 @@ import {
   resolveAuthoritativeCompactionSupport,
 } from '../domains/cats/services/session/authoritative-compaction.js';
 import type { ContextEpochOwner } from '../domains/cats/services/session/ContextEpochOwner.js';
-import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
+import type { TranscriptReader } from '../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { AgentContextCapability } from '../domains/cats/services/types.js';
 

@@ -24,8 +24,8 @@ describe('SessionSealer handoff digest integration', () => {
   async function createFixtures(handoffConfig) {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
 
     const store = new SessionChainStore();
     const writer = new TranscriptWriter({ dataDir: tempDir });

@@ -4,7 +4,7 @@ import type {
   InvocationTrajectoryTokens,
   SessionRecord,
 } from '@cat-cafe/shared';
-import type { TranscriptEvent } from './TranscriptReader.js';
+import type { TranscriptEvent } from './transcript/TranscriptReader.js';
 
 type SessionProjection = Pick<SessionRecord, 'id' | 'threadId' | 'catId' | 'seq' | 'status' | 'sealReason'>;
 

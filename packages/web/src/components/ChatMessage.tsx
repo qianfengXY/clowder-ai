@@ -894,7 +894,7 @@ export const ChatMessage = memo(function ChatMessage({
         {crossThreadSourceThreadId &&
           (() => {
             const sourceId = crossThreadSourceThreadId;
-            const sourceName = crossThreadSourceName ?? '未命名对话';
+            const sourceName = crossThreadSourceName ?? '会话标题未加载';
             const shortId = sourceId.replace(/^thread_/, '').slice(0, 8);
             const senderLabel = catStyle?.label;
             return (
@@ -915,14 +915,15 @@ export const ChatMessage = memo(function ChatMessage({
                 }}
                 className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-cafe-surface border-cafe text-cafe hover:bg-cafe-surface-sunken transition-colors cursor-pointer w-fit max-w-full"
                 title={sourceId}
-                aria-label={`跳转到来源 thread ${sourceId}`}
+                aria-label={`跨会话来信，来自 ${crossThreadSourceName ?? sourceId}；打开来源会话`}
               >
                 <span className="text-micro font-semibold" aria-hidden>
                   📮
                 </span>
                 <span className="min-w-0 truncate">
-                  {senderLabel && <span className="font-medium">{senderLabel} · </span>}
-                  {shortId} · {sourceName}
+                  <span className="font-medium">跨会话来信 · 来自 </span>
+                  {sourceName} · {shortId}
+                  {senderLabel && <span className="font-medium"> · {senderLabel}</span>}
                 </span>
               </a>
             );

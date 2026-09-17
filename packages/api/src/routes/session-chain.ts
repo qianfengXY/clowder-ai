@@ -15,9 +15,7 @@ import { z } from 'zod';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { RuntimeSessionMetadata } from '../domains/cats/services/runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
-import { backfillBoundSessionHistory } from '../domains/cats/services/session/BoundSessionHistoryImporter.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
-import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import {
   canReadThreadRecord,
   filterThreadRecords,
@@ -25,6 +23,8 @@ import {
   threadAccessDeniedBody,
   threadRecordAccessDeniedBody,
 } from '../domains/cats/services/session/thread-access-policy.js';
+import { backfillBoundSessionHistory } from '../domains/cats/services/session/transcript/BoundSessionHistoryImporter.js';
+import type { TranscriptReader } from '../domains/cats/services/session/transcript/TranscriptReader.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type {
   ISessionChainStore,

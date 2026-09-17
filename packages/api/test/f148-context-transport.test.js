@@ -859,7 +859,7 @@ describe('F148 Phase C: formatAnchors', () => {
 
 // --- Phase D: AC-D1 — Read ops tracking ---
 
-import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptWriter } from '../dist/domains/cats/services/session/transcript/TranscriptWriter.js';
 
 describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
   const session = {

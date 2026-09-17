@@ -47,34 +47,17 @@
       "id": "workflow-sop-store",
       "match": "workflow-sop-store",
       "category": "source_only",
-      "reason": "The bounded public audit discovered no matching test file; retain only until the explicit inventory recheck completes.",
-      "owner": "@zts212653",
+      "reason": "Rechecked the exact file in the isolated public runner environment: without REDIS_URL the RedisWorkflowSopStore suite executes zero tests. Public CI does not provision Redis; retain this resource boundary in the isolated Redis gate rather than claim that a skipped suite passed.",
+      "owner": "@cat-idwxwjba",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-09-08",
+      "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
-        "status": "pending_bounded_recheck",
+        "reviewedOn": "2026-09-14",
+        "sourceHead": "d714231ef1d844ccd341b340cebd674b88c1894f",
+        "publicHead": "d714231ef1d844ccd341b340cebd674b88c1894f",
+        "status": "resource_contract",
         "matchedFileCount": 1,
         "matchedFilesHash": "f2bb4b4bfdab922a8169ff8df9d041e0d694b636be18fa81ce58850ba264e0c8"
-      }
-    },
-    {
-      "id": "codex-agent-service",
-      "match": "codex-agent-service",
-      "category": "source_only",
-      "reason": "The bounded public audit reached its 120-second cap; retain only until a completed public recheck replaces this evidence.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-09-08",
-      "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
-        "status": "pending_bounded_recheck",
-        "matchedFileCount": 2,
-        "matchedFilesHash": "bb6f15490d1f0a407ece89b4a005c9fbea371b0d2b57e3d3ce080c9b27f08113"
       }
     },
     {

@@ -41,8 +41,8 @@ describe('F98 Route Inject: session-transcript', () => {
 
   async function setup() {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/transcript/TranscriptWriter.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
     const { sessionTranscriptRoutes } = await import('../dist/routes/session-transcript.js');
 
     const sessionChainStore = new SessionChainStore();
@@ -281,7 +281,9 @@ describe('F98 Route Inject: session-transcript', () => {
 
 describe('Cloud P1-1: chat view handles production event type (text)', () => {
   it('includes type:text events as role:assistant', async () => {
-    const { formatEventsChat } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { formatEventsChat } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     const events = [
       {
         v: 1,
@@ -317,7 +319,9 @@ describe('Cloud P1-1: chat view handles production event type (text)', () => {
 
 describe('Cloud P1-2: handoff view reads toolName field', () => {
   it('extracts tool names from toolName (production format)', async () => {
-    const { formatEventsHandoff } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { formatEventsHandoff } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     const events = [
       {
         v: 1,
@@ -348,7 +352,9 @@ describe('Cloud P1-2: handoff view reads toolName field', () => {
   });
 
   it('extracts key messages from type:text events', async () => {
-    const { formatEventsHandoff } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { formatEventsHandoff } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     const events = [
       {
         v: 1,
@@ -373,7 +379,9 @@ describe('Cloud P1-2: handoff view reads toolName field', () => {
 
 describe('P2-1: extractTextContent rejects non-string text', () => {
   it('skips content items where text is not a string', async () => {
-    const { formatEventsChat } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { formatEventsChat } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     const events = [
       {
         v: 1,
@@ -403,7 +411,9 @@ describe('P2-1: extractTextContent rejects non-string text', () => {
 
 describe('P2-2: handoff keyMessages capped at 5', () => {
   it('limits keyMessages to 5 per invocation', async () => {
-    const { formatEventsHandoff } = await import('../dist/domains/cats/services/session/TranscriptFormatter.js');
+    const { formatEventsHandoff } = await import(
+      '../dist/domains/cats/services/session/transcript/TranscriptFormatter.js'
+    );
     // Create 10 assistant events in same invocation
     const events = Array.from({ length: 10 }, (_, i) => ({
       v: 1,

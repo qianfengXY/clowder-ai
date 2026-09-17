@@ -19,10 +19,10 @@ import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
 import { extractDecisionSignals } from './extractDecisionSignals.js';
-import { generateHandoffDigest } from './HandoffDigestGenerator.js';
-import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
-import type { TranscriptReader } from './TranscriptReader.js';
-import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js';
+import { generateHandoffDigest } from './handoff/HandoffDigestGenerator.js';
+import { formatEventsChat, formatEventsHandoff } from './transcript/TranscriptFormatter.js';
+import type { TranscriptReader } from './transcript/TranscriptReader.js';
+import type { ExtractiveDigestV1, TranscriptWriter } from './transcript/TranscriptWriter.js';
 
 const log = createModuleLogger('session-sealer');
 const FINALIZE_TIMEOUT_MS = 30_000;
@@ -467,7 +467,7 @@ export class SessionSealer implements ISessionSealer {
                 clean = false;
               } else {
                 const sessionDir = this.transcriptReader.getSessionDir(record.threadId, record.catId, record.id);
-                const { TranscriptWriter: TW } = await import('./TranscriptWriter.js');
+                const { TranscriptWriter: TW } = await import('./transcript/TranscriptWriter.js');
                 await TW.writeHandoffDigest(
                   sessionDir,
                   {

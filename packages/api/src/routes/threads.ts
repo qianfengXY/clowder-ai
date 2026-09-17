@@ -24,7 +24,7 @@ import { recordFreshnessClosureTransition } from '../domains/cats/services/fresh
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
-import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import type { TranscriptWriter } from '../domains/cats/services/session/transcript/TranscriptWriter.js';
 import { compareCursors, parseCursor } from '../domains/cats/services/stores/cursor.js';
 import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';

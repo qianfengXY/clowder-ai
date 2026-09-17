@@ -43,3 +43,24 @@ An acquisition must still be live after every asynchronous boundary before it st
 - Runtime acceptance remains pending: load the merged patch into a new authorized runtime instance, confirm the peer reaches its provider, and let the original task owner close its completed validation task through the canonical task API. Delivery, a green unit suite, or ordinary dispatch completion alone cannot close this recovery.
 
 No product-project code, test results, or private incident payload is copied into this report.
+
+## Operator direct-call follow-up
+
+The operator reported that directly addressing a participating cat still failed after the peer-dispatch correction was loaded. A fresh process, runtime source/dist, and the failed invocation stack confirmed this was a separate ingress gap, not a stale deployment.
+
+| Field | Evidence and disposition |
+| --- | --- |
+| Symptom | An owner directly calls a coordinating or reviewing cat in an implementation thread already bound to another cat; the call fails before provider startup. |
+| Evidence | The ordinary user-message path supplies a persisted causal message id, not an A2A trigger. The resolver reaches `bindManagedWorkAttempt` and raises `MANAGED_WORK_EXECUTOR_CONFLICT`. |
+| Root cause | Conversation participation was separated from parent implementation attribution only for cat-authored A2A triggers. The same distinction was omitted for authenticated owner-authored direct messages. |
+| Diagnostic strategy | Reproduce the actual `invokeSingleCat` owner path without A2A metadata, and test persisted source provenance plus admission identity independently. |
+| Timeout strategy | Preserve original messages, attempts, and failed receipts. Do not rebind the parent executor or manufacture an A2A source to make a user call pass. |
+| Warning strategy | A working cross-thread wake proves only the A2A path. Direct owner calls require their own provider and visible-response evidence. |
+| User-visible correction | The owner can directly address another participating cat without that conversation acquiring or replacing the parent's implementation identity. |
+| Acceptance | Same-source RED→GREEN, unchanged A2A/admission/consumer regressions, independent review, and a new live direct-owner invocation with a visible reply. |
+
+The correction recognizes only strict owner provenance and an exact persisted user message matching owner, thread, and resolved mention target. It rejects A2A-shaped user sources and connector, scheduler, or system carriers from this owner-only path. Prompt text grants no implementation identity. The existing admission checks, incumbent continuation, unbound atomic binding, and external Desktop executor enforcement remain authoritative; no public contract or persistent ownership record changes.
+
+The initial isolated build succeeded, then the new regression run failed 5 of 27 tests: the real owner invocation, owner participation/prose cases, and admission read/identity error propagation. The existing A2A invocation and negative provenance/ownership cases passed. Final GREEN counts and exact-head independent verdict belong in the PR evidence. Live direct-call acceptance remains pending until the new correction is loaded and exercised.
+
+The isolated HTTP acceptance sends an owner-authenticated `POST /api/messages` through the real `AgentRouter` and `invokeSingleCat`, using in-memory stores and a fake provider. It verifies a successful child execution, a reply readable through `GET /api/messages`, exact source identity without A2A or parent work attribution, and unchanged incumbent ownership. The same test fails on the pre-correction resolver before provider startup and passes with the correction. This exercises application ingress and persistence within the test process; it does not claim a native provider or the live conversation has recovered.

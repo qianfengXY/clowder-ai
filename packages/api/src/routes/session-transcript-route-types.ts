@@ -1,7 +1,7 @@
 import type { FastifyPluginOptions } from 'fastify';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
-import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
-import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import type { TranscriptReader } from '../domains/cats/services/session/transcript/TranscriptReader.js';
+import type { TranscriptWriter } from '../domains/cats/services/session/transcript/TranscriptWriter.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
