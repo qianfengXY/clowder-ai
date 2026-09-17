@@ -1960,3 +1960,20 @@ created: 2026-02-26
 - 原理：**把车造得更坚固不会让它自动开向正确目的地。** 方向靠 accepted-source 追溯，确定风险靠 guard，运行健康靠 observability，不确定效用才靠 eval；机制的数量不是质量，能否更早发现偏航且不增加人类协调税才是质量。
 
 - 关联：ADR-031 v3.5 candidate | LL-071（A2A scope 误读放大）| LL-072/083（review 无不动点与开放纠缠）| LL-095（机制工具箱不是清单）| LL-101（长门禁先收敛）| F100 Process Evolution | F303 Design Gate Integrity | F311 Capability Evolution Workspace
+
+---
+
+### LL-103: `origin` 不是权威远端——隔离越彻底，ref 类真相源越不可信
+
+- 状态：draft
+- 更新时间：2026-09-17
+
+- 坑：做 PR 独立审阅时按纪律建了隔离 sandbox（`git clone <本地路径>`），随后用 `git fetch origin main` + `git rev-parse origin/main` 判断远端 main，据此断言"`c2eb46a` 不是 main 的祖先、合入 PR 是 342 文件 / +33129 / 9 commits、我审的只是其中一小部分"。实际该 ref 在 GitHub 上**根本不存在**（`git ls-remote | grep -c` → `0`），真实合入是 **21 文件 / 1 commit**，恰是被指派的审阅主体。作者猫提出质疑后核验，三条主张全错。同一机制此前已发生过一次：EXT-002/F306 中 `origin` 指向开源上游而非权威 `fork/main`，门禁脚本按 `origin/main` 审计了非权威历史，把 658 个上游差异投影成 hotfix。
+- 根因：`origin` 被默认当成"权威远端"，但它只是"**某个**远端的本地镜像"。更隐蔽的是 tier 混用而不自知——对 head SHA 老实走了 T1 resolver（`gh pr view`），对 base / main 却默认信任 `origin/*`（T2），同一个判断里掺了两个 tier 也没察觉。`git fetch` 提供虚假的新鲜度安全感：它只刷新镜像，**不改变镜像的是谁**。此外 F306 当时已写下"统一 canonical base resolver + 不一致时 fail closed"的建议，但它停在一份交付级 harness-feedback 报告里，没有落到任何猫接球时会走的路径上，因此没能拦住第二次。
+- 触发条件：任何由本地路径 clone / worktree 建立的隔离树；fork 工作流中 `origin` 指向上游而非权威 fork；仅仅是久未 fetch；以及需要判断 remote main tip / PR base / 合入规模 / ancestry 的时刻。**越认真做隔离越容易踩——隔离动作本身就是污染源。**
+- 修复：用 `git ls-remote <显式 https URL>` 与 `gh api .../compare` 重取真相，更正结论；原错误段落按原样保留并标 `SUPERSEDED`、另附更正章节，不抹改记录轨迹。
+- 防护：`cat-cafe-skills/receive-handoff-grounding/refs/resolver-catalog.md` 新增 **R3.2**——本地 git 分两类：**不可变对象**（`cat-file` / `ls-tree` / 给定两个 SHA 的 diff 与 ancestry）= T1；**ref / 分支尖端**（`origin/*`、`rev-parse origin/<b>`、刚 fetch 的结果）= **T2**。凡涉及 remote tip / PR base / 合入规模 / ancestry 的结论，先 `git remote -v` 确认 `origin` 指向何处，只取 `gh` 或 `git ls-remote <显式 URL>`；repo target 与 remote owner 不一致 → fail closed。
+- 来源锚点：`docs/harness-feedback/reviews/F306-feature-close-trace.md`（前案 2026-08-25，含未落地的建议 #1）| `cat-cafe-skills/receive-handoff-grounding/refs/resolver-catalog.md` §3 R3.2（本次防护）| Traqen PR#37 独立审阅记录「更正 C1」（2026-09-17）
+- 原理：**"隔离"保护的是写，不是读。** 把工作树隔离开能防止副作用外溢，但同一个动作会把所有 ref 类真相源一并替换成本地副本；隔离做得越彻底，本地 ref 与权威远端的距离越远。所以在隔离环境里，写侧越安全，读侧越要显式回到 canonical remote——**安全感与正确性在这里是反向的**。推论：不可变对象（内容由 SHA 决定）可以就地信任，可变指针（谁是 main）永远要回源问。
+
+- 关联：LL-099（给没有 canonical 账本的对象拼轨迹是结构性失败）| receive-handoff-grounding skill（T0/T1/T2 resolver 纪律）| EXT-002/F306 harness feedback | branch review publication policy（独立审阅的 exact-SHA 约束）

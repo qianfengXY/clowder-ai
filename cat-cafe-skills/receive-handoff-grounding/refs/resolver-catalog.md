@@ -98,13 +98,35 @@ claim "reviewer 已 approve PR"。
 | `gh api repos/<repo>/issues/<id>` | T1 | issue updated_at + closed_at |
 | `gh api repos/<repo>/pulls/<id>` | T1 | PR head SHA + merge_state |
 | `gh api repos/<repo>/commits/<sha>` | T1 | commit SHA (immutable) |
-| `git ls-tree / cat-file` | T1 | tree/blob SHA |
+| `git ls-tree / cat-file`（给定 SHA 的**不可变对象**） | T1 | tree/blob SHA |
+| `git ls-remote <显式 https URL>` / `gh api repos/<repo>/branches/<name>` | T1 | remote ref SHA |
+| `git rev-parse origin/<branch>` / 任何 `refs/remotes/*` 本地镜像 | **T2** | 本地 fetch 时刻；可能陈旧、已分叉，或镜像的根本不是权威远端 |
 | `TaskStore.get(taskId)` | T1 | task updated_at |
 | `ThreadStore.get(threadId)` `threadKind` | T2 | thread updated_at (context signal only) |
 | `cat_cafe_get_thread_metadata()`（可选候选缩窄） | T2 | metadata updated_at；允许为空/陈旧，不能替代 canonical resolver |
 
 **Limitation**：`threadKind` 是 context signal，**不**是 truth source（R3 critical: 不能独立裁决）。
 Thread metadata 同样不是必读前置条件；仅在已有理由认为它能缩小搜索范围时可选读取，命中后仍须用上表 T0/T1 resolver 核验。
+
+**Rule (R3.2) — 本地 git 分两类，tier 不能混用**：
+
+- **不可变对象**（`git cat-file` / `git ls-tree` / 给定两个 SHA 的 diff 与 ancestry）：内容由 SHA 唯一决定，本地即 **T1**。
+- **Ref / 分支尖端**（`origin/main`、`git rev-parse origin/*`、乃至刚 `git fetch origin` 的结果）：**T2**。
+  `origin` 只是"**某个**远端的本地镜像"，它可能 (a) 指向本地路径（隔离 sandbox / worktree 从本地 clone 而来）、
+  (b) 指向开源上游而非权威 fork、(c) 仅仅是没 fetch 而陈旧。**`git fetch` 不会把 T2 升成 T1**——
+  它只刷新镜像，不改变"镜像的是谁"。
+- 任何关于 **remote main tip / PR base / 合入规模 / X 是否是 main 的祖先** 的判断：
+  先 `git remote -v` 确认 `origin` 指向何处，结论只能取自 `gh` 或 `git ls-remote <显式 URL>`；
+  repo target 与 remote owner 不一致 → **fail closed**，不要用本地 ref 顶上。
+
+> **两次实证（同一机制，不同表现）**：
+> ① EXT-002/F306（2026-08-25）——`origin` 指向开源上游而非权威 `fork/main`，门禁脚本按 `origin/main`
+> 审计了非权威历史，把 658 个上游差异投影成 hotfix。见 `docs/harness-feedback/reviews/F306-feature-close-trace.md`。
+> ② Traqen PR#37 独立审阅（2026-09-17）——隔离 sandbox 由 `git clone <本地路径>` 建立，`origin` 指向本地
+> 检出；`git fetch origin main` + `rev-parse origin/main` 得到一个**在 GitHub 上根本不存在**的 ref，
+> 据此得出"合入是 342 文件 / 9 commits"，实际是 21 文件 / 1 commit。
+> 共同点：对 head SHA 走了 T1 resolver，却对 base / main 默认信任了 `origin/*`。**越是认真做隔离，越容易踩**
+> ——隔离动作本身就是污染源。
 
 ### 4. Callback / wait coverage
 
