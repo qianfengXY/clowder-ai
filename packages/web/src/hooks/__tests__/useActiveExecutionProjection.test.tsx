@@ -209,6 +209,30 @@ describe('F295 canonical execution hydration', () => {
     });
   });
 
+  it('does not overlap polls or reconnect refreshes while a response body is pending', async () => {
+    let finish!: (value: unknown) => void;
+    mocks.apiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    } as Response);
+    await act(async () => {
+      root.render(<Harness threadId="thread-a" connected={false} />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await act(async () => {
+      root.render(<Harness threadId="thread-a" connected />);
+    });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish({ projectPath: '/project/cafe', executions: [] });
+    });
+  });
+
   it('treats an exact 409 retry as terminal convergence and refreshes the projection', async () => {
     const execution = liveExecution();
     const request = useActiveExecutionStore.getState().beginHydration('thread-a');
@@ -223,6 +247,14 @@ describe('F295 canonical execution hydration', () => {
     );
 
     await expect(cancelProjectedExecution(execution)).resolves.toBeUndefined();
+
+    // A pre-cancel poll may already have received headers for an obsolete body.
+    // Cancellation must ask for a causal trailing generation, never reuse it.
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith(
+      '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      { signal: undefined },
+      { afterCurrentGet: true },
+    );
 
     expect(mocks.apiFetch).toHaveBeenCalledWith('/api/threads/thread-a/executions/live/inv-exact/cancel', {
       method: 'POST',

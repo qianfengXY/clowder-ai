@@ -261,6 +261,8 @@ function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
 }
 
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  // boundedFetch completes finite JSON delivery before resolving, so the active
+  // generation covers body transfer as well as response headers.
   void performApiFetch(generation.path, physicalGetInit(generation))
     .then(generation.resolve, generation.reject)
     .finally(() => {

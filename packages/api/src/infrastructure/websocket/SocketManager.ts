@@ -174,7 +174,10 @@ export class SocketManager {
       // In single-user mode, all connections are 'default-user'.
       // F077 will replace this with session/cookie-based identity.
       const userId = 'default-user';
-      log.info({ socketId: socket.id, userId }, 'Client connected');
+      log.info({ socketId: socket.id, userId, transport: socket.conn.transport.name }, 'Client connected');
+      socket.conn.on('upgrade', (transport) => {
+        log.info({ socketId: socket.id, transport: transport.name }, 'Client transport upgraded');
+      });
       log.debug(
         {
           socketId: socket.id,
@@ -190,8 +193,8 @@ export class SocketManager {
       // derive it from session). Auto-join is unconditional.
       socket.join(`user:${userId}`);
 
-      socket.on('disconnect', () => {
-        log.info({ socketId: socket.id }, 'Client disconnected');
+      socket.on('disconnect', (reason) => {
+        log.info({ socketId: socket.id, transport: socket.conn.transport.name, reason }, 'Client disconnected');
       });
 
       socket.on('join_room', async (roomInput: unknown, acknowledgeInput?: unknown) => {

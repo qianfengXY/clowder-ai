@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { apiFetch } from '@/utils/api-client';
+import { startSerialPolling } from '@/utils/serial-polling';
 import { BallotIcon } from './icons/VoteIcons';
 
 interface VoteBarState {
@@ -17,34 +18,26 @@ export function VoteActiveBar({ threadId, onEnd }: { threadId: string; onEnd: ()
 
   // Poll vote state
   useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vote`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!data.vote || data.vote.status !== 'active') {
-          setVote(null);
-          return;
-        }
-        const v = data.vote;
-        setVote({
-          question: v.question,
-          voteCount: v.voteCount ?? Object.keys(v.votes).length,
-          totalVoters: v.voters?.length ?? 0,
-          deadline: v.deadline,
-          anonymous: v.anonymous,
-        });
-      } catch {
-        /* ignore */
+    const poller = startSerialPolling(async (signal) => {
+      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vote`, { signal });
+      if (!res.ok || signal.aborted) return false;
+      const data = await res.json();
+      if (signal.aborted) return false;
+      if (!data.vote || data.vote.status !== 'active') {
+        setVote(null);
+        return true;
       }
-    };
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+      const v = data.vote;
+      setVote({
+        question: v.question,
+        voteCount: v.voteCount ?? Object.keys(v.votes).length,
+        totalVoters: v.voters?.length ?? 0,
+        deadline: v.deadline,
+        anonymous: v.anonymous,
+      });
+      return true;
+    }, 5000);
+    return poller.stop;
   }, [threadId]);
 
   // Countdown timer
