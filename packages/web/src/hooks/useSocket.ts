@@ -3,7 +3,6 @@
 import type { ProviderSemanticEvent } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 import {
   bootstrapDebugFromStorage,
   ensureWindowDebugApi,
@@ -18,6 +17,7 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
+import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 import { getUserId } from '@/utils/userId';
 import {
   deliverPreviewAutoOpenEvent,

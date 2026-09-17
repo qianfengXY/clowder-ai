@@ -1,4 +1,3 @@
-import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 /**
  * Regression test for reconnect catch-up (#276 intake).
  *
@@ -11,6 +10,7 @@ import EventEmitter from 'events';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CHAT_SOCKET_TRANSPORTS } from '@/utils/socket-polling-transport';
 
 // ── Mock socket.io-client ──
 const mockSocket = new EventEmitter() as EventEmitter & {
