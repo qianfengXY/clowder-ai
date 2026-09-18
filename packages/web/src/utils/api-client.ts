@@ -77,6 +77,9 @@ export interface ApiFetchOptions {
 
 interface GetGeneration {
   id: number;
+  controller: AbortController;
+  subscribers: number;
+  settled: boolean;
   promise: Promise<Response>;
   resolve(response: Response): void;
   reject(error: unknown): void;
@@ -243,6 +246,9 @@ function createGetGeneration(
   });
   return {
     id: ++nextGetGeneration,
+    controller: new AbortController(),
+    subscribers: 0,
+    settled: false,
     promise,
     resolve,
     reject,
@@ -253,29 +259,43 @@ function createGetGeneration(
 }
 
 function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
+  const init = { ...generation.init, signal: generation.controller.signal };
   const validator = generation.ifNoneMatch;
-  if (!validator) return generation.init;
+  if (!validator) return init;
   const headers = new Headers(generation.init?.headers);
   headers.set('if-none-match', validator);
-  return { ...generation.init, headers };
+  return { ...init, headers };
+}
+
+function finishGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  // A cancelled generation may finish after a new state has claimed this key.
+  if (coordinatedGets.get(key) !== state || state.active !== generation) return;
+  const trailing = state.trailing;
+  if (!trailing) {
+    coordinatedGets.delete(key);
+    return;
+  }
+  state.active = trailing;
+  state.trailing = null;
+  startGetGeneration(key, state, trailing);
 }
 
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
   // boundedFetch completes finite JSON delivery before resolving, so the active
   // generation covers body transfer as well as response headers.
   void performApiFetch(generation.path, physicalGetInit(generation))
-    .then(generation.resolve, generation.reject)
-    .finally(() => {
-      if (state.active !== generation) return;
-      const trailing = state.trailing;
-      if (!trailing) {
-        coordinatedGets.delete(key);
-        return;
-      }
-      state.active = trailing;
-      state.trailing = null;
-      startGetGeneration(key, state, trailing);
-    });
+    .then(
+      (response) => {
+        // Successful downloads/streams remain owned by the delivered Response.
+        generation.settled = true;
+        generation.resolve(response);
+      },
+      (error: unknown) => {
+        generation.settled = true;
+        generation.reject(error);
+      },
+    )
+    .finally(() => finishGetGeneration(key, state, generation));
 }
 
 async function coordinatedGet(
@@ -287,12 +307,13 @@ async function coordinatedGet(
   const key = exactGetKey(path, init);
   let state = coordinatedGets.get(key);
   let generation: GetGeneration;
+  let startNow = false;
 
   if (!state) {
     generation = createGetGeneration(path, init, ifNoneMatch);
     state = { active: generation, trailing: null };
     coordinatedGets.set(key, state);
-    startGetGeneration(key, state, generation);
+    startNow = true;
   } else if (afterCurrentGet) {
     state.trailing ??= createGetGeneration(path, init, ifNoneMatch);
     generation = state.trailing;
@@ -300,10 +321,34 @@ async function coordinatedGet(
     generation = state.active;
   }
 
-  const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
-  const clone = response.clone();
-  markApiGetGeneration(clone, generation.id);
-  return clone;
+  generation.subscribers++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    init?.signal?.removeEventListener('abort', release);
+    generation.subscribers--;
+    if (generation.subscribers || generation.settled) return;
+    generation.settled = true;
+    const reason = new DOMException('No callers remain for this GET.', 'AbortError');
+    generation.controller.abort(reason);
+    generation.reject(reason);
+    if (state.trailing === generation) state.trailing = null;
+    else finishGetGeneration(key, state, generation);
+  };
+  // Release synchronously on abort: an immediate replacement caller must never
+  // join the abandoned generation while promise cleanup is still queued.
+  init?.signal?.addEventListener('abort', release, { once: true });
+  const pending = waitForPromiseWithSignal(generation.promise, init?.signal);
+  if (startNow) startGetGeneration(key, state, generation);
+  try {
+    const response = await pending;
+    const clone = response.clone();
+    markApiGetGeneration(clone, generation.id);
+    return clone;
+  } finally {
+    release();
+  }
 }
 
 /**

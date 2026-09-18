@@ -80,3 +80,21 @@ writer 的 live 文件和 reader 的 canonical 文件不是同一个文件。不
 授权后才把经过验证的精确提交用于 runtime 构建/部署；不得用自动同步引入无关 main
 变更。新 service worker 激活后需确认客户端加载新 worker 和 bundle，再验证长期访问。
 若需回退，只回退本补丁和构建，保留全部数据；回退后的重启同样须用户确认。
+
+
+## Follow-up: shared GET cancellation (2026-09-18)
+
+Architecture cell: browser exact-GET coordination / request lifetime.
+Map delta: no new endpoint, datastore or authentication authority; the existing GET generation owns its physical cancellation.
+Why: caller cancellation ended only its promise wait; a generation with zero callers continued its GET and automatic read retry, occupying HTTP/1.1 connections for up to two 8-second attempts. A caller leaving during session bootstrap could still cause a later business GET.
+Canonical source: `packages/web/src/utils/api-client.ts#coordinatedGet`.
+Consumer evidence: `rg -n 'apiFetch|AbortController' packages/web/src/hooks/useActiveExecutionProjection.ts packages/web/src/components/VoteActiveBar.tsx packages/web/src/utils/shared-probe.ts`.
+Claim guard: `api-client-get-coordination.test.ts` adds last-caller transport/body cancellation, abandoned session-wait and trailing work, immediate replacement, live trailing peers/validator, and successful stream delivery checks. Five initial regression cases failed against the previous commit (8 existing cases passed).
+
+Each generation now owns an AbortController and subscriber count. One subscriber abort preserves peers; the final abort removes the generation synchronously, cancels its physical fetch/body and prevents retries. Empty trailing work is discarded; live trailing work advances. Completion guards both map-state and generation identities so stale cleanup cannot delete a replacement. Successful Response delivery is marked settled before subscriber cleanup, preserving non-JSON downloads/streams. Shared session bootstrap is not cancelled by a business request.
+
+Validation: 64 tests passed across GET coordination, body lifetime, timeout/retry, body normalization, URL resolution and active-execution projection; `tsc --noEmit --incremental false` passed. Targeted Biome check passed. The repository's Node-environment wrapper cannot load the pre-existing missing `scripts/lib/process-resource-lease.mjs`, so unit tests used `NODE_ENV=test pnpm exec vitest run ... --maxWorkers=1` directly.
+
+Real Chrome HTTP/1.1 isolated fixture (no production data): six JSON responses held open; each caller cancels at 200 ms. Previous code: server observed 0/6 cancellations, peak 6 connections, following health timed out at 1002 ms. Fixed code: server observed 6/6 cancellations, peak 1 connection, health completed in 6 ms. Local reproducible fixture and results: `/Users/skybowen/.cpolar/incident-20260918/followup-1302/get-lifecycle-fixture.cjs`, `fixture-before.json`, `fixture-fixed.json`.
+
+Limits: this proves and fixes abandoned-request connection occupancy, not every tunnel stall. Runtime remains on 96a3124 until deployment/restart authorization. Public HTTP/1.1 monitoring also found a separate 6-second ready timeout while local health completed in 0.85/2.46 ms. `--noproxy` alone does not bypass the Mac's TUN: hostname resolves to 198.18.0.77 via utun4; verified public DNS returns 61.184.13.136 with en0 route. Follow-up uses per-request `--resolve` with hostname/TLS verification preserved; no runtime/network configuration is changed.
