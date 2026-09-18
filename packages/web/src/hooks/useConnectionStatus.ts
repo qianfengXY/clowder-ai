@@ -114,7 +114,8 @@ export function deriveDeploymentAdmission(
 // A real page reload evaluates the module again and intentionally resets it.
 const pageDeploymentRevision = createDeploymentRevisionTracker();
 
-const POLL_INTERVAL_MS = 15_000;
+// These status probes supplement realtime connectivity; avoid constant tunnel churn.
+const POLL_INTERVAL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 2_500;
 const FAILURE_THRESHOLD = 2;
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);

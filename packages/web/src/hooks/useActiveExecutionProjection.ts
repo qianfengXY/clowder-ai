@@ -8,7 +8,7 @@ import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 import { startSerialPolling } from '@/utils/serial-polling';
 
-const ACTIVE_EXECUTION_REFRESH_MS = 4_000;
+const ACTIVE_EXECUTION_REFRESH_MS = 10_000;
 
 function activeExecutionResource(projectPath: string): string {
   return `/api/executions/active?projectPath=${encodeURIComponent(projectPath)}`;

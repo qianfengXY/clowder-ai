@@ -36,7 +36,7 @@ export function VoteActiveBar({ threadId, onEnd }: { threadId: string; onEnd: ()
         anonymous: v.anonymous,
       });
       return true;
-    }, 5000);
+    }, 15_000);
     return poller.stop;
   }, [threadId]);
 
