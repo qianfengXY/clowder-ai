@@ -10,6 +10,7 @@
  */
 
 /// <reference lib="WebWorker" />
+import './network-bypass';
 declare const self: ServiceWorkerGlobalScope;
 
 import type { PushNotificationPayload } from '../src/utils/push-notification-policy';
