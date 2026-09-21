@@ -60,6 +60,8 @@ export function useWorkspaceFile(worktreeId: string, path: string, openRequest: 
     void openRequest;
     void refresh();
     return () => {
+      // Invalidate the latest request generation; this ref is a counter, not a DOM node.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       requestSeq.current++;
     };
   }, [openRequest, refresh]);
@@ -109,12 +111,9 @@ export function useWorkspaceFile(worktreeId: string, path: string, openRequest: 
   }, [readFile]);
   const dismissExternalChange = useCallback(() => setPendingExternalSha(null), []);
   // useFileEditing calls this only after a successful save, with the same owner path.
-  const fetchFile = useCallback(
-    async (_path: string) => {
-      await readFile(true);
-    },
-    [readFile],
-  );
+  const fetchFile = useCallback(async () => {
+    await readFile(true);
+  }, [readFile]);
 
   return {
     file,
