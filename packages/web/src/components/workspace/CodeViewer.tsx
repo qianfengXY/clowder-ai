@@ -58,6 +58,12 @@ function getSelectionInfo(view: EditorView) {
   return { text, startLine, endLine, selectionStart: from, selectionEnd: to };
 }
 
+function revealEditorLine(view: EditorView, lineNumber: number | null) {
+  if (!lineNumber || lineNumber < 1) return;
+  const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
+  view.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: 'center' }) });
+}
+
 interface CodeSelectionAction {
   position: FloatingSelectionPosition;
   text: string;
@@ -144,6 +150,8 @@ export function CodeViewer({
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const baseContentRef = useRef(content);
+  const scrollToLineRef = useRef(scrollToLine);
+  scrollToLineRef.current = scrollToLine;
   const onDirtyChangeRef = useRef(onDirtyChange);
   onDirtyChangeRef.current = onDirtyChange;
   const onScrollTopChangeRef = useRef(onScrollTopChange);
@@ -184,11 +192,7 @@ export function CodeViewer({
     const view = new EditorView({ state, parent: editorContainerRef.current });
     viewRef.current = view;
 
-    if (scrollToLine && scrollToLine > 0) {
-      const line = Math.min(scrollToLine, view.state.doc.lines);
-      const lineInfo = view.state.doc.line(line);
-      view.dispatch({ effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' }) });
-    }
+    revealEditorLine(view, scrollToLineRef.current);
 
     const scroller = view.scrollDOM;
     let rafId = 0;
@@ -210,7 +214,14 @@ export function CodeViewer({
       }
       view.destroy();
     };
-  }, [content, mime, path, scrollToLine, editable]);
+  }, [content, mime, path, editable]);
+
+  // Reopening the same file at another line is navigation, not a new document.
+  // Rebuilding here would discard an unsaved editor buffer before refresh can
+  // report its external-change conflict.
+  useEffect(() => {
+    if (viewRef.current) revealEditorLine(viewRef.current, scrollToLine);
+  }, [scrollToLine]);
 
   const restoreScrollTopRef = useRef(restoreScrollTop);
   restoreScrollTopRef.current = restoreScrollTop;

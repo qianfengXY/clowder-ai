@@ -260,9 +260,11 @@ describe('useWorkspace worktree refresh', () => {
     const urls = apiFetchMock.mock.calls.map(([url]) => String(url));
     expect(urls).toContain('/api/workspace/worktrees?repoRoot=%2Ftmp%2Fforeign-project');
     expect(urls).toContain('/api/workspace/worktrees?repoRoot=%2Ftmp%2Fcurrent-project');
-    expect(urls.some((url) => url.startsWith('/api/workspace/file?') && url.includes('path=docs%2Fstudy.md'))).toBe(
-      true,
-    );
+    // Body reads belong to the mounted descriptor owner, not this metadata hook.
+    expect(
+      urls.some((url) => url.startsWith('/api/workspace/tree?') && url.includes('worktreeId=230809_cat-cafe')),
+    ).toBe(true);
+    expect(urls.some((url) => url.startsWith('/api/workspace/file?'))).toBe(false);
     expect(urls.some((url) => url.startsWith('/api/workspace/file?') && url.includes('worktreeId=foreign-repo'))).toBe(
       false,
     );

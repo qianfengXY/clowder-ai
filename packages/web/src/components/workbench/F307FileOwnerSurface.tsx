@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { WorkspaceFileViewer } from '@/components/workspace/WorkspaceFileViewer';
 import { useFileEditing } from '@/hooks/useFileEditing';
-import type { FileData } from '@/hooks/useWorkspace';
+import { useWorkspaceFile } from '@/hooks/useWorkspaceFile';
 import { apiFetch } from '@/utils/api-client';
 import { resolveFileTarget } from './real-surface-adapters';
 
@@ -27,45 +27,27 @@ function FileOwnerUnavailable({ message }: { message: string }) {
 
 function ResolvedFileOwnerSurface({
   target,
+  openRequest,
   onRequestDetach,
 }: {
   target: FileOwnerTarget;
+  openRequest: WorkspaceSurfaceDescriptor;
   onRequestDetach: () => void;
 }) {
-  const [file, setFile] = useState<FileData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const {
+    file,
+    reloadVersion,
+    error,
+    refresh,
+    fetchFile,
+    setEditDirty,
+    pendingExternalSha,
+    applyExternalChange,
+    dismissExternalChange,
+  } = useWorkspaceFile(target.worktreeId, target.path, openRequest);
   const [markdownRendered, setMarkdownRendered] = useState(true);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [jsxPreview, setJsxPreview] = useState(false);
-  const requestSeq = useRef(0);
-
-  const fetchFile = useCallback(
-    async (path: string) => {
-      const seq = ++requestSeq.current;
-      setLoading(true);
-      setError(false);
-      try {
-        const params = new URLSearchParams({ worktreeId: target.worktreeId, path });
-        const response = await apiFetch(`/api/workspace/file?${params}`);
-        if (!response.ok) throw new Error(`workspace file owner unavailable: ${response.status}`);
-        const nextFile = (await response.json()) as FileData;
-        if (seq === requestSeq.current) setFile(nextFile);
-      } catch {
-        if (seq === requestSeq.current) {
-          setFile(null);
-          setError(true);
-        }
-      } finally {
-        if (seq === requestSeq.current) setLoading(false);
-      }
-    },
-    [target.worktreeId],
-  );
-
-  useEffect(() => {
-    void fetchFile(target.path);
-  }, [fetchFile, target.path]);
 
   const { editMode, setEditMode, saveError, canEdit, handleToggleEdit, handleSave } = useFileEditing({
     worktreeId: target.worktreeId,
@@ -85,9 +67,12 @@ function ResolvedFileOwnerSurface({
     [target.worktreeId],
   );
 
-  if (loading) return <div className="p-5 text-xs text-cafe-muted">正在从原 worktree 恢复文件…</div>;
-  if (error || !file)
-    return <FileOwnerUnavailable message="F063 文件 owner 暂时不可用；Workbench 没有改用当前 Workspace。" />;
+  if (!file)
+    return error ? (
+      <FileOwnerUnavailable message={error} />
+    ) : (
+      <div className="p-5 text-xs text-cafe-muted">正在从原 worktree 恢复文件…</div>
+    );
 
   const isMarkdown = /\.mdx?$/i.test(target.path);
   const isHtml = /\.html?$/i.test(target.path);
@@ -95,6 +80,7 @@ function ResolvedFileOwnerSurface({
   return (
     <div className="flex min-h-0 flex-1" data-owner-worktree={target.worktreeId} data-owner-path={target.path}>
       <WorkspaceFileViewer
+        key={reloadVersion}
         file={file}
         openFilePath={target.path}
         openTabs={[target.path]}
@@ -106,10 +92,12 @@ function ResolvedFileOwnerSurface({
         markdownRendered={markdownRendered}
         htmlPreview={htmlPreview}
         jsxPreview={jsxPreview}
-        saveError={saveError}
+        saveError={saveError ?? error}
         scrollToLine={target.scrollToLine}
         worktreeId={target.worktreeId}
-        setOpenFile={() => undefined}
+        setOpenFile={() => {
+          void refresh();
+        }}
         closeTab={onRequestDetach}
         onCloseCurrentTab={() => {
           setEditMode(false);
@@ -120,6 +108,10 @@ function ResolvedFileOwnerSurface({
         onToggleHtmlPreview={() => setHtmlPreview((current) => !current)}
         onToggleJsxPreview={() => setJsxPreview((current) => !current)}
         onSave={handleSave}
+        onDirtyChange={setEditDirty}
+        pendingExternalSha={pendingExternalSha}
+        onApplyExternalChange={applyExternalChange}
+        onDismissExternalChange={dismissExternalChange}
         revealInFinder={revealInFinder}
       />
     </div>
@@ -135,5 +127,12 @@ export function F307FileOwnerSurface({
 }) {
   const target = resolveFileTarget(surface);
   if (!target) return <FileOwnerUnavailable message="File descriptor 没有合法的 F063 owner/result target。" />;
-  return <ResolvedFileOwnerSurface target={target} onRequestDetach={onRequestDetach} />;
+  return (
+    <ResolvedFileOwnerSurface
+      key={JSON.stringify([target.worktreeId, target.path])}
+      target={target}
+      openRequest={surface}
+      onRequestDetach={onRequestDetach}
+    />
+  );
 }
