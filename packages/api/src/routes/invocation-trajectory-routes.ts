@@ -24,7 +24,7 @@ interface InvocationTrajectoryRouteDependencies {
     SessionTranscriptRouteOptions,
     'invocationRecordStore' | 'turnExecutionStore' | 'sessionChainStore' | 'threadStore'
   >;
-  readSessionEvents: (session: ReadableSession) => Promise<TranscriptEvent[]>;
+  readSessionEvents: (session: ReadableSession, signal?: AbortSignal) => Promise<TranscriptEvent[]>;
   readInvocationEvents: (session: ReadableSession, invocationId: string) => Promise<TranscriptEvent[]>;
   messageStore?: SessionTranscriptRouteOptions['messageStore'];
   keyedContentDigest?: (value: string) => Promise<string>;
@@ -176,15 +176,28 @@ export function registerInvocationTrajectoryRoutes(
     if (Number.isNaN(limitValue) || limitValue < 1) {
       return reply.status(400).send({ error: 'Invalid limit: must be a positive integer' });
     }
-    const projected = (
-      await Promise.all(
-        scopedSessions.map(async (session) =>
-          projectInvocationTrajectories(await dependencies.readSessionEvents(session), session),
-        ),
-      )
-    )
-      .flat()
-      .sort((left, right) => right.startedAt - left.startedAt || left.invocationId.localeCompare(right.invocationId));
+    const controller = new AbortController();
+    const onClose = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    };
+    reply.raw.on('close', onClose);
+    const projected: ReturnType<typeof projectInvocationTrajectories> = [];
+    try {
+      // A session can contain hundreds of MB. Release each raw transcript after
+      // projection instead of expanding every session concurrently on the API heap.
+      for (const session of scopedSessions) {
+        if (reply.raw.destroyed) controller.abort();
+        controller.signal.throwIfAborted();
+        projected.push(
+          ...projectInvocationTrajectories(await dependencies.readSessionEvents(session, controller.signal), session),
+        );
+      }
+    } finally {
+      reply.raw.off('close', onClose);
+    }
+    projected.sort(
+      (left, right) => right.startedAt - left.startedAt || left.invocationId.localeCompare(right.invocationId),
+    );
     return reply.send({
       invocations: projected.slice(0, Math.min(limitValue, 500)),
       total: projected.length,

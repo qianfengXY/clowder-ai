@@ -14,14 +14,21 @@
  */
 
 import { createHmac, randomBytes } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
 } from '../../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../../agents/routing/route-helpers.js';
-import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
+import {
+  mergeEventSourcesCooperatively,
+  normalizeTranscriptEvent,
+  transcriptEventFingerprint,
+} from './TranscriptEventEnvelope.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 
 export interface TranscriptSessionInfo {
@@ -316,21 +323,24 @@ export class TranscriptWriter {
    * read projection — it neither clears the buffer nor promotes the live file
    * into a second canonical transcript.
    */
-  async readActiveEvents(session: TranscriptSessionInfo): Promise<TranscriptEvent[]> {
+  async readActiveEvents(session: TranscriptSessionInfo, signal?: AbortSignal): Promise<TranscriptEvent[]> {
+    signal?.throwIfAborted();
     await this.drainPendingWrites(session.sessionId);
-    const liveEvents = await this.readEventsFromLiveFile(this.sessionDir(session));
+    const liveEvents = await this.readEventsFromLiveFile(this.sessionDir(session), signal);
     const bufferedEvents = [...(this.buffers.get(session.sessionId) ?? [])];
-    return mergeLiveAndBufferedEvents(liveEvents, bufferedEvents).map((entry) => ({
-      v: 1,
-      t: entry.timestamp,
-      threadId: session.threadId,
-      catId: session.catId,
-      sessionId: session.sessionId,
-      ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-      ...(entry.invocationId ? { invocationId: entry.invocationId } : {}),
-      eventNo: entry.eventNo,
-      event: entry.event,
-    }));
+    return (await mergeEventSourcesCooperatively(liveEvents, bufferedEvents, bufferedEventFingerprint, signal)).map(
+      (entry, eventNo) => ({
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        ...(entry.invocationId ? { invocationId: entry.invocationId } : {}),
+        eventNo,
+        event: entry.event,
+      }),
+    );
   }
 
   /**
@@ -366,11 +376,16 @@ export class TranscriptWriter {
   }
 
   /** Read raw events from the incremental live file. Returns [] if file doesn't exist. */
-  private async readEventsFromLiveFile(sessionDir: string): Promise<BufferedEvent[]> {
+  private async readEventsFromLiveFile(sessionDir: string, signal?: AbortSignal): Promise<BufferedEvent[]> {
+    signal?.throwIfAborted();
+    const input = createReadStream(join(sessionDir, 'events.live.jsonl'), { encoding: 'utf-8', signal });
+    const lines = createInterface({ input, crlfDelay: Infinity });
     try {
-      const content = await readFile(join(sessionDir, 'events.live.jsonl'), 'utf-8');
       const events: BufferedEvent[] = [];
-      for (const line of content.split('\n')) {
+      let processed = 0;
+      for await (const line of lines) {
+        if (++processed % 128 === 0) await yieldToEventLoop();
+        signal?.throwIfAborted();
         if (!line.trim()) continue;
         try {
           const envelope = normalizeTranscriptEvent(JSON.parse(line));
@@ -387,7 +402,11 @@ export class TranscriptWriter {
       }
       return events;
     } catch {
+      signal?.throwIfAborted();
       return [];
+    } finally {
+      lines.close();
+      input.destroy();
     }
   }
 

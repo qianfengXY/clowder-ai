@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { createSharedProbe } from '@/utils/shared-probe';
 
 export type ConnectionLevel = 'online' | 'degraded' | 'offline';
 
@@ -113,7 +114,8 @@ export function deriveDeploymentAdmission(
 // A real page reload evaluates the module again and intentionally resets it.
 const pageDeploymentRevision = createDeploymentRevisionTracker();
 
-const POLL_INTERVAL_MS = 15_000;
+// These status probes supplement realtime connectivity; avoid constant tunnel churn.
+const POLL_INTERVAL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 2_500;
 const FAILURE_THRESHOLD = 2;
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -155,8 +157,11 @@ interface PublicProbeResult {
   deploymentRevision: string | null;
 }
 
-async function probePublicEndpoint(path: string): Promise<PublicProbeResult> {
+async function probePublicEndpoint(path: string, signal: AbortSignal): Promise<PublicProbeResult> {
   const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  if (signal.aborted) controller.abort();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(`${API_URL}${path}`, {
@@ -172,6 +177,7 @@ async function probePublicEndpoint(path: string): Promise<PublicProbeResult> {
     return { level: 'offline', deploymentRevision: null };
   } finally {
     clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -179,9 +185,9 @@ async function probePublicEndpoint(path: string): Promise<PublicProbeResult> {
  * Upstream probe: if roster is fetchable and at least one cat is routable, treat as online.
  * We use this as a low-cost proxy signal for "model side reachable enough to serve".
  */
-async function probeCatsAvailability(): Promise<ConnectionLevel> {
+async function probeCatsAvailability(signal: AbortSignal): Promise<ConnectionLevel> {
   try {
-    const res = await apiFetch('/api/cats');
+    const res = await apiFetch('/api/cats', { signal });
     if (!res.ok) return 'degraded';
     const data = (await res.json().catch(() => null)) as { cats?: Array<{ roster?: { available?: boolean } }> } | null;
     const cats = Array.isArray(data?.cats) ? data.cats : [];
@@ -198,6 +204,16 @@ function mergeUpstreamSignal(ready: ConnectionLevel, cats: ConnectionLevel): Con
   if (ready === 'degraded' || cats === 'degraded') return 'degraded';
   return 'online';
 }
+
+const connectionProbes = createSharedProbe(
+  (signal) =>
+    Promise.all([
+      probePublicEndpoint('/api/health', signal),
+      probePublicEndpoint('/api/ready', signal),
+      probeCatsAvailability(signal),
+    ]),
+  POLL_INTERVAL_MS,
+);
 
 export function useConnectionStatus(socketConnected?: boolean | null): ConnectionProbeState {
   const probesEnabled = process.env.NODE_ENV !== 'test';
@@ -239,21 +255,17 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
     [],
   );
 
-  const runProbe = useCallback(async () => {
-    if (browserOfflineForcesDown) return;
-    if (!probesEnabled) return;
-    const [apiProbe, readyProbe, catsLevel] = await Promise.all([
-      probePublicEndpoint('/api/health'),
-      probePublicEndpoint('/api/ready'),
-      probeCatsAvailability(),
-    ]);
-    if (!mountedRef.current) return;
+  const applyProbe = useCallback(
+    ([apiProbe, readyProbe, catsLevel]: [PublicProbeResult, PublicProbeResult, ConnectionLevel]) => {
+      if (!mountedRef.current) return;
 
-    applyWithFailureThreshold(apiProbe.level, apiFailureCountRef, setApi);
-    applyWithFailureThreshold(mergeUpstreamSignal(readyProbe.level, catsLevel), upstreamFailureCountRef, setUpstream);
-    setDeploymentRevision(pageDeploymentRevision.observe(apiProbe.deploymentRevision, apiProbe.level === 'online'));
-    setCheckedAt(Date.now());
-  }, [applyWithFailureThreshold, browserOfflineForcesDown, probesEnabled]);
+      applyWithFailureThreshold(apiProbe.level, apiFailureCountRef, setApi);
+      applyWithFailureThreshold(mergeUpstreamSignal(readyProbe.level, catsLevel), upstreamFailureCountRef, setUpstream);
+      setDeploymentRevision(pageDeploymentRevision.observe(apiProbe.deploymentRevision, apiProbe.level === 'online'));
+      setCheckedAt(Date.now());
+    },
+    [applyWithFailureThreshold],
+  );
 
   useEffect(() => {
     if (browserOfflineForcesDown) {
@@ -274,16 +286,12 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
       return;
     }
 
-    void runProbe();
-    const timer = setInterval(() => {
-      void runProbe();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [browserOfflineForcesDown, runProbe, probesEnabled]);
+    return connectionProbes.subscribe(applyProbe);
+  }, [browserOfflineForcesDown, applyProbe, probesEnabled]);
 
   useEffect(() => {
-    if (socketConnected === true) void runProbe();
-  }, [socketConnected, runProbe]);
+    if (socketConnected === true && probesEnabled && !browserOfflineForcesDown) connectionProbes.refresh();
+  }, [socketConnected, browserOfflineForcesDown, probesEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
