@@ -1,3 +1,4 @@
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import type { TranscriptEvent } from './TranscriptReader.js';
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -70,6 +71,7 @@ export function mergeTranscriptEventSources(
   supplementalEvents: TranscriptEvent[],
 ): TranscriptEvent[] {
   if (supplementalEvents.length === 0) return primaryEvents;
+  if (primaryEvents.length === 0) return supplementalEvents.map((event, eventNo) => ({ ...event, eventNo }));
 
   const supplementalCounts = new Map<string, number>();
   for (const event of supplementalEvents) {
@@ -90,4 +92,52 @@ export function mergeTranscriptEventSources(
   }
 
   return [...primaryOnly, ...supplementalEvents].map((event, eventNo) => ({ ...event, eventNo }));
+}
+
+/** Same multiset merge, but let health checks and cancellation run during large reads. */
+export async function mergeTranscriptEventSourcesAsync(
+  primaryEvents: TranscriptEvent[],
+  supplementalEvents: TranscriptEvent[],
+  signal?: AbortSignal,
+): Promise<TranscriptEvent[]> {
+  signal?.throwIfAborted();
+  if (supplementalEvents.length === 0) return primaryEvents;
+  return (
+    await mergeEventSourcesCooperatively(primaryEvents, supplementalEvents, transcriptEventFingerprint, signal)
+  ).map((event, eventNo) => ({ ...event, eventNo }));
+}
+
+/** Preserve multiplicity and supplemental precedence without retaining a second
+ * full-file text copy or monopolizing the event loop while fingerprinting. */
+export async function mergeEventSourcesCooperatively<T>(
+  primaryEvents: T[],
+  supplementalEvents: T[],
+  fingerprint: (event: T) => string,
+  signal?: AbortSignal,
+): Promise<T[]> {
+  signal?.throwIfAborted();
+  if (primaryEvents.length === 0) return supplementalEvents;
+  if (supplementalEvents.length === 0) return primaryEvents;
+  const counts = new Map<string, number>();
+  let processed = 0;
+  const checkpoint = async () => {
+    await yieldToEventLoop();
+    signal?.throwIfAborted();
+  };
+  for (const event of supplementalEvents) {
+    if (++processed % 128 === 0) await checkpoint();
+    const key = fingerprint(event);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const primaryOnly: T[] = [];
+  for (const event of primaryEvents) {
+    if (++processed % 128 === 0) await checkpoint();
+    const key = fingerprint(event);
+    const remaining = counts.get(key) ?? 0;
+    if (remaining > 0) {
+      if (remaining === 1) counts.delete(key);
+      else counts.set(key, remaining - 1);
+    } else primaryOnly.push(event);
+  }
+  return [...primaryOnly, ...supplementalEvents];
 }

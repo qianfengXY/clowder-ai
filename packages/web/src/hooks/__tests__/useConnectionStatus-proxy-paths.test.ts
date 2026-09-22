@@ -10,8 +10,8 @@ const src = readFileSync(resolve(testDir, '../useConnectionStatus.ts'), 'utf8');
 
 describe('useConnectionStatus reverse-proxy paths', () => {
   it('probes health endpoints through the same /api/ reverse-proxy boundary', () => {
-    expect(src).toContain("probePublicEndpoint('/api/health')");
-    expect(src).toContain("probePublicEndpoint('/api/ready')");
+    expect(src).toContain("probePublicEndpoint('/api/health', signal)");
+    expect(src).toContain("probePublicEndpoint('/api/ready', signal)");
     expect(src).not.toContain("probePublicEndpoint('/health')");
     expect(src).not.toContain("probePublicEndpoint('/ready')");
   });

@@ -18,7 +18,7 @@ import {
   threadAccessDeniedBody,
   threadRecordAccessDeniedBody,
 } from '../domains/cats/services/session/thread-access-policy.js';
-import { mergeTranscriptEventSources } from '../domains/cats/services/session/transcript/TranscriptEventEnvelope.js';
+import { mergeTranscriptEventSourcesAsync } from '../domains/cats/services/session/transcript/TranscriptEventEnvelope.js';
 import { formatEventsChat } from '../domains/cats/services/session/transcript/TranscriptFormatter.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { registerInvocationTrajectoryRoutes } from './invocation-trajectory-routes.js';
@@ -46,23 +46,26 @@ export async function sessionTranscriptRoutes(
     memoryCueSourceReader,
   } = opts;
 
-  async function readActiveSessionEvents(session: ReadableSession) {
+  async function readActiveSessionEvents(session: ReadableSession, signal?: AbortSignal) {
     if (session.status !== 'sealed' && transcriptWriter) {
-      return transcriptWriter.readActiveEvents({
-        sessionId: session.id,
-        threadId: session.threadId,
-        catId: session.catId,
-        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-        seq: session.seq,
-      });
+      return transcriptWriter.readActiveEvents(
+        {
+          sessionId: session.id,
+          threadId: session.threadId,
+          catId: session.catId,
+          ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+          seq: session.seq,
+        },
+        signal,
+      );
     }
     return [];
   }
 
-  async function readSessionEvents(session: ReadableSession) {
-    const activeEvents = await readActiveSessionEvents(session);
-    const persistedEvents = await transcriptReader.readAllEvents(session.id, session.threadId, session.catId);
-    return mergeTranscriptEventSources(persistedEvents, activeEvents);
+  async function readSessionEvents(session: ReadableSession, signal?: AbortSignal) {
+    const activeEvents = await readActiveSessionEvents(session, signal);
+    const persistedEvents = await transcriptReader.readAllEvents(session.id, session.threadId, session.catId, signal);
+    return mergeTranscriptEventSourcesAsync(persistedEvents, activeEvents, signal);
   }
 
   async function readInvocationEvents(session: ReadableSession, invocationId: string) {

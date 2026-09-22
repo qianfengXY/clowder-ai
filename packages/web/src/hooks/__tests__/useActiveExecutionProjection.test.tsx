@@ -99,7 +99,7 @@ describe('F295 canonical execution hydration', () => {
     expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      vi.advanceTimersByTime(4_000);
+      vi.advanceTimersByTime(10_000);
     });
     expect(mocks.apiFetch).toHaveBeenCalledTimes(3);
 

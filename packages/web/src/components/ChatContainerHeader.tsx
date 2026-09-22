@@ -95,7 +95,7 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
         if (!signal.aborted) setDaemonShortId(null);
         return false;
       }
-    }, 5000);
+    }, 30_000);
     return poller.stop;
   }, [threadId]);
 
