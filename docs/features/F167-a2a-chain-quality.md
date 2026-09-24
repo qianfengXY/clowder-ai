@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-09-04
+updated: 2026-09-24
 tips_exempt: "Renewed 2026-09-08 for upstream integration of terminal-lineage repair with fork managed-command carrier retirement: this preserves existing coordination and consumed receipts without adding a user-invokable action or discovery workflow."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -904,6 +904,18 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **把两个维度压成一根轴，导致钟摆式过度纠正**：将“术语透明度”与“语体正式度”错误合并为“学术黑话 ↔ 大白话”，收到去黑话反馈后直接滑到口语端，漏掉“透明且正式”的目标象限。与 Case E7 的语域整体预测缺失同型。**分界判据**：改写正式表达时分别检查（1）术语是否可解释，（2）句法是否自然，（3）语体是否匹配场合；去掉黑话不等于降低正式度。 |
 | 纠正轮次 | 同一任务 2 次：`0001788539041626-001301-d8b1f4fa` 首次指出标题和图中文字仍有奇怪黑话；`0001788543273574-001378-6801c11d` 再次指出“大白话”不是目标。 |
 | 元心智哪条没执行 | Q3 坐标变换——没有把“可理解性”和“正式度”拆成正交维度，也没有在技术领导路演这一真实使用场景里朗读检查整句。 |
+
+### Case E22: 把完整调用链绘图压成概念摘要（2026-09-24，cat-idwxwjba / gpt-6-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 单页技术 PPT 要简洁，就应把用户提供的调用链合并为少数概念卡片，再用文字解释细节。 |
+| 实际要求 | 在一页 PPT 中画出实际调用关系，保留关键函数和接口，清楚展示正常分支、失败落点、异常传播和循环返回点；通过排版层次让读者快速理解。 |
+| 偏差根因 | **任务替换 + 信息完整性与视觉简洁度混为一轴**：把“简洁清晰”理解为删掉实际节点，用概念摘要替换流程图。错误例是省略调用关系后补一段解释；正确例是保留源节点，按职责分区、用颜色区分路径，并逐条核对箭头。分界判据：可追溯性由节点与边的覆盖决定，易读性由层级与布局决定，二者分别验收。 |
+| 纠正轮次 | 同一任务两次明确纠正：`thread_muevjiaa8wh9f98a` 中 `0001790231363820-000186-3671a619` 要求重点可见、逻辑清晰；`0001790232427493-000192-a45b8747` 再次明确要在单页 PPT 上展示调用链流程图。修订稿已逐项核对 29 个源节点/标识，检查实际渲染的箭头方向与回路接点，并交付原生可编辑 PPT 和聊天预览；此记录不代表用户已验收。 |
+| 元心智哪条没执行 | Q1 没有持续锚定“调用链流程图”这一交付物；Q3 没有把内容覆盖与视觉层级作为两个独立维度，反复通过删信息追求简洁。 |
+
+仅记录表达方法与偏差证据，不回流外部项目的事故数据。
 
 ## Review Gate
 
