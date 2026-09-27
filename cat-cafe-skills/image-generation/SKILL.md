@@ -1,10 +1,11 @@
 ---
 name: image-generation
+tips_exempt: Corrected 2026-09-27 to distinguish existing native auto-publication from inline data-URI delivery of browser downloads; no new image-generation capability or discovery surface.
 description: >
   AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
   Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
   Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
-  Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
+  Output: 原生生成图自动发布；浏览器下载小图可内联交付，或作为视觉 mock / 图像素材进入后续制作。
 ---
 
 # AI 图片生成 Skill

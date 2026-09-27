@@ -1,6 +1,6 @@
 ---
 name: anime-forge
-tips_exempt: delivery error row only — no new user-facing capability; continuity commit will reference video-forge SOT
+tips_exempt: Renewed 2026-09-27 to remove unsafe runtime-copy delivery instructions and disclose the existing local-video publication gap; no new animation capability or discovery surface.
 description: >
   AI 生成动画短片生产线：图（关键帧锁确定性）→ 视频（i2v 给活气）→ 后期（剪辑做节奏）。
   Use when: 做动画短剧/角色 IP 短片、猫咖日记系列新集、图生视频管线、剧情类 AI 视频。
