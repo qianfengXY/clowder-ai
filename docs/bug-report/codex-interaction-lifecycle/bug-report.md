@@ -50,10 +50,13 @@ extracted patch. Together with the existing adapter, wire-edge and canonical
 registration suites, the targeted source tests passed 17/17.
 
 The transport timeout regression was retained separately in
-`codex-app-server-transport.test.js`. Its earlier RED and GREEN belong to the
-combined candidate; this branch still needs its own built transport test and
-full gate. No runtime, actual CUA tool, permission store or production data was
-used in these tests.
+`codex-app-server-transport.test.js`. The independent branch at
+`43c165c6750626c91fb9e9c39956a723e6e5dcfa` subsequently passed the MCP/API builds,
+the complete built transport suite, and the canonical runtime-interaction suite
+(43 passed, none failed). The managed command exited 0 after 211 seconds. Tests
+used an isolated HOME with inherited Redis and Codex home settings removed.
+No runtime, actual CUA tool, permission store or production data was used.
+The full risk gate remains outstanding; these targeted results do not replace it.
 
 ## Remaining acceptance
 
