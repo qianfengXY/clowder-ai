@@ -1955,7 +1955,11 @@ export async function handlePublishFile(input: { sourcePath: string; expectedSha
     const payload = await prepareFilePublication(input);
     // Do not persist confidential file bytes in a callback outbox. An explicit
     // retry re-reads the source and the server deduplicates the same publication.
-    return await callbackPost('/api/callbacks/publish-file', payload, { enableOutbox: false, retryDelaysMs: [] });
+    return await callbackPost('/api/callbacks/publish-file', payload, {
+      enableOutbox: false,
+      retryDelaysMs: [],
+      fetchTimeoutMs: 120_000,
+    });
   } catch (error) {
     return errorResult(`File publication failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -3790,6 +3794,8 @@ export const callbackTools = [
       'Output: uploads exact bytes through invocation authentication, attaches a file card, and returns URL, size and SHA256. ' +
       'GOTCHA: a local Markdown path is not a remote download. Do not copy into runtime/uploads; use this publisher. ' +
       'Requires active invocation credentials, a regular file up to 50 MiB, and user authorization to share that file. ' +
+      'This publishes to the Hub chat only, without IM connector forwarding. A timeout can leave publication successful: ' +
+      'retry the same file in the same invocation to recover the same messageId. ' +
       'Publication receipt does not prove the remote client downloaded it; verify that separately.',
     inputSchema: publishFileInputSchema,
     handler: handlePublishFile,

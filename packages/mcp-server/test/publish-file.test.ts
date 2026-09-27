@@ -32,6 +32,7 @@ test('publisher sends exact bytes and filename, checks expected hash, and reject
   const expectedSha256 = createHash('sha256').update(bytes).digest('hex');
   await writeFile(sourcePath, bytes);
   const calls: Array<{ url: string; options: RequestInit }> = [];
+  const timeout = t.mock.method(AbortSignal, 'timeout', () => new AbortController().signal);
   globalThis.fetch = async (url, options) => {
     calls.push({ url: String(url), options: options! });
     return new Response(JSON.stringify({ status: 'ok', sha256: expectedSha256 }), { status: 200 });
@@ -39,6 +40,11 @@ test('publisher sends exact bytes and filename, checks expected hash, and reject
   const result = await tool.handler({ sourcePath, expectedSha256 });
   assert.ok(!result.isError);
   assert.equal(calls.length, 1);
+  assert.equal(
+    timeout.mock.calls[0]?.arguments[0],
+    120_000,
+    'bounded upload budget exceeds the small callback default',
+  );
   assert.match(calls[0]!.url, /\/api\/callbacks\/publish-file$/);
   const body = JSON.parse(String(calls[0]!.options.body));
   assert.equal(body.fileName, '合成文档.txt');
@@ -60,4 +66,10 @@ test('publisher sends exact bytes and filename, checks expected hash, and reject
     assert.ok((await tool.handler(input)).isError);
   }
   assert.equal(calls.length, 1, 'rejected local files must never be uploaded');
+  const parentLink = join(dir, 'parent-link');
+  await symlink(dir, parentLink);
+  assert.ok(
+    !(await tool.handler({ sourcePath: join(parentLink, '合成文档.txt'), expectedSha256 })).isError,
+    'O_NOFOLLOW constrains the leaf, not parent directory resolution',
+  );
 });

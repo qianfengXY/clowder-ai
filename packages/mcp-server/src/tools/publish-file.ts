@@ -9,7 +9,9 @@ export const publishFileInputSchema = {
   sourcePath: z
     .string()
     .min(1)
-    .describe('Absolute path to the existing document the user asked to receive. Regular files only; no symlinks.'),
+    .describe(
+      'Absolute path to the existing document the user asked to receive. Regular files only; the final path component must not be a symlink. Parent directory symlinks are followed.',
+    ),
   expectedSha256: z
     .string()
     .regex(/^[a-f0-9]{64}$/)

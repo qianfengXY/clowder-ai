@@ -98,6 +98,7 @@ test('rejects unauthenticated, malformed and forged-scope uploads without writin
     { sha256: '0'.repeat(64) },
     { dataBase64: '!!!' },
     { fileName: '../escape.txt' },
+    { fileName: 'report\u202Etxt.txt' },
     { mimeType: 'text/html' },
     { fileName: 'deck.pptx' },
     { threadId: 'foreign' },
@@ -118,6 +119,20 @@ test('deleted threads and stale invocations cannot publish', async (t) => {
   assert.notEqual((await stale.post()).json().status, 'ok');
   assert.deepEqual(await readdir(stale.uploadDir), []);
   assert.equal(stale.broadcasts.length, 0);
+});
+
+test('canonical base64 validation preserves padding bits without re-encoding the payload', async (t) => {
+  const h = await harness(t);
+  for (const [canonical, malformed] of [
+    ['AA==', 'AB=='],
+    ['AAA=', 'AAB='],
+    ['AAAA', 'AAA\n'],
+  ]) {
+    const data = Buffer.from(canonical, 'base64');
+    const sample = { ...payload, sha256: createHash('sha256').update(data).digest('hex') };
+    assert.equal((await h.post({ ...sample, dataBase64: malformed })).statusCode, 400);
+    assert.equal((await h.post({ ...sample, dataBase64: canonical })).statusCode, 200);
+  }
 });
 
 test('MCP publisher, authenticated HTTP endpoint and attachment download preserve the same bytes', async (t) => {

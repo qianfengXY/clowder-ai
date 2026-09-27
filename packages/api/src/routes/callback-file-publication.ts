@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { agentFileMime, MAX_AGENT_FILE_BASE64_LENGTH, MAX_AGENT_FILE_BYTES, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -10,7 +10,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { saveFileBufferToUploadDir } from '../utils/file-storage.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
-import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { admitCallbackBody, requireCallbackAuth } from './callback-auth-prehandler.js';
 import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 
 const inputSchema = z
@@ -19,7 +19,7 @@ const inputSchema = z
       .string()
       .min(1)
       .max(200)
-      .refine((name) => !/[\p{Cc}/\\]/u.test(name) && name !== '.' && name !== '..'),
+      .refine((name) => !/[\p{Cc}\p{Cf}/\\]/u.test(name) && name !== '.' && name !== '..'),
     mimeType: z.string().min(1),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     dataBase64: z.string().min(4).max(MAX_AGENT_FILE_BASE64_LENGTH),
@@ -27,18 +27,34 @@ const inputSchema = z
   .strict();
 const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
+function isCanonicalBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const end = value.length - padding;
+  if (/[^A-Za-z0-9+/]/.test(value.slice(0, end))) return false;
+  const tail = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(value.charAt(end - 1));
+  return padding === 0 || (tail & (padding === 2 ? 15 : 3)) === 0;
+}
+
+async function verifyStoredFile(path: string, length: number, sha256: string): Promise<boolean> {
+  const hash = createHash('sha256');
+  let read = 0;
+  for await (const chunk of createReadStream(path)) {
+    read += chunk.length;
+    if (read > length) return false;
+    hash.update(chunk);
+  }
+  return read === length && hash.digest('hex') === sha256;
+}
+
 function decodePublication(body: unknown) {
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) return { error: 'Invalid attachment payload' };
   const input = parsed.data;
   if (agentFileMime(input.fileName) !== input.mimeType) return { error: 'Unsupported filename / MIME type pair' };
+  if (!isCanonicalBase64(input.dataBase64)) return { error: 'Non-canonical attachment encoding' };
   const bytes = Buffer.from(input.dataBase64, 'base64');
-  if (
-    !bytes.length ||
-    bytes.length > MAX_AGENT_FILE_BYTES ||
-    bytes.toString('base64') !== input.dataBase64 ||
-    digest(bytes) !== input.sha256
-  )
+  if (!bytes.length || bytes.length > MAX_AGENT_FILE_BYTES || digest(bytes) !== input.sha256)
     return { error: 'Attachment byte length, encoding or SHA256 mismatch' };
   return { input, bytes };
 }
@@ -55,7 +71,10 @@ export function registerCallbackFilePublication(
 ): void {
   app.post(
     '/api/callbacks/publish-file',
-    { bodyLimit: MAX_AGENT_FILE_BASE64_LENGTH + 4096 },
+    {
+      bodyLimit: MAX_AGENT_FILE_BASE64_LENGTH + 4096,
+      onRequest: (request, reply) => admitCallbackBody(request, reply, deps.registry),
+    },
     async (request, reply) => {
       const actor = requireCallbackAuth(request, reply);
       if (!actor) return;
@@ -79,8 +98,7 @@ export function registerCallbackFilePublication(
         uploadDir: getDefaultUploadDir(deps.uploadDir ?? process.env.UPLOAD_DIR),
         filenameStem: `agent-${publicationId}`,
       });
-      const stored = await readFile(saved.absPath);
-      if (stored.length !== bytes.length || digest(stored) !== input.sha256) {
+      if (!(await verifyStoredFile(saved.absPath, bytes.length, input.sha256))) {
         return reply.code(409).send({ error: 'Stored attachment does not match this publication' });
       }
       // Saved bytes follow the existing upload retention policy (no TTL). A later
@@ -99,7 +117,7 @@ export function registerCallbackFilePublication(
         url: saved.urlPath,
         fileName: input.fileName,
         mimeType: input.mimeType,
-        fileSize: stored.length,
+        fileSize: bytes.length,
       };
       // Publication is durable before acknowledgement. It must survive buffer
       // expiry, a long invocation, and a lost HTTP or websocket acknowledgement.
@@ -137,7 +155,7 @@ export function registerCallbackFilePublication(
         url: saved.urlPath,
         fileName: input.fileName,
         mimeType: input.mimeType,
-        fileSize: stored.length,
+        fileSize: bytes.length,
         sha256: input.sha256,
         blockId: block.id,
         messageId: message.id,

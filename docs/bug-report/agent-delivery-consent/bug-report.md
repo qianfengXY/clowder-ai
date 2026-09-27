@@ -23,14 +23,30 @@ It does not implement image/video publishing or repair provider guard parity.
 ## Publication contract and retention
 
 `cat_cafe_publish_file({ sourcePath, expectedSha256? })` reads a local regular file
-without following symlinks and sends bytes with current invocation credentials.
+and sends bytes with current invocation credentials. `O_NOFOLLOW` rejects a symlink
+at the final path component; parent directory symlinks are followed. This is not a
+filesystem sandbox or a guarantee that every ancestor is a literal directory.
 The API accepts no source path, alternate actor or target thread. It verifies the
 filename/MIME pair, bounded canonical base64 and SHA256, checks current invocation
 and live thread, saves through the existing store, then verifies stored bytes.
+Header authentication and tool policy run before parsing the enlarged request body,
+then the ordinary preHandler verifies them again after parsing. Early admission
+does not prefill cached auth that could hide mid-upload revocation or policy changes.
+Storage writes a unique temporary file, then atomically links the complete file into
+place without replacing an existing destination. Failed writes remove only their
+own staging file. Identical concurrent retries cannot observe partial final bytes.
+Base64 alphabet/padding-bit checks avoid a full re-encoding allocation; stored bytes
+are verified with a bounded stream instead of loading a second whole file. The JSON
+body and decoded buffer still consume memory proportional to the 50 MiB file bound;
+this patch adds no global upload-concurrency policy.
 
 The API appends an idempotent, durable cat-authored file message before ACK.
 The key binds invocation, filename, MIME and bytes. A lost-ACK retry returns and
 rebroadcasts the same message; deleted-message tombstones prevent resurrection.
+The tool has a bounded 120-second upload timeout. Timeout is an ambiguous result:
+retry the same filename/MIME/bytes in the same invocation to recover the same
+messageId. No confidential bytes are stored in the callback outbox and this route
+does not forward attachments to IM connectors.
 The receipt proves server persistence, not remote-user receipt or download.
 Required remote acceptance uses the agreed download entry; if inaccessible,
 record it as unverified rather than impersonating the user.
@@ -79,6 +95,7 @@ the following edges now govern all document/image/video instructions in this dif
 | Local bytes → tool payload | Document MCP reads the path itself; inline media requires complete parameter bytes within the actual carrier's limits. No assumed image path reader. |
 | Payload → server admission | Invocation authentication, supported format and body bound; admission alone says nothing about message persistence. |
 | Admission → durable message | Document publisher appends before ACK; ordinary rich blocks first enter a transient buffer, then attach at host-message append. |
+| Durable message → live card | Socket receiver preserves cat identity and converts the persisted cat envelope to the same assistant type used by history loading. Verify the actual ChatMessage/FileBlock without a reload. |
 | Durable message → remote access | Agreed client/download entry readback; never substitute localhost 200 or server ACK. |
 | Message deletion → later retry | Tombstone prevents resurrection; stored upload bytes and original URL remain until authorized storage maintenance. |
 
@@ -109,6 +126,51 @@ No local grant cache or workspace self-asserted trust is acceptable.
 
 ## Verification and remaining acceptance
 
+### Full code review delta (source: 0001790545930216-000356-d6492481)
+
+The fourth formal changes-requested arrival triggered a pause and accepted-source
+reread (msg252). Finding pattern: previous instruction fixes stopped at server
+admission; this code review exposed two more boundary omissions — resource use
+before authentication, and a persisted/broadcast card that its live consumer dropped.
+The fix covers these concrete edges instead of another wording-only review loop.
+
+- P1 RED: a >1 MiB anonymous body reached the JSON parser. GREEN: missing, partial,
+  wrong and agent-key credentials reject before parsing; read-only/recovery deny;
+  valid headers admit the body; revocation/policy changes during parsing deny again.
+- P2 RED: actual useSocket/store/ChatMessage test stored `connector`, lost catId and
+  rendered no FileBlock. GREEN: the common receiver preserves cat authorship and
+  callback origin, deduplicates live retries and keeps background threads isolated.
+  This also covers the same envelope emitted by runtime interaction card publishers;
+  ordinary connector messages retain their existing behavior.
+- Browser regression uses isolated Fastify publication/auth, memory storage, real
+  Socket.IO and the actual useSocket/store/ChatMessage/FileBlock with production CSS.
+  One navigation, zero history fetches, visible download and byte-equal synthetic
+  download are required. This is local UI evidence, not remote PPT acceptance.
+  Author inspected the screenshot at
+  `/private/tmp/cat-cafe-evidence/agent-publication-r5/file-publication-live.png`.
+  The separate Hub preview launcher failed with `launchd Bootstrap failed: 5`;
+  status was `stopped`, so no Hub preview delivery is claimed.
+- P3 write-failure RED exposed a four-byte prefix at the deterministic final path.
+  GREEN tests failure, an overlapping same-key retry, concurrent successful retries
+  and non-overwrite. Filename formatting controls (including U+202E) now reject;
+  its test first returned 200 instead of 400. Padding-bit, timeout and parent-symlink
+  cases have explicit regression coverage.
+- Preexisting uploads HTML/nosniff behavior is outside this document whitelist and
+  not changed here; the review's potential stored-XSS observation is not a new A bug.
+
+Architecture ownership remains `hub-action-surface` (publication/display) and
+`bubble-pipeline` (live/history identity). No new state owner, event channel or
+permission system is added; MessageStore owns the durable body and the existing
+socket/store ingress owns its live projection. The shared file storage helper
+retains its non-overwrite contract for all existing callers, with atomic visibility.
+
+Author targeted verification for this delta: API/runtime suite 56/56 (including
+admission and atomic-write cases), MCP publication/registry 8/8, live receiver plus
+thread-guard suites 67/67, Chromium journey 1/1, and API/MCP/web typechecks passed.
+The new API cases and browser journey are registered in package test scripts.
+Compiled storage/auth regression and final security gate remain required; no older
+HEAD's gate or semantic-only verdict is used as approval for this delta.
+
 - Publisher RED was endpoint 404. API/MCP tests cover authentication, byte/MIME/hash
   validation, scope, durable idempotence, lost ACK and tombstones. Real isolated
   HTTP MCP → API → download verifies synthetic bytes/SHA256, not real-user access.
@@ -121,9 +183,11 @@ No local grant cache or workspace self-asserted trust is acceptable.
 - Earlier combined gates found an obsolete rules assertion and Collective fixture
   owner mismatch; corrected without changing production ownership checks.
   A later unchanged process-liveness test timed out on its child marker and passed
-  alone. Timing cause remains unproven; no full green is claimed.
-- Ongoing gate at combined HEAD `2efdc239` cannot validate the split's final tree.
-  Still required: final-tree tests/full gate, independent semantic and security/
+  alone. Timing cause remains unproven. Attachment-only a1465af1 subsequently passed
+  `managed-gate-264317d6-78a1-495a-92e5-2043c4022e02` (exit 0, 23,529 public tests
+  passed, 135 skipped; runtime 45/45 and MCP 8/8). That result is historical and does
+  not validate this review delta.
+- Still required: final-tree tests/full gate, independent semantic and security/
   contract review, merged isolated acceptance, governed activation.
 - Approved PPT remains unchanged in the user's delivery directory, outside Git.
   Formal file-card publication and remote readback are outstanding.

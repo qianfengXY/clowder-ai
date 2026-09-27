@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { link, mkdir, open, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import type { FileContent } from '@cat-cafe/shared';
 import { ImageUploadError, sanitizeFilenameStem } from './image-storage.js';
@@ -145,21 +145,21 @@ export async function saveFileBufferToUploadDir(input: {
   const urlPath = `/uploads/${diskFilename}` as const;
   const displayName = buildDisplayName(input.originalFilename, input.mimeType);
 
+  // Only complete bytes become visible under the final name. link() publishes
+  // without overwriting an existing upload, including a concurrent same-key retry.
+  const stagingPath = join(input.uploadDir, `.${diskFilename}.${randomUUID()}.tmp`);
+  const staging = await open(stagingPath, 'wx');
   try {
-    await writeFile(absPath, input.buffer, { flag: 'wx' });
-  } catch (error) {
-    if (!isFileExistsError(error)) throw error;
-    return {
-      absPath,
-      urlPath,
-      content: {
-        type: 'file',
-        url: urlPath,
-        fileName: displayName,
-        mimeType: input.mimeType,
-        fileSize: input.buffer.byteLength,
-      },
-    };
+    await writeFile(staging, input.buffer);
+    await staging.close();
+    try {
+      await link(stagingPath, absPath);
+    } catch (error) {
+      if (!isFileExistsError(error)) throw error;
+    }
+  } finally {
+    await staging.close();
+    await unlink(stagingPath);
   }
 
   return {

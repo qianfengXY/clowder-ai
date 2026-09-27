@@ -83,7 +83,9 @@ interface ConnectorMessageEvent {
   threadId: string;
   message: {
     id: string;
-    type: 'connector';
+    type: 'connector' | 'cat';
+    catId?: string;
+    origin?: 'stream' | 'callback';
     content: string;
     source?: import('../stores/chat-types').ConnectorSourceData;
     extra?: import('../stores/chat-types').ChatMessage['extra'];
@@ -1129,6 +1131,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     socket.on('connector_message', (data: ConnectorMessageEvent) => {
       if (!data?.threadId || !data?.message?.id) return;
+      // Persisted cat publishers share this non-streaming envelope. Preserve
+      // authorship like history hydration instead of hiding their rich blocks
+      // behind a source-less connector bubble. Never invent a missing author.
+      const isCatMessage = data.message.type === 'cat';
+      if (isCatMessage && !data.message.catId?.trim()) return;
       // Suppress internal routing diagnostics from user timeline
       if (data.message.source?.connector === 'routing-guard-failure') return;
       const toast = data.message.extra?.scheduler?.toast;
@@ -1148,7 +1155,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       if (semantic?.action === 'suppress') return;
       store.addMessageToThread(data.threadId, {
         id: data.message.id,
-        type: 'connector',
+        type: isCatMessage ? 'assistant' : 'connector',
+        ...(isCatMessage ? { catId: data.message.catId, origin: data.message.origin } : {}),
         content: semantic?.action === 'replace' ? semantic.projection.content : (data.message.content ?? ''),
         ...(data.message.source ? { source: data.message.source } : {}),
         ...(data.message.extra ? { extra: data.message.extra } : {}),

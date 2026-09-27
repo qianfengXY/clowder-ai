@@ -75,6 +75,33 @@ export function rejectCallbackAuthDuringStartupRecovery(registry: CallbackAuthRe
   return true;
 }
 
+/** Body admission for large callbacks: headers only, before buffering/parsing.
+ * Do not decorate callbackAuth here: the ordinary preHandler must verify again
+ * after the body has arrived, including revocation/recovery/policy changes.
+ */
+export async function admitCallbackBody(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  registry: CallbackAuthRegistry,
+): Promise<void> {
+  const invocationId = firstHeaderValue(request.headers['x-invocation-id']);
+  const callbackToken = firstHeaderValue(request.headers['x-callback-token']);
+  const tool = callbackToolFromUrl(request.url);
+  if (!invocationId || !callbackToken) {
+    recordCallbackAuthFailure({ reason: 'missing_creds', tool });
+    reply.code(401).send(makeCallbackAuthError('missing_creds'));
+    return;
+  }
+  if (rejectCallbackAuthDuringStartupRecovery(registry, reply)) return;
+  const result = await registry.verify(invocationId, callbackToken);
+  if (!result.ok) {
+    recordCallbackAuthFailure({ reason: result.reason, tool });
+    reply.code(401).send(makeCallbackAuthError(result.reason));
+    return;
+  }
+  allowToolExecution(request, reply, result.record);
+}
+
 /** Register the callbackAuth decoration + preHandler on a Fastify instance.
  *
  *  Behavior:
