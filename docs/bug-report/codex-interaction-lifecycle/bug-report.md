@@ -23,8 +23,10 @@ The client's timeout callback waited for lifecycle termination to close the
 interaction, leaving the interrupt-grace interval exposed.
 
 - Closed runs return before calling the interaction port.
-- A repeated request ID closes the run, invalidates its first waiter and fails
-  the carrier instead of publishing another interaction or racing two replies.
+- Every numeric server-request ID is recorded before dispatching to either an
+  interactive or rejection path. A repeated ID closes the run, invalidates its
+  first waiter and fails the carrier without another reply. Foreign coordinates,
+  unsupported methods and legacy approval replies share this wire ID namespace.
 - A positive opt-in timeout closes interactions before sending the interrupt.
 
 This branch does not change the consent adapter, request classification, choices,
@@ -38,11 +40,31 @@ Ordinary form, URL and user-input adapter behavior remains the baseline behavior
 | State / event | Required result |
 |---|---|
 | Live, first valid request ID | Existing adapter behavior |
-| Foreign thread or stale turn | Reject before publication |
-| Duplicate ID, first request pending or answered | Close once; no second publication |
+| Fresh ID with foreign thread or stale turn | Record ID; reject before publication; other fresh IDs remain usable |
+| Duplicate ID, first request pending or answered | Close once; no second publication or reply |
+| Valid pending request, then same ID with foreign coordinates or another method | Close; suppress the first request's late answer and the second reply |
+| Rejected request, then same ID with valid coordinates | Close; no new interaction or reply |
+| New run, ID previously used by another run | Independent ID set; existing adapter behavior |
 | Closed run, new request | No publication or response |
 | Close, followed by a late accept from a waiter ignoring abort | No wire response |
 | Opt-in timeout, before interrupt grace finishes | Interaction already invalidated |
+
+The ID rule is a Host compatibility policy scoped to one run, not a general
+[JSON-RPC guarantee](https://www.jsonrpc.org/specification) that completed IDs
+can never be reused. The upstream
+[OutgoingMessageSender implementation](https://github.com/openai/codex/blob/main/codex-rs/app-server/src/outgoing_message.rs)
+observed on 2026-09-27 initializes an atomic counter and increments it when
+allocating new server-request IDs. That supports the expected allocation pattern;
+it does not prove the installed binary matches that source or establish a promise
+for every upstream version. If an upstream deliberately reuses an ID within the
+same run after completion, this Host will terminate that run. A new run starts
+with a fresh ID set.
+
+Opt-in inactivity timeout currently invalidates with `transport_lost`, the
+existing terminal reason also used for a broken connection. The card therefore
+shows the connection-interrupted wording even when an idle timeout triggered
+invalidation. This patch does not add a distinct timeout reason or change the
+default disabled timeout; production run input currently does not set timeoutMs.
 
 The standalone lifecycle regression showed three baseline failures (duplicate
 pending ID, duplicate answered ID, dispatch after close), then passed with the

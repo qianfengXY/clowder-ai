@@ -49,16 +49,9 @@ export function createCodexRuntimeInteractionRunState(
     dispatch: (request, write, onFailure) => {
       if (closed) return;
       const task = (async () => {
-        if (isCodexRuntimeInteractionMethod(request.method) && !matchesProviderTurn(request, providerTurn)) {
-          if (!closed && typeof request.id === 'number') {
-            await write({
-              id: request.id,
-              error: { code: -32602, message: 'Invalid runtime interaction provider binding' },
-            });
-          }
-          return;
-        }
-        if (isCodexRuntimeInteractionMethod(request.method) && typeof request.id === 'number') {
+        // Rejections and legacy replies share the same wire ID namespace as
+        // interactive answers. Claim the ID before any branch can reply.
+        if (typeof request.id === 'number') {
           if (seenRequestIds.has(request.id)) {
             // Do not race two responses for one wire id. Invalidate any first
             // waiter before failing the carrier, so a late answer cannot grant.
@@ -67,6 +60,15 @@ export function createCodexRuntimeInteractionRunState(
             return;
           }
           seenRequestIds.add(request.id);
+        }
+        if (isCodexRuntimeInteractionMethod(request.method) && !matchesProviderTurn(request, providerTurn)) {
+          if (!closed && typeof request.id === 'number') {
+            await write({
+              id: request.id,
+              error: { code: -32602, message: 'Invalid runtime interaction provider binding' },
+            });
+          }
+          return;
         }
         if (isCodexApprovalInteractionMethod(request.method) && approvalsReviewer !== 'user') {
           // auto_review and guardian_subagent own permission decisions upstream.

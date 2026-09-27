@@ -20,6 +20,141 @@ function ordinaryForm(params = {}) {
   };
 }
 
+const nonPublishingRequests = [
+  { name: 'foreign thread', request: () => ordinaryForm({ threadId: 'foreign' }) },
+  { name: 'stale turn', request: () => ordinaryForm({ turnId: 'old-turn' }) },
+  { name: 'missing binding', request: () => ({ ...ordinaryForm(), params: {} }) },
+  { name: 'unsupported method', request: () => ({ ...ordinaryForm(), method: 'unsupported/request' }) },
+  { name: 'legacy approval', request: () => ({ ...ordinaryForm(), method: 'execCommandApproval' }) },
+];
+
+test('wire ID collisions on rejection paths invalidate an existing pending answer', async (t) => {
+  for (const variant of nonPublishingRequests) {
+    await t.test(variant.name, async () => {
+      let answer: ((response: RuntimeInteractionResponse) => void) | undefined;
+      let published = 0;
+      const invalidations: unknown[] = [];
+      const failures: Error[] = [];
+      const written: unknown[] = [];
+      const state = createCodexRuntimeInteractionRunState(
+        {
+          owner,
+          port: {
+            request: () => {
+              published++;
+              return new Promise((resolve) => {
+                answer = resolve;
+              });
+            },
+            invalidateInvocation: async (...args) => {
+              invalidations.push(args);
+            },
+          },
+        },
+        'auto_review',
+      );
+      assert.ok(state);
+      state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
+      const write = async (response: unknown) => {
+        written.push(response);
+      };
+      const fail = (error: Error) => {
+        failures.push(error);
+      };
+      state.dispatch(ordinaryForm(), write, fail);
+      assert.ok(answer);
+      state.dispatch(variant.request(), write, fail);
+      answer({ kind: 'decision', decisionId: 'accept', content: {} });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(published, 1);
+      assert.equal(failures.length, 1);
+      assert.deepEqual(invalidations, [[owner.invocationId, 'transport_lost']]);
+      assert.deepEqual(written, []);
+    });
+  }
+});
+
+test('wire IDs consumed by rejection paths cannot later publish a valid request', async (t) => {
+  for (const variant of nonPublishingRequests) {
+    await t.test(variant.name, async () => {
+      let published = 0;
+      const invalidations: unknown[] = [];
+      const failures: Error[] = [];
+      const written: unknown[] = [];
+      const state = createCodexRuntimeInteractionRunState(
+        {
+          owner,
+          port: {
+            request: async () => {
+              published++;
+              return { kind: 'decision', decisionId: 'accept', content: {} };
+            },
+            invalidateInvocation: async (...args) => {
+              invalidations.push(args);
+            },
+          },
+        },
+        'auto_review',
+      );
+      assert.ok(state);
+      state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
+      const write = async (response: unknown) => {
+        written.push(response);
+      };
+      const fail = (error: Error) => {
+        failures.push(error);
+      };
+      state.dispatch(variant.request(), write, fail);
+      await new Promise((resolve) => setImmediate(resolve));
+      const firstResponse = [...written];
+      assert.equal(firstResponse.length, 1);
+      state.dispatch(ordinaryForm(), write, fail);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(published, 0);
+      assert.equal(failures.length, 1);
+      assert.deepEqual(invalidations, [[owner.invocationId, 'transport_lost']]);
+      assert.deepEqual(written, firstResponse);
+    });
+  }
+});
+
+test('rejection of a fresh ID leaves other IDs usable and does not consume IDs in another run', async () => {
+  for (const rejectFirst of [true, false]) {
+    let published = 0;
+    const written: unknown[] = [];
+    const state = createCodexRuntimeInteractionRunState(
+      {
+        owner,
+        port: {
+          request: async () => {
+            published++;
+            return { kind: 'decision', decisionId: 'accept', content: {} };
+          },
+        },
+      },
+      'auto_review',
+    );
+    assert.ok(state);
+    state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
+    const write = async (response: unknown) => {
+      written.push(response);
+    };
+    if (rejectFirst) {
+      state.dispatch(ordinaryForm({ threadId: 'foreign' }), write, assert.fail);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    // The second run may use the ID rejected in the first run.
+    state.dispatch({ ...ordinaryForm(), id: rejectFirst ? 124 : 123 }, write, assert.fail);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(published, 1);
+    assert.deepEqual(written.at(-1), {
+      id: rejectFirst ? 124 : 123,
+      result: { action: 'accept', content: {} },
+    });
+    state.close('provider_cancelled');
+  }
+});
+
 test('a duplicate pending request invalidates its first waiter before a late accept', async () => {
   let answer: ((response: RuntimeInteractionResponse) => void) | undefined;
   let published = 0;
@@ -117,9 +252,9 @@ test('foreign provider coordinates and closed runs cannot publish or replay an o
   assert.ok(state);
   state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
   const written: unknown[] = [];
-  for (const params of [{ threadId: 'foreign' }, { turnId: 'old-turn' }]) {
+  for (const [index, params] of [{ threadId: 'foreign' }, { turnId: 'old-turn' }].entries()) {
     state.dispatch(
-      ordinaryForm(params),
+      { ...ordinaryForm(params), id: 123 + index },
       async (r) => {
         written.push(r);
       },
