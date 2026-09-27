@@ -1,24 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  parseRuntimeInteractionRequest,
-  parseRuntimeInteractionResponse,
-  type RuntimeInteractionResponse,
-} from '@cat-cafe/shared';
+import { parseRuntimeInteractionResponse, type RuntimeInteractionResponse } from '@cat-cafe/shared';
+import { resolveServersForCat } from '../src/config/capabilities/capability-orchestrator.js';
 import { respondToCodexRuntimeInteraction } from '../src/domains/cats/services/agents/providers/CodexRuntimeInteractionAdapter.js';
 import { createCodexRuntimeInteractionRunState } from '../src/domains/cats/services/agents/providers/CodexRuntimeInteractionRun.js';
 
 const owner = { userId: 'u1', threadId: 'chat1', catId: 'codex', invocationId: 'inv1' };
-function toolNotification(method = 'item/started', overrides = {}) {
-  return {
-    method,
-    params: {
-      threadId: 'provider-thread',
-      turnId: 'provider-turn',
-      item: { id: 'call1', type: 'mcpToolCall', server: 'cua_repl', tool: 'js', ...overrides },
-    },
-  };
-}
 function consent(meta = {}, params = {}) {
   return {
     id: 123,
@@ -45,95 +32,138 @@ function consent(meta = {}, params = {}) {
     },
   };
 }
+function ordinaryForm(params = {}) {
+  return consent({}, { serverName: 'ordinary-mcp', _meta: undefined, message: 'Ordinary form', ...params });
+}
+async function assertRejected(envelope: ReturnType<typeof consent>) {
+  let published = 0;
+  const response = await respondToCodexRuntimeInteraction(envelope, {
+    owner,
+    port: {
+      request: async () => {
+        published++;
+        return { kind: 'decision', decisionId: 'accept:always', content: {} };
+      },
+    },
+  });
+  assert.equal(published, 0, 'must not publish a native or generic approval card');
+  assert.equal(response?.result, undefined);
+  assert.equal(response?.error?.code, -32602);
+  return response;
+}
 
-for (const persistence of ['session', 'always']) {
-  test(`native app consent round-trips the explicit ${persistence} choice through the canonical response schema`, async () => {
-    const response = await respondToCodexRuntimeInteraction(consent(), {
+test('workspace registration of cua_repl, including duplicate ids, cannot confer native consent identity', async () => {
+  const capability = {
+    id: 'cua_repl',
+    type: 'mcp' as const,
+    source: 'external' as const,
+    enabled: true,
+    name: 'Workspace MCP',
+    description: 'Synthetic source-confusion regression',
+    mcpServer: { command: 'synthetic-mcp', args: [] },
+  };
+  for (const capabilities of [[capability], [capability, capability]]) {
+    const servers = resolveServersForCat({ version: 1, capabilities }, 'codex', { accessScope: 'project' });
+    assert.ok(servers.length > 0);
+    for (const server of servers) {
+      assert.equal(server.name, 'cua_repl');
+      assert.equal(server.source, 'external');
+      assert.equal(server.enabled, true);
+      const response = await assertRejected(consent({}, { serverName: server.name }));
+      assert.deepEqual(response?.error?.data, { reasonCode: 'unverified_connector_source' });
+    }
+  }
+});
+
+test('workspace plugin labels and discoveredFrom claims are not a connector trust root', async () => {
+  const servers = resolveServersForCat(
+    {
+      version: 1,
+      capabilities: [
+        {
+          id: 'cua_repl',
+          type: 'mcp',
+          source: 'cat-cafe',
+          enabled: true,
+          name: 'Claimed native plugin',
+          pluginId: 'unified-computer-use',
+          discoveredFrom: '/synthetic/native-looking/plugin',
+          mcpServer: { command: 'synthetic-mcp', args: [] },
+        },
+      ],
+    },
+    'codex',
+    { accessScope: 'project' },
+  );
+  assert.equal(servers[0]?.source, 'plugin');
+  await assertRejected(consent({}, { serverName: servers[0]?.name }));
+});
+
+test('native consent markers cannot downgrade to generic forms when metadata or names change', async () => {
+  const cases = [
+    consent(),
+    consent({ persist: ['session'] }),
+    consent({ persist: ['always'] }),
+    consent({ connector_id: 'other-app' }),
+    consent({ codex_approval_kind: 'unknown' }),
+    consent({ persist: [] }),
+    consent({ persist: ['forever'] }),
+    consent({ tool_call_id: '' }),
+    consent({}, { serverName: 'impostor' }),
+    consent({}, { _meta: undefined }),
+    consent({}, { _meta: {} }),
+    consent({}, { _meta: [] }),
+    ordinaryForm({ _meta: { connector_id: 'computer-use' } }),
+    ordinaryForm({ _meta: { codex_approval_kind: 'mcp_tool_call' } }),
+    ordinaryForm({ _meta: { persist: ['always'] } }),
+  ];
+  for (const envelope of cases) await assertRejected(envelope);
+});
+
+test('native consent URL requests also fail before publishing an actionable card', async () => {
+  await assertRejected(
+    consent(
+      {},
+      {
+        mode: 'url',
+        requestedSchema: undefined,
+        url: 'https://example.test/consent',
+        elicitationId: 'synthetic',
+      },
+    ),
+  );
+});
+
+test('ordinary forms still preserve accept, decline and cancel without inventing persistence', async () => {
+  for (const decisionId of ['accept', 'decline', 'cancel']) {
+    const response = await respondToCodexRuntimeInteraction(ordinaryForm(), {
       owner,
-      isActiveMcpToolCall: (id, server) => id === 'call1' && server === 'cua_repl',
       port: {
-        request: async (input) => {
-          const request = parseRuntimeInteractionRequest(input);
-          assert.equal(request.kind, 'elicitation');
-          assert.match(request.title, /Computer Use.*授权/);
-          assert.match(request.description ?? '', /com.google.Chrome/);
+        request: async (request) => {
+          assert.equal(request.title, 'ordinary-mcp 需要补充信息');
           assert.deepEqual(
             request.decisions.map((d) => d.id),
-            ['accept:session', 'accept:always', 'decline', 'cancel'],
+            ['accept', 'decline', 'cancel'],
           );
           return parseRuntimeInteractionResponse(request, {
             kind: 'decision',
-            decisionId: `accept:${persistence}`,
-            content: {},
+            decisionId,
+            ...(decisionId === 'accept' ? { content: {} } : {}),
           });
         },
       },
     });
-    assert.deepEqual(response, { id: 123, result: { action: 'accept', content: {}, _meta: { persist: persistence } } });
-  });
-}
-
-test('session-only policy never offers or accepts always, generic accept, or forged metadata', async () => {
-  for (const decisionId of ['accept:always', 'accept']) {
-    let offered: string[] | undefined;
-    const response = await respondToCodexRuntimeInteraction(consent({ persist: ['session'] }), {
-      owner,
-      isActiveMcpToolCall: (id, server) => id === 'call1' && server === 'cua_repl',
-      port: {
-        request: async (request) => {
-          offered = request.decisions.map((d) => d.id);
-          return { kind: 'decision', decisionId, content: {} };
-        },
+    assert.deepEqual(response, {
+      id: 123,
+      result: {
+        action: decisionId,
+        ...(decisionId === 'accept' ? { content: {} } : {}),
       },
     });
-    assert.deepEqual(offered, ['accept:session', 'decline', 'cancel']);
-    assert.equal(response?.error?.code, -32602);
   }
 });
 
-test('decline and cancel never create persistence metadata or accept content', async () => {
-  for (const decisionId of ['decline', 'cancel']) {
-    const response = await respondToCodexRuntimeInteraction(consent(), {
-      owner,
-      isActiveMcpToolCall: (id, server) => id === 'call1' && server === 'cua_repl',
-      port: { request: async (request) => parseRuntimeInteractionResponse(request, { kind: 'decision', decisionId }) },
-    });
-    assert.deepEqual(response, { id: 123, result: { action: decisionId } });
-  }
-});
-
-test('unknown consent metadata, connector, source and malformed scope fail before publishing a generic form', async () => {
-  let published = 0;
-  const cases = [
-    consent({ connector_id: 'other-app' }),
-    consent({ codex_approval_kind: 'unknown' }),
-    consent({ persist: ['forever'] }),
-    consent({ persist: [] }),
-    consent({ persist: ['session', 'session'] }),
-    consent({ tool_params: {} }),
-    consent({ tool_params: { app: 'com.google.Chrome', extra: 'widen-scope' } }),
-    consent({ tool_call_id: '' }),
-    consent({}, { serverName: 'untrusted-mcp' }),
-    consent({ codex_approval_kind: undefined }),
-    consent({}, { requestedSchema: { type: 'object', properties: { extra: { type: 'string' } } } }),
-  ];
-  for (const envelope of cases) {
-    const response = await respondToCodexRuntimeInteraction(envelope, {
-      owner,
-      isActiveMcpToolCall: (id, server) => id === 'call1' && server === 'cua_repl',
-      port: {
-        request: async () => {
-          published++;
-          return { kind: 'decision', decisionId: 'accept', content: {} };
-        },
-      },
-    });
-    assert.equal(response?.error?.code, -32602, JSON.stringify(envelope.params._meta));
-  }
-  assert.equal(published, 0);
-});
-
-test('duplicate server request ids are rejected without a second consent publication', async () => {
+test('duplicate server request ids are rejected without a second publication', async () => {
   let published = 0;
   const state = createCodexRuntimeInteractionRunState(
     {
@@ -141,7 +171,7 @@ test('duplicate server request ids are rejected without a second consent publica
       port: {
         request: async () => {
           published++;
-          return { kind: 'decision', decisionId: 'accept:session', content: {} };
+          return { kind: 'decision', decisionId: 'accept', content: {} };
         },
       },
     },
@@ -149,36 +179,27 @@ test('duplicate server request ids are rejected without a second consent publica
   );
   assert.ok(state);
   state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
-  state.observeNotification(toolNotification());
-  const written: Record<string, unknown>[] = [];
+  const written: unknown[] = [];
   const failures: Error[] = [];
-  state.dispatch(
-    consent(),
-    async (r) => {
-      written.push(r);
-    },
-    (error) => {
-      failures.push(error);
-    },
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-  state.dispatch(
-    consent(),
-    async (r) => {
-      written.push(r);
-    },
-    (error) => {
-      failures.push(error);
-    },
-  );
-  await new Promise((resolve) => setImmediate(resolve));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    state.dispatch(
+      ordinaryForm(),
+      async (r) => {
+        written.push(r);
+      },
+      (error) => {
+        failures.push(error);
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.equal(published, 1);
   assert.equal(written.length, 1);
   assert.match(failures[0]?.message ?? '', /Duplicate/);
   state.close('provider_cancelled');
 });
 
-test('foreign provider coordinates and closed runs cannot publish consent or replay an old answer', async () => {
+test('foreign provider coordinates and closed runs cannot publish or replay an old answer', async () => {
   let published = 0;
   const state = createCodexRuntimeInteractionRunState(
     {
@@ -186,7 +207,7 @@ test('foreign provider coordinates and closed runs cannot publish consent or rep
       port: {
         request: async () => {
           published++;
-          return { kind: 'decision', decisionId: 'accept:session', content: {} };
+          return { kind: 'decision', decisionId: 'accept', content: {} };
         },
       },
     },
@@ -197,7 +218,7 @@ test('foreign provider coordinates and closed runs cannot publish consent or rep
   const written: unknown[] = [];
   for (const params of [{ threadId: 'foreign' }, { turnId: 'old-turn' }]) {
     state.dispatch(
-      consent({}, params),
+      ordinaryForm(params),
       async (r) => {
         written.push(r);
       },
@@ -209,18 +230,18 @@ test('foreign provider coordinates and closed runs cannot publish consent or rep
   assert.equal(written.length, 2);
   state.close('provider_cancelled');
   state.dispatch(
-    consent(),
+    ordinaryForm(),
     async (r) => {
       written.push(r);
     },
     assert.fail,
   );
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(published, 0, 'closed run must not stage a new interaction');
+  assert.equal(published, 0);
   assert.equal(written.length, 2);
 });
 
-test('cancellation and transport timeout suppress a late accepted consent even if the waiter ignores abort', async () => {
+test('cancellation and transport timeout suppress a late accept even if the waiter ignores abort', async () => {
   for (const reason of ['provider_cancelled', 'transport_lost'] as const) {
     let answer: ((response: RuntimeInteractionResponse) => void) | undefined;
     const invalidations: unknown[] = [];
@@ -241,101 +262,20 @@ test('cancellation and transport timeout suppress a late accepted consent even i
     );
     assert.ok(state);
     state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
-    state.observeNotification(toolNotification());
     const written: unknown[] = [];
     state.dispatch(
-      consent(),
-      async (response) => {
-        written.push(response);
+      ordinaryForm(),
+      async (r) => {
+        written.push(r);
       },
       assert.fail,
     );
     await new Promise((resolve) => setImmediate(resolve));
     state.close(reason);
     assert.ok(answer);
-    answer({ kind: 'decision', decisionId: 'accept:always', content: {} });
+    answer({ kind: 'decision', decisionId: 'accept', content: {} });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(written, []);
     assert.deepEqual(invalidations, [[owner.invocationId, reason]]);
   }
-});
-
-test('app consent must match a live MCP call from the provider, not only self-reported metadata', async () => {
-  for (const setup of ['absent', 'foreign-server', 'completed', 'old-turn', 'matching']) {
-    let published = 0;
-    const state = createCodexRuntimeInteractionRunState(
-      {
-        owner,
-        port: {
-          request: async () => {
-            published++;
-            return { kind: 'decision', decisionId: 'accept:session', content: {} };
-          },
-        },
-      },
-      'auto_review',
-    );
-    assert.ok(state);
-    state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
-    if (setup !== 'absent')
-      state.observeNotification(
-        toolNotification('item/started', {
-          server: setup === 'foreign-server' ? 'impostor' : 'cua_repl',
-        }),
-      );
-    if (setup === 'completed') state.observeNotification(toolNotification('item/completed'));
-    if (setup === 'old-turn') state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'new-turn' });
-    const written: { result?: unknown; error?: unknown }[] = [];
-    state.dispatch(
-      consent({}, { turnId: null }),
-      async (response) => {
-        written.push(response);
-      },
-      assert.fail,
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(published, setup === 'matching' ? 1 : 0, setup);
-    assert.equal(
-      (written[0]?.result as { action?: unknown } | undefined)?.action,
-      setup === 'matching' ? 'accept' : undefined,
-      setup,
-    );
-    if (setup !== 'matching') assert.equal((written[0]?.error as { code?: unknown } | undefined)?.code, -32602, setup);
-    state.close('provider_cancelled');
-  }
-});
-
-test('MCP completion while consent is pending invalidates the late decision', async () => {
-  let answer: ((response: RuntimeInteractionResponse) => void) | undefined;
-  const state = createCodexRuntimeInteractionRunState(
-    {
-      owner,
-      port: {
-        request: () =>
-          new Promise((resolve) => {
-            answer = resolve;
-          }),
-      },
-    },
-    'auto_review',
-  );
-  assert.ok(state);
-  state.bindProviderTurn({ threadId: 'provider-thread', turnId: 'provider-turn' });
-  state.observeNotification(toolNotification());
-  const written: { result?: unknown; error?: unknown }[] = [];
-  state.dispatch(
-    consent(),
-    async (response) => {
-      written.push(response);
-    },
-    assert.fail,
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(answer);
-  state.observeNotification(toolNotification('item/completed'));
-  answer({ kind: 'decision', decisionId: 'accept:always', content: {} });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(written[0]?.result, undefined);
-  assert.equal((written[0]?.error as { code?: unknown } | undefined)?.code, -32602);
-  state.close('provider_cancelled');
 });

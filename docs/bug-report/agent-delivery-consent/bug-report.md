@@ -1,6 +1,8 @@
 # Agent attachment publication and Computer Use consent
 
-Status: implementation under review preparation / not accepted. Owner: 砚砚, thread_mujrlphvcvzgvzsx.
+Status: attachment publisher and interaction safety repair under review preparation / not accepted.
+Native Computer Use approval activation and persistent reuse remain blocked.
+Owner: 砚砚, thread_mujrlphvcvzgvzsx.
 
 ## Authorization and scope
 
@@ -20,7 +22,7 @@ does not reassign that feature or revive F246 generic authorization.
 | Strategy | Trace installed protocol, compare successful publisher, reproduce with synthetic bytes and deterministic wire fixtures before changing code. |
 | Timeout strategy | Bound test requests; use existing provider cancellation/timeout lifecycle, preserve durable records. After 20 minutes without new protocol evidence, obtain independent contract review instead of speculative grant logic. |
 | Warning | Never write runtime uploads directly, impersonate operator messages, fabricate grants, modify vendor/config/permissions, or use another cat's protected session. Three failed hypotheses require reconsideration. |
-| User-visible correction | Recognizable app-consent card with only upstream-offered choices; authenticated agent-file publication returning a real attachment URL. |
+| Current correction | Authenticated agent-file publication with durable attachment message; immediate timeout invalidation; native-looking CUA requests fail closed with `unverified_connector_source` rather than becoming generic accept forms. |
 | Acceptance | Metadata choices round-trip; ordinary forms unchanged; unknown/foreign/stale requests fail closed; cancellation/timeout; same-scope upstream reuse verified; real remote attachment bytes match original. Local HTTP 200 or queued preview is insufficient. |
 
 ## Runtime preflight (2026-09-27)
@@ -60,11 +62,9 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   identified Desktop's native app-approval owner and its settings methods. This
   does not expose a supported grant read/reuse API to the headless carrier.
 - Installed app-server protocol export explicitly supports request and response
-  `_meta`. An isolated real-binary probe uses a fake MCP, no credentials, no model
-  turn and no CUA: `bash packages/api/scripts/with-test-home.sh env -u CODEX_HOME
-  node --import tsx packages/api/test/probes/computer-use-wire.mjs
-  /Applications/ChatGPT.app/Contents/Resources/codex`. Our actual adapter round-trips
-  session/always/decline/cancel through app-server back to that fake MCP.
+  `_meta`. At b07bbd813 an isolated real-binary probe demonstrated all four
+  choices, but that implementation was subsequently withdrawn after the source
+  confusion finding below. This is historical wire evidence, not an enabled feature.
 - This proves wire compatibility, not persistent grant reuse. No Desktop approval
   file is read, no local grant cache exists, and no persisted-state marker is forged.
   Product activation of persistent choices remains blocked on a supported owner
@@ -77,12 +77,25 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   registers a fake `cua_repl` in its isolated configuration and makes no claim that
   metadata authenticates a vendor. Terra narrowed the original source-spoof claim
   after this evidence (`0001790515816319-000283-071de3b2`).
-- A separate reproduced P1 accepted an absent or completed tool-call id in the
-  correct provider thread. The run now binds consent to provider `mcpToolCall`
-  started/completed notifications, clears that binding on turn change/close, and
-  checks it before displaying choices and before returning the answer. Two RED
-  tests became GREEN. The explicit always label requests upstream persistence;
-  it does not assert a saved grant.
+- Current source finding supersedes the prior provisional conclusion: Terra's
+  `0001790518218129-000292-bd9d059c` confirms that workspace capabilities can
+  register an external service as `cua_repl`, including duplicate same IDs.
+  `CodexAgentService` reads the workspace capabilities first; its descriptor
+  carries no verified native connector provenance. Workspace `source`, `pluginId`
+  and `discoveredFrom` claims cannot authenticate a vendor. Live provider item
+  notifications establish a call lifetime, but do not resolve this identity gap.
+- RED: resolving a synthetic workspace external capability with id `cua_repl`
+  and sending its native-looking metadata produced one actionable approval card.
+  GREEN: no such request publishes any card or returns accept, including duplicate
+  registrations and forged plugin claims. Special native approve handling and
+  its now-unused call tracker were removed, rather than hidden behind a boolean
+  flag or name allowlist. Ordinary MCP forms retain their established behavior.
+- The current real-binary probe proves rejection for both a fake server registered
+  as `cua_repl` and an `impostor` claiming that name. Run it with the isolated home:
+  `bash packages/api/scripts/with-test-home.sh env -u CODEX_HOME node --import tsx
+  packages/api/test/probes/computer-use-wire.mjs
+  /Applications/ChatGPT.app/Contents/Resources/codex`.
+  It performs no model turn, CUA access, vendor modification or grant lookup.
 - Provider guard registration parity is a separate F306 security finding requiring
   owner disposition. The new publisher removes the need for direct runtime writes;
   it does not silently modify another provider's hook or runtime configuration.
@@ -90,13 +103,22 @@ them at timeout onset; it does not invent a default timeout or explain the entir
 ## Verification evidence so far
 
 - Initial consent tests failed on generic choice/metadata loss and closed-run
-  publication; duplicate-id test failed with two publications. Corrected tests pass.
+  publication; duplicate-id test failed with two publications. The eventual safe
+  scope rejects unverified native consent and preserves the general lifecycle fixes.
 - Publisher initially returned 404; API and discoverable MCP tests now pass,
   including a real isolated HTTP upload/download byte and SHA256 round trip.
-- Initial publisher/consent suites passed 15 tests; the consent suite now passes
-  10 tests after adding active-call binding and late-answer regressions.
-  Existing renderer DOM suite passes 7 tests, including both explicit scope choices
-  and no submission before a click. No production browser was invoked.
+- The pre-withdrawal b07bbd813 renderer passed seven DOM tests and six isolated
+  Chromium checks. Those screenshots are historical evidence only; current code
+  does not activate that native consent UI and removes its feature-specific fixture.
+- Current consent regressions cover workspace registration, duplicate IDs, forged
+  plugin claims, no generic-form downgrade, ordinary forms, duplicate request IDs,
+  foreign/closed runs and cancellation/timeout suppressing late answers.
+  The eight source/lifecycle tests, canonical 52-test runtime interaction suite,
+  37-test app-server transport suite and API TypeScript build pass. The real-binary
+  probe returns decline for both synthetic connections without publishing cards.
+  That decline is app-server's conversion of our protocol error, not a user vote.
+  The in-progress full gate is pinned to b07bbd813 and cannot validate this delta;
+  its completion must be followed by final-tree gate routing before PR creation.
 - API/MCP full builds passed before the timeout regression, which produced the
   expected RED at `codex-app-server-transport.test.js:619`. Green recheck, full
   transport/buffer/registration recheck now passes 51 tests; the canonical runtime
@@ -119,8 +141,10 @@ message or file is created and no other cat is routed.
 
 1. RED: exercise a sanitized native consent request through adapter and canonical
    response validation; reject malformed metadata and unavailable choices.
-2. Map scoped choices using existing elicitation decisions, preserving upstream
-   ownership of grant storage. No local grant cache or historical-accept replay.
+2. Block unverified native requests. Re-enabling scoped choices requires a verified
+   per-invocation connector binding from the authoritative registration chain plus
+   a supported upstream grant owner contract; both remain unresolved. No local
+   grant cache, caller-supplied trust flag or historical-accept replay is introduced.
 3. Exercise cancellation, foreign provider identity and timeout using existing
    runtime service/transport fixtures; correct demonstrated lifecycle gaps.
 4. Add an authenticated byte-upload publisher using the existing file store,

@@ -675,7 +675,7 @@ test('authoritative terminal result survives a cleanup failure', async () => {
   assert.equal(lifecycle.at(-1).cleanupError, 'cleanup exploded');
 });
 
-test('native app consent is bound to item notifications on the actual client pump', async () => {
+test('a live provider item named cua_repl cannot confer native consent identity', async () => {
   const wire = new ProtocolWire();
   let published = 0;
   const client = new CodexAppServerClient({ wire });
@@ -724,10 +724,9 @@ test('native app consent is bound to item notifications on the actual client pum
   wire.inbox.push({ method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item } });
   wire.inbox.push({ id: 901, method: 'mcpServer/elicitation/request', params });
   await waitFor(() => wire.writes.some((message) => message.id === 901));
-  assert.deepEqual(wire.writes.find((message) => message.id === 901)?.result, {
-    action: 'accept',
-    content: {},
-    _meta: { persist: 'session' },
+  assert.equal(wire.writes.find((message) => message.id === 901)?.error?.code, -32602);
+  assert.deepEqual(wire.writes.find((message) => message.id === 901)?.error?.data, {
+    reasonCode: 'unverified_connector_source',
   });
   wire.inbox.push({
     method: 'item/completed',
@@ -736,7 +735,7 @@ test('native app consent is bound to item notifications on the actual client pum
   wire.inbox.push({ id: 902, method: 'mcpServer/elicitation/request', params });
   await waitFor(() => wire.writes.some((message) => message.id === 902));
   assert.equal(wire.writes.find((message) => message.id === 902)?.error?.code, -32602);
-  assert.equal(published, 1);
+  assert.equal(published, 0);
   wire.inbox.push({
     method: 'turn/completed',
     params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },

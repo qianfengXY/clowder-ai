@@ -9,7 +9,7 @@ import type {
 } from '@cat-cafe/shared';
 import type { RuntimeInteractionPort } from '../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
 import { isCodexMcpApprovalCompatibilityRequest } from './CodexAppServerEventMapper.js';
-import { computerUseConsent } from './CodexComputerUseConsent.js';
+import { rejectUnverifiedComputerUseConsent, UnverifiedComputerUseConsentError } from './CodexComputerUseConsent.js';
 import {
   commandParamsSchema,
   fileParamsSchema,
@@ -34,8 +34,6 @@ export interface CodexRuntimeInteractionContext {
   signal?: AbortSignal;
   createInteractionId?: () => string;
   now?: () => number;
-  /** Bound by this run's provider notifications, never by MCP-supplied metadata. */
-  isActiveMcpToolCall?: (toolCallId: string, serverName: string) => boolean;
   resolveEntrustedWorkTaskRef?: () => Promise<EntrustedWorkTaskRefV1 | undefined>;
 }
 
@@ -58,6 +56,12 @@ export async function respondToCodexRuntimeInteraction(
     );
     return { id: envelope.id, result: binding.toProviderResponse(response) };
   } catch (error) {
+    if (error instanceof UnverifiedComputerUseConsentError) {
+      return {
+        id: envelope.id,
+        error: { code: -32602, message: error.message, data: { reasonCode: 'unverified_connector_source' } },
+      };
+    }
     const reasonCode = interactionReasonCode(error);
     if (reasonCode) {
       return {
@@ -170,30 +174,22 @@ function buildBinding(
   }
   const form = mcpFormParamsSchema.safeParse(params);
   if (form.success) {
+    rejectUnverifiedComputerUseConsent(form.data);
     const provider = providerRef(requestId, method, form.data);
-    const consent = computerUseConsent(form.data, context.isActiveMcpToolCall);
     return {
       request: {
-        ...baseRequest(
-          interactionId,
-          context.owner,
-          consent ? { ...provider, itemId: consent.toolCallId } : provider,
-          now,
-          consent?.title ?? `${form.data.serverName} 需要补充信息`,
-        ),
-        ...(consent ? { description: consent.description } : {}),
+        ...baseRequest(interactionId, context.owner, provider, now, `${form.data.serverName} 需要补充信息`),
         kind: 'elicitation',
         mode: 'form',
         message: form.data.message,
-        requestedSchema: consent?.requestedSchema ?? normalizeCodexMcpFormSchema(form.data.requestedSchema),
-        decisions: consent?.decisions ?? elicitationDecisions(),
+        requestedSchema: normalizeCodexMcpFormSchema(form.data.requestedSchema),
+        decisions: elicitationDecisions(),
       },
-      toProviderResponse: (response) =>
-        consent ? consent.toProviderResponse(response) : elicitationResponse(response),
+      toProviderResponse: (response) => elicitationResponse(response),
     };
   }
   const url = mcpUrlParamsSchema.parse(params);
-  computerUseConsent(url); // A consent marker on another mode must fail closed.
+  rejectUnverifiedComputerUseConsent(url);
   const provider = providerRef(requestId, method, url);
   return {
     request: {

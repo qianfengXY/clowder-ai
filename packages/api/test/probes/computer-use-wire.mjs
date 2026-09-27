@@ -42,7 +42,6 @@ const pending = new Map();
 let nextId = 1;
 let stderr = '';
 let observed;
-let choice = 'session';
 let published = 0;
 child.stderr.on('data', (chunk) => {
   stderr = (stderr + chunk).slice(-4000);
@@ -63,12 +62,9 @@ const reader = (async () => {
     const m = JSON.parse(line);
     if (m.method === 'mcpServer/elicitation/request') {
       observed = m.params;
-      // Answer only our synthetic app and request. This is not an operator grant.
+      // This is a synthetic source-confusion attempt, never an operator grant.
       assert.equal(m.params._meta?.tool_params?.app, 'org.example.ContractTest');
       const response = await respondToCodexRuntimeInteraction(m, {
-        // This standalone RPC has no model turn/item notifications. Its binding
-        // comes from our explicit outbound mcpServer/tool/call below, not _meta.
-        isActiveMcpToolCall: (id, server) => id === 'synthetic-call' && server === 'cua_repl',
         owner: {
           userId: 'synthetic-owner',
           threadId: 'synthetic-thread',
@@ -80,8 +76,8 @@ const reader = (async () => {
             published++;
             return {
               kind: 'decision',
-              decisionId: choice === 'decline' || choice === 'cancel' ? choice : `accept:${choice}`,
-              ...(choice === 'decline' || choice === 'cancel' ? {} : { content: {} }),
+              decisionId: 'accept:always',
+              content: {},
             };
           },
         },
@@ -114,35 +110,30 @@ try {
     },
   });
   const results = [];
-  for (choice of ['session', 'always', 'decline', 'cancel']) {
+  for (const server of ['cua_repl', 'impostor']) {
     const result = await request('mcpServer/tool/call', {
       threadId: started.thread.id,
-      server: 'cua_repl',
+      server,
       tool: 'probe',
       arguments: {},
     });
     assert.ok(observed, 'app-server must expose native metadata as elicitation');
     assert.equal(observed._meta.connector_id, 'computer-use');
     assert.deepEqual(observed._meta.persist, ['session', 'always']);
+    assert.equal(observed.serverName, server, 'provider name is only the configured connection identity');
     const echoed = JSON.parse(result.content[0].text);
-    const accepted = choice === 'session' || choice === 'always';
-    assert.equal(echoed.action, accepted ? 'accept' : choice);
-    assert.deepEqual(echoed._meta, accepted ? { persist: choice } : undefined);
-    results.push(echoed);
+    assert.deepEqual(echoed, { action: 'decline' });
+    assert.equal(published, 0, 'neither a configured native-looking name nor forged metadata may publish consent');
+    results.push({ server, response: echoed });
   }
-  const publicationCount = published;
-  const impostor = await request('mcpServer/tool/call', {
-    threadId: started.thread.id,
-    server: 'impostor',
-    tool: 'probe',
-    arguments: {},
-  });
-  assert.equal(observed.serverName, 'impostor', 'app-server must bind the configured connection, not a claimed name');
-  assert.equal(published, publicationCount, 'forged metadata from another configured server must not publish consent');
-  assert.deepEqual(JSON.parse(impostor.content[0].text), { action: 'decline' });
   console.log(
     JSON.stringify(
-      { result: 'wire-pass', sourceSpoof: 'rejected', responses: results, persistenceReuse: 'not-tested' },
+      {
+        result: 'source-rejection-pass',
+        nativeConsentEnabled: false,
+        responses: results,
+        persistenceReuse: 'not-tested',
+      },
       null,
       2,
     ),

@@ -15,7 +15,6 @@ export type CodexRuntimeInteractionCloseReason = 'provider_cancelled' | 'transpo
 
 export interface CodexRuntimeInteractionRunState {
   bindProviderTurn(binding: { threadId: string; turnId: string }): void;
-  observeNotification(envelope: CodexAppServerJsonObject): void;
   close(reasonCode: CodexRuntimeInteractionCloseReason): void;
   dispatch(
     request: CodexAppServerJsonObject,
@@ -33,35 +32,18 @@ export function createCodexRuntimeInteractionRunState(
   let closed = false;
   let providerTurn: { threadId: string; turnId: string } | null = null;
   const seenRequestIds = new Set<number>();
-  const activeMcpCalls = new Map<string, string>();
-  const context: CodexRuntimeInteractionContext = {
-    ...input,
-    signal: controller.signal,
-    isActiveMcpToolCall: (itemId, serverName) => !closed && activeMcpCalls.get(itemId) === serverName,
-  };
+  const context: CodexRuntimeInteractionContext = { ...input, signal: controller.signal };
 
   const close = (reasonCode: CodexRuntimeInteractionCloseReason): void => {
     if (closed) return;
     closed = true;
-    activeMcpCalls.clear();
     controller.abort(reasonCode);
     void input.port.invalidateInvocation?.(input.owner.invocationId, reasonCode).catch(() => {});
   };
 
   return {
     bindProviderTurn: (binding) => {
-      if (providerTurn?.threadId !== binding.threadId || providerTurn?.turnId !== binding.turnId) {
-        activeMcpCalls.clear();
-      }
       providerTurn = binding;
-    },
-    observeNotification: (envelope) => {
-      if (closed || (envelope.method !== 'item/started' && envelope.method !== 'item/completed')) return;
-      if (!matchesProviderTurn(envelope, providerTurn)) return;
-      const item = asCodexAppServerRecord(asCodexAppServerRecord(envelope.params)?.item);
-      if (item?.type !== 'mcpToolCall' || typeof item.id !== 'string' || typeof item.server !== 'string') return;
-      if (envelope.method === 'item/completed') activeMcpCalls.delete(item.id);
-      else activeMcpCalls.set(item.id, item.server);
     },
     close,
     dispatch: (request, write, onFailure) => {
