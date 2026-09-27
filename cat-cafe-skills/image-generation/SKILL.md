@@ -86,8 +86,8 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 |------|------|------|---------|-------------|
 | **原生** | **Codex CLI** | 内置 `image_gen` tool call | `~/.codex/generated_images/<sessionId>/` | ✅ scanner 自动拾取 |
 | **原生** | **Antigravity** | 内置 `generate_image` tool call | `~/.gemini/antigravity/brain/<cascadeId>/` | ✅ GENERATE_IMAGE step 自动拾取 |
-| 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 无通用本地文件发布入口，报告缺口 |
-| 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 无通用本地文件发布入口，报告缺口 |
+| 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 无自动发布；小图用 media_gallery + data URI（完整请求 ≤1 MiB） |
+| 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 无自动发布；小图用 media_gallery + data URI（完整请求 ≤1 MiB） |
 
 ## 原生路径（优先）
 
@@ -241,4 +241,4 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 5. **ChatGPT 图片页面是独立入口**：`/images` 和普通对话 `/` 是分开的
 6. **两个平台都支持 execCommand 注入**
 7. **Gemini 图片更大**（~7MB PNG），ChatGPT 图片更小（~1MB PNG）
-8. **浏览器路径归档**：本地下载图片尚无通用发布入口，归档后如实报告交付缺口。`publishGeneratedImage()` 是 API 内部函数，猫不能直接调用；F172 自动发布仅覆盖 Codex `image_gen` 和 Antigravity 原生生成图。不要直接写 runtime 上传目录
+8. **浏览器路径归档**：本地下载小图可通过 `cat_cafe_create_rich_block` 发 `media_gallery`，URL 使用真实 MIME 的 `data:image/...;base64,...`。整个 JSON 请求须 ≤1 MiB，原图约 ≤750 KiB 仅作参考，以编码后完整请求字节数为准，多图合计。图片随宿主消息持久化，不写 uploads；富块 ACK 只代表进 buffer。超限且无已发布 URL 时才报告通用文件发布入口缺口。`publishGeneratedImage()` 是 API 内部函数，猫不能直接调用；F172 自动发布仅覆盖 Codex `image_gen` 和 Antigravity 原生生成图。不要直接写 runtime 上传目录

@@ -3749,6 +3749,43 @@ describe('Callback Routes', () => {
     assert.equal(msgs[0].invocationId, invocationId, 'create-rich-block broadcast must include invocationId');
   });
 
+  test('create-rich-block admits inline image data within the request limit and only buffers before message append', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'inline-image-boundary');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const url =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=';
+    const block = { id: 'inline-image', kind: 'media_gallery', v: 1, items: [{ url }] };
+    try {
+      assert.equal(app.initialConfig.bodyLimit, 1024 * 1024);
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-rich-block',
+        headers,
+        payload: { block },
+      });
+      assert.equal(accepted.statusCode, 200);
+      assert.equal(messageStore.getByThread('inline-image-boundary').length, 0, 'rich-block ACK is not persistence');
+      const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+      assert.deepEqual(getRichBlockBuffer().consume('inline-image-boundary', 'opus', invocationId), [block]);
+      const oversized = {
+        ...block,
+        id: 'oversized',
+        items: [{ url: `data:image/png;base64,${'A'.repeat(1024 * 1024)}` }],
+      };
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-rich-block',
+        headers,
+        payload: { block: oversized },
+      });
+      assert.equal(rejected.statusCode, 413);
+      assert.equal(socketManager.getMessages().length, 1, 'oversized payload must not broadcast');
+    } finally {
+      await app.close();
+    }
+  });
+
   test('POST create-rich-block rejects invocation-bound soft-deleted thread without buffering or broadcasting', async () => {
     const thread = threadStore.create('user-1', 'Deleted Rich Block Target');
     assert.equal(threadStore.softDelete(thread.id), true);

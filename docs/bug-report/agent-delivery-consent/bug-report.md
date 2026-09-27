@@ -42,6 +42,9 @@ an identical concurrent retry may already reference that deterministic path.
 Cleanup requires operator-authorized, reference-aware storage maintenance.
 This patch adds no automatic expiry or garbage collector. Before-save rejection
 writes nothing; post-save rejection does not roll back bytes or prove delivery.
+Soft or hard deletion of an attachment message also retains the stored upload;
+the original URL remains downloadable. Removing a message neither revokes access
+to its file URL nor destroys the file bytes.
 
 ## Instruction sweep and owned gaps
 
@@ -49,9 +52,15 @@ Server rules and rich-messaging, rich-blocks, video-forge, anime-forge and
 image-generation now direct supported documents to the publisher, prohibit runtime
 copying and provider switching to bypass protection. API-internal
 `publishGeneratedImage()` is not an MCP/callback tool. Automatic publishing covers
-Codex `image_gen` and Antigravity native generated images only. Local screenshots,
-PPT preview PNGs, browser downloads and local videos have no general file publisher;
-report that gap instead of inventing a helper. Already published media URLs remain usable.
+Codex `image_gen` and Antigravity native generated images only. Other local small
+images (including screenshots, PPT preview PNGs and browser downloads) can use
+`media_gallery` with `data:image/...;base64,...`. The complete callback JSON request
+must fit 1 MiB; approximately 750 KiB of source bytes is a guideline, not a guarantee,
+because base64 and metadata add overhead and multiple images count together.
+The data URI is persisted with the host message; rich-block ACK only means buffered,
+not durable delivery. It does not write uploads. Oversized images without a published
+URL and local videos still lack a general file publisher. Already published media
+URLs remain usable.
 
 Claude guard parity is tracked by persistent task `0001790522982588-000302-63c160ac`,
 owner 砚砚. F306's feature owner remains codex-sol; exact F306 thread discovery on
@@ -98,4 +107,8 @@ No local grant cache or workspace self-asserted trust is acceptable.
   contract review, merged isolated acceptance, governed activation.
 - Approved PPT remains unchanged in the user's delivery directory, outside Git.
   Formal file-card publication and remote readback are outstanding.
+  Publish from the current repair-thread invocation into `thread_mujrlphvcvzgvzsx`;
+  after acceptance, the one final source-thread report references that durable
+  attachment message and its verified download URL. No cross-thread publisher
+  override or intermediate source-thread wake is required.
   Source business thread receives one final report after the full task is complete.
