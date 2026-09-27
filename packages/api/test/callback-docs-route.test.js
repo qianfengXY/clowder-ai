@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+
+test('current skills do not instruct agents to publish by copying into runtime uploads', async () => {
+  const root = fileURLToPath(new URL('../../../cat-cafe-skills/', import.meta.url));
+  const violations = [];
+  const unsafeInstructions = [
+    /手动 `cp`.*(?:runtime|uploads)/,
+    /(?:先(?:显式)?放到|先把视频放到|本地 mp4 先变成).*\/uploads\//,
+    /(?:调用|需手动) `publishGeneratedImage\(/,
+  ];
+  async function scan(dir) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await scan(path);
+      else if (entry.isFile() && entry.name.endsWith('.md')) {
+        const lines = (await readFile(path, 'utf8')).split('\n');
+        for (const [index, line] of lines.entries()) {
+          if (unsafeInstructions.some((pattern) => pattern.test(line))) {
+            violations.push(`${path.slice(root.length)}:${index + 1}: ${line.trim()}`);
+          }
+        }
+      }
+    }
+  }
+  await scan(root);
+  assert.deepEqual(violations, [], 'agent-facing publishing instructions must use a callable, authorized publisher');
+});
 
 describe('Callback Docs Routes', () => {
   async function createApp() {

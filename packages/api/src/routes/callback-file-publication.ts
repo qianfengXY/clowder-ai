@@ -83,6 +83,10 @@ export function registerCallbackFilePublication(
       if (stored.length !== bytes.length || digest(stored) !== input.sha256) {
         return reply.code(409).send({ error: 'Stored attachment does not match this publication' });
       }
+      // Saved bytes follow the existing upload retention policy (no TTL). A later
+      // rejection may leave an unreferenced file. Do not unlink here: an identical
+      // concurrent retry can already have attached this same deterministic path.
+      // Cleanup requires operator-authorized, reference-aware storage maintenance.
       const afterSave = await getDeletedCallbackThreadGuard(deps.threadStore, actor.threadId);
       if (afterSave) return reply.code(afterSave.statusCode).send(afterSave.body);
       if (!(await deps.registry.isLatest(actor.invocationId)))

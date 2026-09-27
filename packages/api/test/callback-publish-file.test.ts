@@ -168,3 +168,19 @@ test('retry after a lost persistence acknowledgement recovers the one durable at
   assert.equal((await readdir(h.uploadDir)).length, 1);
   assert.equal(h.messageStore.getByThread(h.threadId).length, 1);
 });
+
+test('retry cannot resurrect or rebroadcast an attachment message removed by its owner', async (t) => {
+  for (const removal of ['softDelete', 'hardDelete']) {
+    const h = await harness(t);
+    const published = await h.post();
+    assert.equal(published.statusCode, 200);
+    const id = published.json().messageId;
+    h.messageStore[removal](id, 'owner');
+    const retry = await h.post();
+    assert.equal(retry.statusCode, 409, removal);
+    assert.equal(h.broadcasts.length, 1, 'rejected retry must not rebroadcast the file');
+    assert.equal(h.messageStore.size, 1, 'retry must not create a replacement message');
+    assert.ok(h.messageStore.getById(id)?.deletedAt);
+    assert.equal((await readdir(h.uploadDir)).length, 1, 'retention is independent of message visibility');
+  }
+});

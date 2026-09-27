@@ -1181,6 +1181,26 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(threadMessages[0].id, first.id);
   });
 
+  it('hard-deleted idempotent append returns its tombstone instead of recreating content', async () => {
+    const input = {
+      userId: 'attachment-owner',
+      catId: 'codex',
+      content: 'synthetic attachment',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'attachment-tombstone',
+      idempotencyKey: 'agent-file:synthetic',
+    };
+    const original = await store.appendIdempotent(input);
+    await store.hardDelete(original.message.id, input.userId);
+    const retried = await store.appendIdempotent(input);
+    assert.equal(retried.idempotent, true);
+    assert.equal(retried.message.id, original.message.id);
+    assert.equal(retried.message._tombstone, true);
+    assert.equal(retried.message.content, '');
+    assert.deepEqual(await store.getByThread(input.threadId), []);
+  });
+
   it('concurrent idempotent append creates exactly one thread member', async () => {
     const threadId = 'thread-concurrent-idem';
     const timestamp = Date.now();

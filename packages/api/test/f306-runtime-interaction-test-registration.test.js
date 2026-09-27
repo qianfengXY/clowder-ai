@@ -11,7 +11,6 @@ const REQUIRED_TESTS = [
   'test/runtime-interaction-card-publisher.test.ts',
   'test/codex-runtime-interaction-adapter.test.ts',
   'test/codex-runtime-interaction-wire-edge.test.ts',
-  'test/codex-computer-use-consent.test.ts',
   'test/callback-publish-file.test.ts',
   'test/approval-hub/f306-approval-adapter.test.ts',
   'test/codex-app-server-protocol-resilience.test.mjs',

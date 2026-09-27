@@ -9,7 +9,6 @@ import type {
 } from '@cat-cafe/shared';
 import type { RuntimeInteractionPort } from '../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
 import { isCodexMcpApprovalCompatibilityRequest } from './CodexAppServerEventMapper.js';
-import { rejectUnverifiedComputerUseConsent, UnverifiedComputerUseConsentError } from './CodexComputerUseConsent.js';
 import {
   commandParamsSchema,
   fileParamsSchema,
@@ -56,12 +55,6 @@ export async function respondToCodexRuntimeInteraction(
     );
     return { id: envelope.id, result: binding.toProviderResponse(response) };
   } catch (error) {
-    if (error instanceof UnverifiedComputerUseConsentError) {
-      return {
-        id: envelope.id,
-        error: { code: -32602, message: error.message, data: { reasonCode: 'unverified_connector_source' } },
-      };
-    }
     const reasonCode = interactionReasonCode(error);
     if (reasonCode) {
       return {
@@ -174,7 +167,6 @@ function buildBinding(
   }
   const form = mcpFormParamsSchema.safeParse(params);
   if (form.success) {
-    rejectUnverifiedComputerUseConsent(form.data);
     const provider = providerRef(requestId, method, form.data);
     return {
       request: {
@@ -189,7 +181,6 @@ function buildBinding(
     };
   }
   const url = mcpUrlParamsSchema.parse(params);
-  rejectUnverifiedComputerUseConsent(url);
   const provider = providerRef(requestId, method, url);
   return {
     request: {

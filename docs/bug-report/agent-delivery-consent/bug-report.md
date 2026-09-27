@@ -1,155 +1,101 @@
-# Agent attachment publication and Computer Use consent
+# Agent document attachment publication
 
-Status: attachment publisher and interaction safety repair under review preparation / not accepted.
-Native Computer Use approval activation and persistent reuse remain blocked.
-Owner: 砚砚, thread_mujrlphvcvzgvzsx.
+Status: attachment-only candidate under review; not merged, deployed or delivered.
+Owner: 砚砚; thread `thread_mujrlphvcvzgvzsx`, task `0001790510418940-000257-261da656`.
+Base: `f20b505d05d0c9f111270bb75145e67ca17dd8cb`.
+Accepted source: `thread_muevjiaa8wh9f98a#0001790510144932-000252-cb06b780`.
 
-## Authorization and scope
-
-Operator message `thread_muevjiaa8wh9f98a#0001790510144932-000252-cb06b780` explicitly
-requests a separate repair conversation. Read directly through thread context; T0
-authorization verified for implementation. F306 remains owned by codex-sol in the
-feature document; its index and title discovery expose no owner thread. This repair
-does not reassign that feature or revive F246 generic authorization.
-
-## Diagnosis capsule
+## Diagnosis
 
 | Field | Evidence / decision |
 | --- | --- |
-| Symptom | Existing local PPTX lacks a remote file attachment; native Computer Use repeatedly opens a generic information form. |
-| Evidence | Current adapter drops approval classification and persistence choices; its response only contains action/content. Installed CUA policy advertises session/always and consumes response `_meta.persist`. Old investigation: thread_mu2dqozm1zf04ygu, correction 0001789459797384-000353-40482e7a. The temporary report no longer exists. |
-| Hypothesis / root cause | Host cannot express the native app-consent choice. This proves a round-trip gap, not that a previous persistent choice existed or that a grant is reusable. The successful attachment author used a direct runtime write; Claude lacked the guard applied to Codex. Rules explicitly recommended that conflicting path. There was no general agent-file publishing endpoint. |
-| Strategy | Trace installed protocol, compare successful publisher, reproduce with synthetic bytes and deterministic wire fixtures before changing code. |
-| Timeout strategy | Bound test requests; use existing provider cancellation/timeout lifecycle, preserve durable records. After 20 minutes without new protocol evidence, obtain independent contract review instead of speculative grant logic. |
-| Warning | Never write runtime uploads directly, impersonate operator messages, fabricate grants, modify vendor/config/permissions, or use another cat's protected session. Three failed hypotheses require reconsideration. |
-| Current correction | Authenticated agent-file publication with durable attachment message; immediate timeout invalidation; native-looking CUA requests fail closed with `unverified_connector_source` rather than becoming generic accept forms. |
-| Acceptance | Metadata choices round-trip; ordinary forms unchanged; unknown/foreign/stale requests fail closed; cancellation/timeout; same-scope upstream reuse verified; real remote attachment bytes match original. Local HTTP 200 or queued preview is insufficient. |
+| Symptom | An approved local PPTX could not be delivered as a remotely downloadable attachment. |
+| Evidence | Author testimony `0001790510419006-000263-64d6ae20`: Claude Bash copied bytes directly into runtime uploads, then attached a manually constructed URL. Codex's native effect guard rejected that kind of write. |
+| Root cause | No agent publisher for existing documents; a file card only attaches a URL. Several rules/skills directed cats to write the protected runtime directory. Claude lacked the guard registration applied to Codex. |
+| Fix | Authenticated current-invocation byte publisher, API-managed storage, durable cat-authored attachment before ACK, and consistent callable-tool instructions. |
+| Acceptance | Approved PPT unchanged; formal attachment readback matches its recorded SHA256. Local HTTP 200, rich-block ACK or queued preview cannot establish remote-user access. |
+| Boundaries | No runtime/config/vendor writes, forged grants, operator impersonation, other-cat private-session access, corporate files in Git, or third-party cloud upload. |
 
-## Runtime preflight (2026-09-27)
+The publisher removes the need for direct runtime writes for its supported document
+types only: PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, MD and CSV, up to 50 MiB.
+It does not implement image/video publishing or repair provider guard parity.
 
-PORT=3004; PID=73677; START_TIME=2026-09-21 19:37:53 local.
-Runtime cwd=/Volumes/WorkSSD/cat-cafe-runtime/packages/api.
-HEAD/TARGET_COMMIT=1d0467b390181dd1bc3927e9f958b700532c0e42 (2026-09-21 19:35:22 -0700).
-PROCESS_AFTER_TARGET=yes. LOG_EVIDENCE=157088 matching lines in the process stdout log.
-Implementation base=f20b505d05d0c9f111270bb75145e67ca17dd8cb; local main,
-fork/main and read-only `git ls-remote fork refs/heads/main` agree. The native
-guard rejects `git fetch fork main` because its refresh allowlist recognizes only
-origin/main; no guard bypass used. No deployment freshness claim follows from this.
+## Publication contract and retention
 
-## Separate error paths
+`cat_cafe_publish_file({ sourcePath, expectedSha256? })` reads a local regular file
+without following symlinks and sends bytes with current invocation credentials.
+The API accepts no source path, alternate actor or target thread. It verifies the
+filename/MIME pair, bounded canonical base64 and SHA256, checks current invocation
+and live thread, saves through the existing store, then verifies stored bytes.
 
-Installed browser-service.mjs throws `Unable to load browser request-header policy`
-when Statsig policy initialization/refresh is unsuccessful or not Ready. That is
-not an app-consent denial. `cgWindowNotFound` and the long elapsed interval still
-need separate causal evidence; do not infer either cause from the authorization bug.
-The author's own session (9b116a26, CLI 01a0d11c) confirms getState ran from
-2026-09-24T14:58:45.165Z to 14:59:14.323Z, then getApp(com.google.Chrome)
-from 2026-09-24T14:59:19.556Z to 2026-09-27T11:52:52.384Z. The latter tool
-reported 248012.7857 seconds and error -10005/cgWindowNotFound. Only timestamps,
-call ids and error strings were extracted; no raw session or credentials are copied here.
-Separately, a deterministic regression proves opted-in inactivity timeout failed
-to invalidate pending interactions until interrupt grace ended. The fix closes
-them at timeout onset; it does not invent a default timeout or explain the entire
-68.9-hour incident without additional carrier evidence.
+The API appends an idempotent, durable cat-authored file message before ACK.
+The key binds invocation, filename, MIME and bytes. A lost-ACK retry returns and
+rebroadcasts the same message; deleted-message tombstones prevent resurrection.
+The receipt proves server persistence, not remote-user receipt or download.
+Required remote acceptance uses the agreed download entry; if inaccessible,
+record it as unverified rather than impersonating the user.
 
-## Independent evidence and remaining boundary
+**Retention:** saved bytes follow the existing upload store's no-TTL policy. A thread
+deletion, invocation expiry or persistence failure after saving can leave an
+unreferenced upload, including confidential bytes. Do not unlink on rejection:
+an identical concurrent retry may already reference that deterministic path.
+Cleanup requires operator-authorized, reference-aware storage maintenance.
+This patch adds no automatic expiry or garbage collector. Before-save rejection
+writes nothing; post-save rejection does not roll back bytes or prove delivery.
 
-- Successful attachment author evidence: current-thread message
-  `0001790510419006-000263-64d6ae20`. Direct native Bash copy followed by a manual
-  file rich block; replaying the command through the guard's pure classifier
-  denies both provider formats. No repeat copy or guard bypass was performed.
-- Upstream grant ownership: Terra's `0001790511114185-000267-c869f934` independently
-  identified Desktop's native app-approval owner and its settings methods. This
-  does not expose a supported grant read/reuse API to the headless carrier.
-- Installed app-server protocol export explicitly supports request and response
-  `_meta`. At b07bbd813 an isolated real-binary probe demonstrated all four
-  choices, but that implementation was subsequently withdrawn after the source
-  confusion finding below. This is historical wire evidence, not an enabled feature.
-- This proves wire compatibility, not persistent grant reuse. No Desktop approval
-  file is read, no local grant cache exists, and no persisted-state marker is forged.
-  Product activation of persistent choices remains blocked on a supported owner
-  contract; transporting `always` alone is not a promise that it has been saved.
-- A second fake server sends both a forged `serverName: cua_repl` and native-looking
-  metadata. The installed app-server exposes its configured connection name
-  `impostor`; the adapter refuses to publish a consent card and the MCP receives
-  `action: decline`. This validates the connection-name boundary, not the contents
-  of arbitrary operator or workspace configuration. The probe deliberately
-  registers a fake `cua_repl` in its isolated configuration and makes no claim that
-  metadata authenticates a vendor. Terra narrowed the original source-spoof claim
-  after this evidence (`0001790515816319-000283-071de3b2`).
-- Current source finding supersedes the prior provisional conclusion: Terra's
-  `0001790518218129-000292-bd9d059c` confirms that workspace capabilities can
-  register an external service as `cua_repl`, including duplicate same IDs.
-  `CodexAgentService` reads the workspace capabilities first; its descriptor
-  carries no verified native connector provenance. Workspace `source`, `pluginId`
-  and `discoveredFrom` claims cannot authenticate a vendor. Live provider item
-  notifications establish a call lifetime, but do not resolve this identity gap.
-- RED: resolving a synthetic workspace external capability with id `cua_repl`
-  and sending its native-looking metadata produced one actionable approval card.
-  GREEN: no such request publishes any card or returns accept, including duplicate
-  registrations and forged plugin claims. Special native approve handling and
-  its now-unused call tracker were removed, rather than hidden behind a boolean
-  flag or name allowlist. Ordinary MCP forms retain their established behavior.
-- The current real-binary probe proves rejection for both a fake server registered
-  as `cua_repl` and an `impostor` claiming that name. Run it with the isolated home:
-  `bash packages/api/scripts/with-test-home.sh env -u CODEX_HOME node --import tsx
-  packages/api/test/probes/computer-use-wire.mjs
-  /Applications/ChatGPT.app/Contents/Resources/codex`.
-  It performs no model turn, CUA access, vendor modification or grant lookup.
-- Provider guard registration parity is a separate F306 security finding requiring
-  owner disposition. The new publisher removes the need for direct runtime writes;
-  it does not silently modify another provider's hook or runtime configuration.
+## Instruction sweep and owned gaps
 
-## Verification evidence so far
+Server rules and rich-messaging, rich-blocks, video-forge, anime-forge and
+image-generation now direct supported documents to the publisher, prohibit runtime
+copying and provider switching to bypass protection. API-internal
+`publishGeneratedImage()` is not an MCP/callback tool. Automatic publishing covers
+Codex `image_gen` and Antigravity native generated images only. Local screenshots,
+PPT preview PNGs, browser downloads and local videos have no general file publisher;
+report that gap instead of inventing a helper. Already published media URLs remain usable.
 
-- Initial consent tests failed on generic choice/metadata loss and closed-run
-  publication; duplicate-id test failed with two publications. The eventual safe
-  scope rejects unverified native consent and preserves the general lifecycle fixes.
-- Publisher initially returned 404; API and discoverable MCP tests now pass,
-  including a real isolated HTTP upload/download byte and SHA256 round trip.
-- The pre-withdrawal b07bbd813 renderer passed seven DOM tests and six isolated
-  Chromium checks. Those screenshots are historical evidence only; current code
-  does not activate that native consent UI and removes its feature-specific fixture.
-- Current consent regressions cover workspace registration, duplicate IDs, forged
-  plugin claims, no generic-form downgrade, ordinary forms, duplicate request IDs,
-  foreign/closed runs and cancellation/timeout suppressing late answers.
-  The eight source/lifecycle tests, canonical 52-test runtime interaction suite,
-  37-test app-server transport suite and API TypeScript build pass. The real-binary
-  probe returns decline for both synthetic connections without publishing cards.
-  That decline is app-server's conversion of our protocol error, not a user vote.
-  The in-progress full gate is pinned to b07bbd813 and cannot validate this delta;
-  its completion must be followed by final-tree gate routing before PR creation.
-- API/MCP full builds passed before the timeout regression, which produced the
-  expected RED at `codex-app-server-transport.test.js:619`. Green recheck, full
-  transport/buffer/registration recheck now passes 51 tests; the canonical runtime
-  interaction suite also passes 51. API TypeScript build passes. Full integration
-  gate, independent review and remote delivery remain required.
-- The first full gate on b8dfd1c found an outdated rules assertion that required
-  direct runtime copying, plus an existing Collective test-fixture mismatch:
-  its mock threads defaulted to owner_1 while its HTTP fixture used owner-user.
-  The rules assertion now requires the authenticated publisher; the mock owner
-  now derives from the same HTTP fixture. These are test corrections, not changes
-  to production ownership checks. The full gate is not claimed green.
+Claude guard parity is tracked by persistent task `0001790522982588-000302-63c160ac`,
+owner 砚砚. F306's feature owner remains codex-sol; exact F306 thread discovery on
+2026-09-27 returned none, so dispatch is explicitly `not_dispatched`.
+The task requires actual registration evidence and isolated provider parity tests.
+This publisher does not close the gap.
 
-Publication now appends an idempotent, durable cat-authored file message before
-returning its messageId, rather than relying on the 15-minute rich-block buffer.
-The real MessageStore regression covers identical retries and a lost persistence
-acknowledgement. The same stored message is rebroadcast on retry; no duplicate
-message or file is created and no other cat is routed.
+## Computer Use is a separate release decision
 
-## Implementation and verification plan
+Review `0001790522455016-000300-769222df` identified a capability downgrade in the
+combined candidate. This attachment branch removes all consent adapter/transport
+changes relative to base. CUA remains at baseline; repeated authorization and
+persistent reuse remain unresolved.
 
-1. RED: exercise a sanitized native consent request through adapter and canonical
-   response validation; reject malformed metadata and unavailable choices.
-2. Block unverified native requests. Re-enabling scoped choices requires a verified
-   per-invocation connector binding from the authoritative registration chain plus
-   a supported upstream grant owner contract; both remain unresolved. No local
-   grant cache, caller-supplied trust flag or historical-accept replay is introduced.
-3. Exercise cancellation, foreign provider identity and timeout using existing
-   runtime service/transport fixtures; correct demonstrated lifecycle gaps.
-4. Add an authenticated byte-upload publisher using the existing file store,
-   callback ownership, stale/deleted-thread checks and file rich blocks. Test with
-   synthetic data only; corporate documents remain outside Git.
-5. Independent security/contract review, full gate, merged isolated acceptance;
-   production activation remains a separate explicit boundary. Only then deliver
-   the real artifact and verify remote readback. Final-only report to source thread.
+Separate branch `fix/cua-consent-boundary`, owned by task
+`0001790510419015-000258-d3f5900d`, preserves that candidate and its evidence.
+It rejects on any of: `serverName === 'cua_repl'`, a present
+`_meta.codex_approval_kind`, a present `_meta.persist`, or
+`_meta.connector_id === 'computer-use'`. If deployed it would directly reject CUA
+and other MCP elicitations with those markers, without a card; baseline instead
+shows a generic information form users can accept each time.
+This is capability loss, not grant reuse. PPT delivery does not require it.
+Recovery from that candidate is a revert, or verified connector binding plus a
+supported upstream grant-owner contract before enabling native choices.
+No local grant cache or workspace self-asserted trust is acceptable.
+
+## Verification and remaining acceptance
+
+- Publisher RED was endpoint 404. API/MCP tests cover authentication, byte/MIME/hash
+  validation, scope, durable idempotence, lost ACK and tombstones. Real isolated
+  HTTP MCP → API → download verifies synthetic bytes/SHA256, not real-user access.
+- Current-skills Markdown regression first failed with 10 unsafe/manual-helper
+  instructions, then passed after the sweep.
+- Deletion regression exposed a Memory/Redis mismatch: Memory hard delete removed
+  the idempotency index, so retry recreated the attachment (200 instead of 409).
+  Memory now retains the content-free claim like Redis. Soft/hard deletion retries
+  must return 409, retain one tombstone and never rebroadcast a new attachment.
+- Earlier combined gates found an obsolete rules assertion and Collective fixture
+  owner mismatch; corrected without changing production ownership checks.
+  A later unchanged process-liveness test timed out on its child marker and passed
+  alone. Timing cause remains unproven; no full green is claimed.
+- Ongoing gate at combined HEAD `2efdc239` cannot validate the split's final tree.
+  Still required: final-tree tests/full gate, independent semantic and security/
+  contract review, merged isolated acceptance, governed activation.
+- Approved PPT remains unchanged in the user's delivery directory, outside Git.
+  Formal file-card publication and remote readback are outstanding.
+  Source business thread receives one final report after the full task is complete.

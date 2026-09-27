@@ -40,7 +40,8 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - 已发布的视频可用文件卡；没有正式发布入口的类型如实报告，禁止直接写 runtime 上传目录
 - **media_gallery**（图片展示 — 不一定要现场生成！）
   - 发送已有图片（头像 \`/avatars/\`、照片 \`/uploads/\`、设计稿）
-  - 本地图片走共享图片发布合约；\`/uploads/xxx\` 由 API 管理，不手动复制到 runtime 或源码仓的上传目录
+  - Codex \`image_gen\` 和 Antigravity 原生生成图会自动发布；本地截图、PPT 预览 PNG、浏览器下载图片尚无通用文件发布入口，如实报告缺口
+  - \`publishGeneratedImage()\` 是 API 内部函数，不能当作猫可调用的工具；\`/uploads/xxx\` 由 API 管理，不手动复制到 runtime 或源码仓的上传目录
   - 截图展示、多图对比
   - 定时任务/主动触发中展示图片
 - **audio**（语音消息 — 你"说出来"的话）

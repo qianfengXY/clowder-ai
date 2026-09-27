@@ -1875,7 +1875,8 @@ export class MessageStore {
     msg.deletedAt = Date.now();
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
-    this.pruneIdempotencyIndexForMessageIds([id]);
+    // Preserve the content-free claim, matching RedisMessageStore: replaying an
+    // acknowledged append must return its tombstone rather than recreate content.
     return msg;
   }
 

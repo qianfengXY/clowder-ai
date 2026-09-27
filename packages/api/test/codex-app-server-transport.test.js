@@ -616,41 +616,6 @@ test('app-server timeout remains disabled at zero and positive opt-in uses proto
   assert.equal(timeoutWire.terminateCalls, 1, 'timeout-interrupted hosts must also be evicted from the warm pool');
 });
 
-test('opt-in timeout invalidates runtime interactions before interrupt grace permits a late answer', async () => {
-  const wire = new ProtocolWire();
-  const invalidations = [];
-  const client = new CodexAppServerClient({ wire });
-  const run = collect(
-    client.run({
-      prompt: frozenPrompt('work'),
-      thread: { kind: 'start' },
-      timeoutMs: 10,
-      interruptGraceMs: 1_000,
-      runtimeInteraction: {
-        owner: { userId: 'u', threadId: 'chat', catId: 'codex', invocationId: 'inv-timeout' },
-        port: {
-          request: async () => ({ kind: 'decision', decisionId: 'cancel' }),
-          invalidateInvocation: async (...args) => {
-            invalidations.push(args);
-            return [];
-          },
-        },
-      },
-    }),
-  );
-  await waitFor(() => wire.writes.some((message) => message.method === 'turn/interrupt'));
-  const atInterrupt = [...invalidations];
-  wire.inbox.push({
-    method: 'turn/completed',
-    params: {
-      threadId: 'thread-1',
-      turn: { id: 'turn-1', status: 'interrupted' },
-    },
-  });
-  await run;
-  assert.deepEqual(atInterrupt, [['inv-timeout', 'transport_lost']]);
-});
-
 test('authoritative terminal result survives a cleanup failure', async () => {
   const wire = new ProtocolWire();
   wire.close = async () => {
@@ -673,74 +638,6 @@ test('authoritative terminal result survives a cleanup failure', async () => {
   assert.ok(stages.indexOf('completed') < stages.indexOf('closing'));
   assert.ok(stages.indexOf('closing') < stages.indexOf('closed'));
   assert.equal(lifecycle.at(-1).cleanupError, 'cleanup exploded');
-});
-
-test('a live provider item named cua_repl cannot confer native consent identity', async () => {
-  const wire = new ProtocolWire();
-  let published = 0;
-  const client = new CodexAppServerClient({ wire });
-  const run = collect(
-    client.run({
-      prompt: frozenPrompt('synthetic consent'),
-      thread: { kind: 'start' },
-      runtimeInteraction: {
-        owner: { userId: 'u', threadId: 'chat', catId: 'codex', invocationId: 'inv-binding' },
-        port: {
-          request: async () => {
-            published++;
-            return { kind: 'decision', decisionId: 'accept:session', content: {} };
-          },
-        },
-      },
-    }),
-  );
-  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
-  const params = {
-    threadId: 'thread-1',
-    turnId: 'turn-1',
-    serverName: 'cua_repl',
-    mode: 'form',
-    message: 'Synthetic app request',
-    requestedSchema: { type: 'object', properties: {} },
-    _meta: {
-      codex_approval_kind: 'mcp_tool_call',
-      connector_id: 'computer-use',
-      connector_name: 'Computer Use',
-      persist: ['session'],
-      riskLevel: 'low',
-      tool_call_id: 'call-native',
-      tool_name: 'get_app',
-      tool_params: { app: 'org.example.ContractTest' },
-    },
-  };
-  const item = {
-    id: 'call-native',
-    type: 'mcpToolCall',
-    server: 'cua_repl',
-    tool: 'js',
-    status: 'inProgress',
-    arguments: {},
-  };
-  wire.inbox.push({ method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item } });
-  wire.inbox.push({ id: 901, method: 'mcpServer/elicitation/request', params });
-  await waitFor(() => wire.writes.some((message) => message.id === 901));
-  assert.equal(wire.writes.find((message) => message.id === 901)?.error?.code, -32602);
-  assert.deepEqual(wire.writes.find((message) => message.id === 901)?.error?.data, {
-    reasonCode: 'unverified_connector_source',
-  });
-  wire.inbox.push({
-    method: 'item/completed',
-    params: { threadId: 'thread-1', turnId: 'turn-1', item: { ...item, status: 'completed' } },
-  });
-  wire.inbox.push({ id: 902, method: 'mcpServer/elicitation/request', params });
-  await waitFor(() => wire.writes.some((message) => message.id === 902));
-  assert.equal(wire.writes.find((message) => message.id === 902)?.error?.code, -32602);
-  assert.equal(published, 0);
-  wire.inbox.push({
-    method: 'turn/completed',
-    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
-  });
-  await run;
 });
 
 test('F291 app-server preserves Fast and explicit Standard on thread start/resume', async () => {

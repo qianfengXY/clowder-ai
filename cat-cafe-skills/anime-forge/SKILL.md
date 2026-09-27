@@ -37,7 +37,7 @@ description: >
 5. **素材账本**：入库即登记 md5/时长/状态；视频 gitignored 账本作存在证明 → 范例 `assets/README.md`
 6. **Animatic 检查点（行为刹车）**：烧贵素材前先用静帧+占位拼粗剪验证节奏；剧本结构问题（见下）必须在这层抓
 7. **EDL 渲染**：`animatic/edl-v1.mjs`（时长/字幕/段序真相源）+ `build-animatic.mjs`（零 npm 依赖：Chrome 当字幕/字卡渲染器 + ffmpeg）——改数字重渲，画幅参数化
-8. **交付/预览**：最终成片必须在 Console 里内联可看，不要只丢工作区路径。外部直链可直接发 rich block；本地 mp4 先变成 `/uploads/...` 再发 `kind:"file"` + `mimeType:"video/mp4"`。只有你明确需要 `autoplay muted` 且拿到的是外部直链时，才退回 `html_widget` + `<video>`
+8. **交付/预览**：最终成片应在 Console 里内联可看。已有合法发布 URL 用 `kind:"file"` + `mimeType:"video/mp4"`；只有本地 mp4 时，如实报告发布入口缺口，不直写 runtime，不用工作区路径冒充交付。`cat_cafe_publish_file` 仅支持文档，不能上传视频。只有明确需要 `autoplay muted` 且拿到外部直链时，才用 `html_widget` + `<video>`
 
 ## 实测分工路由（硬约束，不是偏好）
 
@@ -69,7 +69,7 @@ description: >
 | 不先问素材画幅就定输出画幅 | 横竖分裂，pad 兜底但割裂 | 开抽前统一画幅；混了用 blur-pad 过渡，终态重抽 |
 | 静态 PNG overlay 长片尾段 | ~66s 后 framesync 失效字幕全挂 | PNG 输入加 `-loop 1`（builder 已内置） |
 | 字幕长句贴 max-width | 折行被渲染窗裁掉 | 字号留安全区；改完必抽帧亲眼验 |
-| 最终只产出工作区 mp4，不把成片挂回对话 | operator 看不到片，只能点文件路径，验收断层 | 终稿交付时把视频变成可访问 URL；`/uploads/...` 用 `file` rich block，外部直链才考虑 `html_widget` |
+| 最终只产出工作区 mp4，不把成片挂回对话 | operator 看不到片，验收断层 | 已发布 URL 用 `file` 富块；本地视频缺少发布入口时明确报告未交付，不直写 runtime |
 
 ## 和其他 skill 的区别（GOTCHA）
 

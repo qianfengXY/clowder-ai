@@ -255,9 +255,9 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 
 ### 优先级
 
-1. **本地终稿 / `/uploads/...` URL** → 优先用 `kind:"file"` rich block，`mimeType:"video/mp4"`。Web UI 会直接渲染内联 `<video>` 播放器，并进入 artifact 索引
+1. **已发布的 `/uploads/...` URL** → 优先用 `kind:"file"` rich block，`mimeType:"video/mp4"`。Web UI 会直接渲染内联 `<video>` 播放器，并进入 artifact 索引
 2. **外部直链 URL**（如云端生成结果）→ 可直接发 `kind:"file"`；若你明确要 `autoplay muted`，再退回 `html_widget` + `<video>`
-3. **只有工作区本地文件、还没可访问 URL** → 先放到 `/uploads/...`，再发 rich block；不要直接贴源码路径
+3. **只有工作区本地文件、还没可访问 URL** → 如实报告本地视频发布入口缺口；`cat_cafe_publish_file` 仅支持文档，不支持视频。不要直写 runtime、伪装 MIME 或把源码路径当成已交付
 
 ### 示例：优先用 file rich block
 
@@ -292,7 +292,7 @@ cat_cafe_create_rich_block({
 ### 注意事项
 
 - `file` rich block 保证的是**内联播放器**；如果你要强制自动播放，再考虑 `html_widget` + 外部直链
-- 本地视频目前没有图片那样的自动发布合约；要想稳定显示，先显式放到 `/uploads/...`
+- 本地视频目前没有正式发布入口；文件卡只展示已发布 URL，不能把本地文件变成远程附件。入口缺失时报告未交付
 - 如果 `create_rich_block` 返回 `stale_ignored`，说明回调凭据过期（见 #1092），可尝试在消息文本中嵌入 `` ```cc_rich `` 格式作为降级
 - 多段视频先用 FFmpeg 拼接成完整文件，再用一个 rich block 播放最终版
 

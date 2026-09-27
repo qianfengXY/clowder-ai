@@ -1,6 +1,6 @@
 ---
 name: rich-messaging
-tips_exempt: Chat-visible delivery routing extends the existing capability-rich-messaging tip; sourceRef stays at wakeup-index
+tips_exempt: Renewed 2026-09-27 for authenticated document publication and accurate media limits; the existing capability-rich-messaging tip still routes chat delivery via wakeup-index, with no additional skill discovery surface.
 description: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。
 triggers:
   - "发语音"
@@ -158,12 +158,12 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 
 如果图片来源是本地文件（例如 Codex CLI / 本地脚本刚生成的 PNG）：
 
-**优先使用 F172 共享发布合约**（自动处理 uploadDir 解析 + 幂等 + 富块生成）：
+**F172 自动发布仅覆盖以下原生生成路径**：
 - Codex `image_gen`：自动扫描 `~/.codex/generated_images/<sessionId>/`，无需手动操作
 - Antigravity 生成：工具结果中的文件路径自动检测并发布
-- 其他来源：调用 `publishGeneratedImage({ sourcePath, mimeType, publicationKey, provider, toolName })` 手动发布
+- 其他来源：本地截图、PPT 预览 PNG、浏览器下载图片尚无通用文件发布入口，如实报告缺口。`publishGeneratedImage()` 是 API 内部函数，不是猫可调用的工具。
 
-发布后自动获得 `/uploads/...` 稳定 URL + `media_gallery` 富块。发布成功和远程用户可访问分别核验。
+上述两条自动路径发布后获得 `/uploads/...` 稳定 URL + `media_gallery` 富块。发布回执不能证明远程用户已下载。
 
 共享合约不可用时如实报告缺口；不要直接写 runtime 的 uploadDir，也不要换 provider 绕过保护。
 
@@ -173,7 +173,7 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 - `url` 必须是 `/uploads/...`、`/api/...` 或 `https://...`
 - `mimeType` 以 `video/` 开头时，Web UI 会渲染内联 `<video>` 播放器
 - 已有本地文档（PPT/PPTX、PDF、DOC/DOCX、XLS/XLSX、TXT、MD、CSV）用 `cat_cafe_publish_file({ sourcePath, expectedSha256? })`；工具通过当前 invocation 的认证上传原始字节并自动附文件卡，无需另调 `create_rich_block`。
-- 上述工具只接受最多 50 MiB 的普通文件，不接受符号链接或代发其他 thread。上传回执含大小与 SHA256，但不是远程下载验收；仍须读回正式附件并核对字节及用户访问链路。
+- 上述工具只接受最多 50 MiB 的普通文件，不接受符号链接或代发其他 thread。回执含大小与 SHA256，只证明服务端已持久化，不能据此声称用户已下载。任务要求远程验收时，按约定入口读回并核对字节；无法访问该入口就写明未验证，不冒充用户身份验证。
 - 已发布 URL 可直接用文件卡；本地视频等尚无正式发布入口的类型如实报告，不直写 runtime、不伪装 MIME、不用本机链接或临时 preview 冒充交付。
 
 ## 三条纪律
@@ -188,8 +188,8 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 |------|------|----------|
 | 不知道自己能发语音 | operator说"发语音"你说"我是文字猫" | 你可以！用 audio block |
 | "发图"只想到 image-generation | 走 Chrome MCP 现场生成，慢且不稳定 | 先看家里有没有已有图片（`/avatars/`、`/uploads/`），有就 media_gallery 直接发 |
-| 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 先把视频放到 `/uploads/...`，再用 `file` rich block；`mimeType:"video/mp4"` 时会内联播放 |
-| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | 用 `publishGeneratedImage()` 发布到 `/uploads/...`（F172 共享合约自动解析 uploadDir） |
+| 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 已发布的视频 URL 用 `file` 富块；本地视频没有正式发布入口时如实报告缺口，不直写 runtime |
+| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | Codex `image_gen` / Antigravity 原生生成图会自动发布；其他本地图片如实报告发布入口缺口 |
 | audio 写长段话 | 合成效果差 | 短句口语化，1-2 句 |
 | 只发 block 不写文字 | 猫猫朋友看不懂上下文 | 先写 1-2 句自然语言摘要，再发 block |
 | `"type"` 而不是 `"kind"` | block 创建失败 | 字段是 `kind` 不是 `type` |

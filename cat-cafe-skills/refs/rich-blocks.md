@@ -46,26 +46,14 @@
 
 | 格式 | 示例 | 说明 |
 |------|------|------|
-| `/uploads/xxx.png` | `/uploads/opus-happy.png` | **推荐**，文件在 **runtime** `packages/api/uploads/` |
+| `/uploads/xxx.png` | `/uploads/opus-happy.png` | API 已发布的图片 URL，不是让猫写入的磁盘目录 |
 | `/api/connector-media/xxx` | `/api/connector-media/img.jpg` | 文件在 `data/connector-media/` |
 | `data:image/png;base64,...` | 完整 base64 编码 | 小图可用，会自动转临时文件上传 |
 | `https://...` | `https://example.com/img.png` | 外部链接 |
 
 **禁止**：`/api/connector-media/../assets/...` 等含 `../` 的路径 — 会被路径遍历保护拒绝，前端裂图。
 
-> ⚠️ **落盘路径陷阱（多只猫踩过）**
->
-> `/uploads/xxx.png` 对应的磁盘真身是 **`cat-cafe-runtime/packages/api/uploads/`**（运行中 API 的 `getDefaultUploadDir()`）。
-> 以下路径**全都是错误投放点**，文件放进去也 404：
->
-> | 错误路径 | 为什么错 |
-> |----------|----------|
-> | `cat-cafe/uploads/` | 开发仓根目录，不被任何 server 静态路由 serve |
-> | `cat-cafe/packages/api/uploads/` | 开发仓 packages 目录，非 runtime 检出 |
-> | `cat-cafe-runtime/uploads/` | runtime 根目录，API 不 serve 这一层 |
->
-> **正确做法**：用 `publishGeneratedImage()` 或通过 API multipart 上传——它们自动解析正确的 `uploadDir`。
-> 手动 `cp` 文件时必须确认目标是 runtime PID 对应的 `packages/api/uploads/`。
+> **发布入口与磁盘路径不能混用**：`/uploads/...` 由 API 管理。猫不得把文件直接复制到 runtime 或源码仓的上传目录，也不得换 provider 绕过保护。已有本地文档使用 `cat_cafe_publish_file`；图片自动发布的适用范围见下。没有可调用发布入口的类型如实报告缺口。
 
 ### 关于本地生成图的额外说明（F172 共享发布合约）
 
@@ -74,7 +62,7 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 - Antigravity：`AntigravityAgentService` 自动从工具结果中检测图片路径并发布
 - 两者都通过 `publishGeneratedImage()` 合约，自动解析当前 runtime 的 `uploadDir`、生成幂等文件名、返回 `/uploads/...` URL + `media_gallery` 富块
 
-**手动发布**（仅当自动路径不适用时）：调用 `publishGeneratedImage({ sourcePath, mimeType, publicationKey, provider, toolName })`。
+`publishGeneratedImage()` 是 API 内部函数，没有供猫调用的 MCP/callback。它不能作为本地截图、PPT 预览 PNG 或浏览器下载图片的手动发布工具；这类本地文件尚无通用发布入口，如实报告缺口。
 
 不要把”源码仓里存在这个文件”和”当前 API 正在服务这个文件”混为一谈。runtime 可能跑在另一套 worktree / 另一份 `packages/api/uploads/`。
 
@@ -84,7 +72,8 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 
 - 文档、压缩包等普通文件：显示下载卡片
 - `mimeType` 以 `video/` 开头，或文件名扩展是 `mp4/mov/webm/avi/mkv/m4v/ogv`：Web UI 直接渲染内联 `<video>` 播放器
-- 当前共享自动发布合约只覆盖图片；**本地视频/通用文件还没有自动 publish helper**，需要先显式放到 `/uploads/...`
+- 已有本地文档（PDF、DOC/DOCX、PPT/PPTX、XLS/XLSX、TXT、MD、CSV）用 `cat_cafe_publish_file({ sourcePath, expectedSha256? })`，自动附当前 thread 的文件卡。支持最多 50 MiB 的普通文件，不接受符号链接。
+- 本地视频、压缩包等不在该工具白名单中的类型尚无正式发布入口，如实报告缺口；已有合法发布 URL 可用文件卡。不要直写 runtime 或伪装 MIME。
 
 ## 创建方式
 
