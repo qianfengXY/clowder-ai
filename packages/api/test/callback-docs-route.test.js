@@ -40,9 +40,10 @@ describe('Callback Docs Routes', () => {
       assert.ok(body.rules, 'response should have rules field');
       assert.ok(body.rules.length > 0, 'rules should be non-empty');
       assert.ok(
-        body.rules.includes('cat-cafe-runtime/packages/api/uploads/'),
-        'rules should warn cats that /uploads/ files must land in the runtime API upload directory',
+        body.rules.includes('cat_cafe_publish_file'),
+        'rules should direct existing documents through the authenticated publisher',
       );
+      assert.ok(!body.rules.includes('cat-cafe-runtime/packages/api/uploads/'), 'rules must not direct runtime writes');
     } finally {
       await app.close();
     }

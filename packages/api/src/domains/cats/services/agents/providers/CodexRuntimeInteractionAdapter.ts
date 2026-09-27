@@ -34,6 +34,8 @@ export interface CodexRuntimeInteractionContext {
   signal?: AbortSignal;
   createInteractionId?: () => string;
   now?: () => number;
+  /** Bound by this run's provider notifications, never by MCP-supplied metadata. */
+  isActiveMcpToolCall?: (toolCallId: string, serverName: string) => boolean;
   resolveEntrustedWorkTaskRef?: () => Promise<EntrustedWorkTaskRefV1 | undefined>;
 }
 
@@ -169,7 +171,7 @@ function buildBinding(
   const form = mcpFormParamsSchema.safeParse(params);
   if (form.success) {
     const provider = providerRef(requestId, method, form.data);
-    const consent = computerUseConsent(form.data);
+    const consent = computerUseConsent(form.data, context.isActiveMcpToolCall);
     return {
       request: {
         ...baseRequest(

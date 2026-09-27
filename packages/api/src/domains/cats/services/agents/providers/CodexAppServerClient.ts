@@ -608,7 +608,10 @@ export class CodexAppServerClient {
           }
           continue;
         }
-        if (typeof message.method === 'string') this.notifications.push(message);
+        if (typeof message.method === 'string') {
+          runtimeInteraction?.observeNotification(message);
+          this.notifications.push(message);
+        }
       }
       this.pumpEnded = true;
       runtimeInteraction?.close('transport_lost');

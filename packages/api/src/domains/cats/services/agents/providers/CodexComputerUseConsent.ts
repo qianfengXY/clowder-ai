@@ -25,7 +25,10 @@ const metadataSchema = z
   .strict();
 
 /** Classify only the installed native app-consent protocol; never turn it into a generic accept form. */
-export function computerUseConsent(params: Record<string, unknown>) {
+export function computerUseConsent(
+  params: Record<string, unknown>,
+  isActiveMcpToolCall?: (toolCallId: string, serverName: string) => boolean,
+) {
   const raw = params._meta;
   if (raw == null) return null;
   const record = z.record(z.string(), z.unknown()).parse(raw);
@@ -37,6 +40,10 @@ export function computerUseConsent(params: Record<string, unknown>) {
     return null;
   const meta = metadataSchema.parse(record);
   if (params.serverName !== 'cua_repl' || params.mode !== 'form') throw new Error('unsupported app consent source');
+  const assertActiveCall = () => {
+    if (!isActiveMcpToolCall?.(meta.tool_call_id, 'cua_repl')) throw new Error('unbound app consent call');
+  };
+  assertActiveCall();
   const schema = z
     .object({
       type: z.literal('object'),
@@ -49,7 +56,7 @@ export function computerUseConsent(params: Record<string, unknown>) {
     .parse(params.requestedSchema);
   const decisions: RuntimeInteractionDecision[] = meta.persist.map((persist) => ({
     id: `accept:${persist}`,
-    label: persist === 'session' ? '本次会话允许' : '始终允许此应用',
+    label: persist === 'session' ? '本次会话允许' : '请求 Computer Use 记住此应用',
     outcome: 'accept',
   }));
   decisions.push(
@@ -65,6 +72,7 @@ export function computerUseConsent(params: Record<string, unknown>) {
     decisions,
     toolCallId: meta.tool_call_id,
     toProviderResponse(response: RuntimeInteractionResponse): Record<string, unknown> {
+      assertActiveCall();
       if (response.kind !== 'decision' || !decisions.some((d) => d.id === response.decisionId)) {
         throw new Error('unsupported app consent decision');
       }

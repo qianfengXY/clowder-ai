@@ -56,7 +56,7 @@ describe('RuntimeInteractionElicitationForm', () => {
       requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
       decisions: [
         { id: 'accept:session', label: '本次会话允许', outcome: 'accept' },
-        { id: 'accept:always', label: '始终允许此应用', outcome: 'accept' },
+        { id: 'accept:always', label: '请求 Computer Use 记住此应用', outcome: 'accept' },
         { id: 'decline', label: '拒绝', outcome: 'decline' },
         { id: 'cancel', label: '取消', outcome: 'cancel' },
       ],
@@ -66,7 +66,7 @@ describe('RuntimeInteractionElicitationForm', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('Computer Use 应用授权');
     expect(container.textContent).toContain('org.example.ContractTest');
-    const label = scope === 'session' ? '本次会话允许' : '始终允许此应用';
+    const label = scope === 'session' ? '本次会话允许' : '请求 Computer Use 记住此应用';
     const button = [...container.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
     expect(button).toBeDefined();
     await act(async () => {

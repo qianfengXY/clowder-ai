@@ -69,6 +69,20 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   file is read, no local grant cache exists, and no persisted-state marker is forged.
   Product activation of persistent choices remains blocked on a supported owner
   contract; transporting `always` alone is not a promise that it has been saved.
+- A second fake server sends both a forged `serverName: cua_repl` and native-looking
+  metadata. The installed app-server exposes its configured connection name
+  `impostor`; the adapter refuses to publish a consent card and the MCP receives
+  `action: decline`. This validates the connection-name boundary, not the contents
+  of arbitrary operator or workspace configuration. The probe deliberately
+  registers a fake `cua_repl` in its isolated configuration and makes no claim that
+  metadata authenticates a vendor. Terra narrowed the original source-spoof claim
+  after this evidence (`0001790515816319-000283-071de3b2`).
+- A separate reproduced P1 accepted an absent or completed tool-call id in the
+  correct provider thread. The run now binds consent to provider `mcpToolCall`
+  started/completed notifications, clears that binding on turn change/close, and
+  checks it before displaying choices and before returning the answer. Two RED
+  tests became GREEN. The explicit always label requests upstream persistence;
+  it does not assert a saved grant.
 - Provider guard registration parity is a separate F306 security finding requiring
   owner disposition. The new publisher removes the need for direct runtime writes;
   it does not silently modify another provider's hook or runtime configuration.
@@ -79,7 +93,8 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   publication; duplicate-id test failed with two publications. Corrected tests pass.
 - Publisher initially returned 404; API and discoverable MCP tests now pass,
   including a real isolated HTTP upload/download byte and SHA256 round trip.
-- Newly added suites: 15 tests pass (8 consent, 5 API publication, 2 MCP publication).
+- Initial publisher/consent suites passed 15 tests; the consent suite now passes
+  10 tests after adding active-call binding and late-answer regressions.
   Existing renderer DOM suite passes 7 tests, including both explicit scope choices
   and no submission before a click. No production browser was invoked.
 - API/MCP full builds passed before the timeout regression, which produced the
@@ -87,6 +102,12 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   transport/buffer/registration recheck now passes 51 tests; the canonical runtime
   interaction suite also passes 51. API TypeScript build passes. Full integration
   gate, independent review and remote delivery remain required.
+- The first full gate on b8dfd1c found an outdated rules assertion that required
+  direct runtime copying, plus an existing Collective test-fixture mismatch:
+  its mock threads defaulted to owner_1 while its HTTP fixture used owner-user.
+  The rules assertion now requires the authenticated publisher; the mock owner
+  now derives from the same HTTP fixture. These are test corrections, not changes
+  to production ownership checks. The full gate is not claimed green.
 
 Publication now appends an idempotent, durable cat-authored file message before
 returning its messageId, rather than relying on the 15-minute rich-block buffer.
