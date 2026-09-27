@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { getRichBlockBuffer } from '../src/domains/cats/services/agents/invocation/RichBlockBuffer.js';
+import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { registerCallbackAuthHook } from '../src/routes/callback-auth-prehandler.js';
 import { registerCallbackDocumentRoutes } from '../src/routes/callback-document-routes.js';
 import { uploadsRoutes } from '../src/routes/uploads.js';
@@ -25,14 +26,16 @@ async function harness(t) {
   const threadId = `attachment-${randomUUID()}`;
   const auth = await registry.create('owner', 'codex', threadId, 'parent-chain');
   const app = Fastify();
+  const messageStore = new MessageStore();
   const broadcasts = [];
   let deleted = false;
   registerCallbackAuthHook(app, registry);
   registerCallbackDocumentRoutes(app, {
     registry,
+    messageStore,
     uploadDir,
     threadStore: { get: async () => ({ id: threadId, userId: 'owner', deletedAt: deleted ? 1 : undefined }) },
-    socketManager: { broadcastAgentMessage: (...args) => broadcasts.push(args) },
+    socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
   });
   t.after(() => app.close());
   const headers = { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken };
@@ -46,6 +49,7 @@ async function harness(t) {
   return {
     app,
     registry,
+    messageStore,
     auth,
     threadId,
     uploadDir,
@@ -69,15 +73,18 @@ test('publishes authenticated unchanged bytes as one invocation-bound attachment
   assert.deepEqual(await readFile(join(h.uploadDir, result.url.slice('/uploads/'.length))), bytes);
   assert.deepEqual((await h.post()).json(), result);
   assert.equal((await readdir(h.uploadDir)).length, 1);
-  assert.equal(h.broadcasts.length, 1);
-  assert.equal(h.broadcasts[0][0].invocationId, 'parent-chain');
-  assert.equal(h.broadcasts[0][0].turnInvocationId, h.auth.invocationId);
-  assert.equal(h.broadcasts[0][1], h.threadId);
-  const blocks = getRichBlockBuffer().consume(h.threadId, 'codex', h.auth.invocationId);
-  assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].kind, 'file');
-  assert.equal(blocks[0].url, result.url);
-  assert.equal((await h.post()).statusCode, 409, 'consumed buffers must not report attachment success');
+  assert.deepEqual(h.broadcasts[0][0], [`thread:${h.threadId}`, 'user:owner']);
+  assert.equal(h.broadcasts[0][1], 'connector_message');
+  const message = h.messageStore.getById(result.messageId);
+  assert.ok(message);
+  assert.equal(message.catId, 'codex');
+  assert.equal(message.extra?.stream?.invocationId, 'parent-chain');
+  assert.equal(message.extra?.stream?.turnInvocationId, h.auth.invocationId);
+  assert.equal(message.extra?.isExplicitPost, true);
+  assert.equal(message.extra?.rich?.blocks[0].url, result.url);
+  assert.equal(h.broadcasts[1][2].message.id, result.messageId, 'retry broadcasts the same durable message');
+  assert.deepEqual(getRichBlockBuffer().consume(h.threadId, 'codex', h.auth.invocationId), []);
+  assert.deepEqual((await h.post()).json(), result, 'buffer consumption cannot lose a published attachment');
 });
 
 test('rejects unauthenticated, malformed and forged-scope uploads without writing files', async (t) => {
@@ -138,5 +145,26 @@ test('MCP publisher, authenticated HTTP endpoint and attachment download preserv
   assert.equal(createHash('sha256').update(downloaded).digest('hex'), payload.sha256);
   assert.deepEqual(downloaded, bytes);
   assert.equal(h.broadcasts.length, 1);
-  assert.equal(h.broadcasts[0][1], h.threadId);
+  assert.equal(h.broadcasts[0][2].threadId, h.threadId);
+});
+
+test('retry after a lost persistence acknowledgement recovers the one durable attachment', async (t) => {
+  const h = await harness(t);
+  const append = h.messageStore.appendIdempotent.bind(h.messageStore);
+  let failed = false;
+  h.messageStore.appendIdempotent = (input) => {
+    const result = append(input);
+    if (!failed) {
+      failed = true;
+      throw new Error('synthetic lost acknowledgement');
+    }
+    return result;
+  };
+  assert.equal((await h.post()).statusCode, 500);
+  const response = await h.post();
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.broadcasts.length, 1);
+  assert.equal(h.broadcasts[0][2].message.id, response.json().messageId);
+  assert.equal((await readdir(h.uploadDir)).length, 1);
+  assert.equal(h.messageStore.getByThread(h.threadId).length, 1);
 });

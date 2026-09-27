@@ -6578,7 +6578,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   // F088 Phase J2: Document generation callback routes
-  registerCallbackDocumentRoutes(app, { registry, socketManager, threadStore });
+  registerCallbackDocumentRoutes(app, { registry, socketManager, threadStore, messageStore });
 
   // F162: WeChat Work enterprise action callback routes
   registerCallbackWeComActionRoutes(app, { registry });

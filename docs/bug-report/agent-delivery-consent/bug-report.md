@@ -79,7 +79,7 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   publication; duplicate-id test failed with two publications. Corrected tests pass.
 - Publisher initially returned 404; API and discoverable MCP tests now pass,
   including a real isolated HTTP upload/download byte and SHA256 round trip.
-- Newly added suites: 14 tests pass (8 consent, 4 API publication, 2 MCP publication).
+- Newly added suites: 15 tests pass (8 consent, 5 API publication, 2 MCP publication).
   Existing renderer DOM suite passes 7 tests, including both explicit scope choices
   and no submission before a click. No production browser was invoked.
 - API/MCP full builds passed before the timeout regression, which produced the
@@ -87,6 +87,12 @@ them at timeout onset; it does not invent a default timeout or explain the entir
   transport/buffer/registration recheck now passes 51 tests; the canonical runtime
   interaction suite also passes 51. API TypeScript build passes. Full integration
   gate, independent review and remote delivery remain required.
+
+Publication now appends an idempotent, durable cat-authored file message before
+returning its messageId, rather than relying on the 15-minute rich-block buffer.
+The real MessageStore regression covers identical retries and a lost persistence
+acknowledgement. The same stored message is rebroadcast on retry; no duplicate
+message or file is created and no other cat is routed.
 
 ## Implementation and verification plan
 

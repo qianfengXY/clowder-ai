@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { PandocService } from '../infrastructure/document/PandocService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -36,6 +37,7 @@ export function registerCallbackDocumentRoutes(
   deps: {
     registry: InvocationRegistry;
     socketManager: SocketManager;
+    messageStore?: Pick<IMessageStore, 'appendIdempotent'>;
     threadStore?: Pick<IThreadStore, 'get'>;
     uploadDir?: string;
   },

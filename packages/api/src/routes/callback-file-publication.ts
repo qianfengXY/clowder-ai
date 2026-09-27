@@ -4,8 +4,8 @@ import { agentFileMime, MAX_AGENT_FILE_BASE64_LENGTH, MAX_AGENT_FILE_BYTES, type
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { saveFileBufferToUploadDir } from '../utils/file-storage.js';
@@ -48,6 +48,7 @@ export function registerCallbackFilePublication(
   deps: {
     registry: InvocationRegistry;
     socketManager: SocketManager;
+    messageStore?: Pick<IMessageStore, 'appendIdempotent'>;
     threadStore?: Pick<IThreadStore, 'get'>;
     uploadDir?: string;
   },
@@ -58,6 +59,7 @@ export function registerCallbackFilePublication(
     async (request, reply) => {
       const actor = requireCallbackAuth(request, reply);
       if (!actor) return;
+      if (!deps.messageStore) return reply.code(503).send({ error: 'Durable attachment publisher unavailable' });
       const decoded = decodePublication(request.body);
       if ('error' in decoded) return reply.code(400).send({ error: decoded.error });
       const { input, bytes } = decoded;
@@ -95,21 +97,37 @@ export function registerCallbackFilePublication(
         mimeType: input.mimeType,
         fileSize: stored.length,
       };
-      const buffer = getRichBlockBuffer();
-      if (buffer.add(actor.threadId, actor.catId, block, actor.invocationId)) {
-        deps.socketManager.broadcastAgentMessage(
-          {
-            type: 'system_info',
-            catId: actor.catId,
-            content: JSON.stringify({ type: 'rich_block', block }),
-            ...stampVisibleTurn(actor.parentInvocationId ?? actor.invocationId, actor.invocationId),
-            timestamp: Date.now(),
-          },
-          actor.threadId,
-        );
-      } else if (!buffer.hasBlock(actor.threadId, actor.catId, actor.invocationId, block.id)) {
-        return reply.code(409).send({ error: 'Invocation no longer accepts attachments' });
-      }
+      // Publication is durable before acknowledgement. It must survive buffer
+      // expiry, a long invocation, and a lost HTTP or websocket acknowledgement.
+      const { message } = await deps.messageStore.appendIdempotent({
+        userId: actor.userId,
+        catId: actor.catId,
+        threadId: actor.threadId,
+        origin: 'callback',
+        content: input.fileName,
+        mentions: [],
+        timestamp: Date.now(),
+        idempotencyKey: `agent-file:${publicationId}`,
+        extra: {
+          isExplicitPost: true,
+          stream: stampVisibleTurn(actor.parentInvocationId ?? actor.invocationId, actor.invocationId),
+          rich: { v: 1, blocks: [block] },
+        },
+      });
+      if (message.deletedAt || message._tombstone)
+        return reply.code(409).send({ error: 'Attachment message was removed' });
+      deps.socketManager.broadcastToRoom([`thread:${actor.threadId}`, `user:${actor.userId}`], 'connector_message', {
+        threadId: actor.threadId,
+        message: {
+          id: message.id,
+          type: 'cat',
+          catId: actor.catId,
+          origin: 'callback',
+          content: message.content,
+          timestamp: message.timestamp,
+          extra: message.extra,
+        },
+      });
       return {
         status: 'ok',
         url: saved.urlPath,
@@ -118,6 +136,7 @@ export function registerCallbackFilePublication(
         fileSize: stored.length,
         sha256: input.sha256,
         blockId: block.id,
+        messageId: message.id,
       };
     },
   );

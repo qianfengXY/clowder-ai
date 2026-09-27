@@ -107,12 +107,6 @@ export class RichBlockBuffer {
   }
 
   /** Content-free proof for an in-flight invocation; never exposes buffered block bodies. */
-  hasBlock(threadId: string, catId: string, invocationId: string, blockId: string): boolean {
-    const entry = this.entries.get(bufferKey(threadId, catId));
-    return Boolean(entry && entry.invocationId === invocationId && entry.seenIds.has(blockId));
-  }
-
-  /** Content-free proof for an in-flight invocation; never exposes buffered block bodies. */
   hasKind(threadId: string, catId: string, invocationId: string, kind: RichBlock['kind']): boolean {
     const entry = this.entries.get(bufferKey(threadId, catId));
     return Boolean(entry && entry.invocationId === invocationId && entry.blocks.some((block) => block.kind === kind));
