@@ -1,11 +1,11 @@
 ---
 name: image-generation
-tips_exempt: Corrected 2026-09-27 to distinguish existing native auto-publication from inline data-URI delivery of browser downloads; no new image-generation capability or discovery surface.
+tips_exempt: Corrected 2026-09-27 to distinguish native auto-publication from the browser-download publication gap and tiny-icon carrier limits; no new image-generation capability or discovery surface.
 description: >
   AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
   Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
   Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
-  Output: 原生生成图自动发布；浏览器下载小图可内联交付，或作为视觉 mock / 图像素材进入后续制作。
+  Output: 原生生成图自动发布；浏览器产物归档供后续制作，缺少按路径图片发布入口时如实报告交付缺口。
 ---
 
 # AI 图片生成 Skill
@@ -87,8 +87,8 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 |------|------|------|---------|-------------|
 | **原生** | **Codex CLI** | 内置 `image_gen` tool call | `~/.codex/generated_images/<sessionId>/` | ✅ scanner 自动拾取 |
 | **原生** | **Antigravity** | 内置 `generate_image` tool call | `~/.gemini/antigravity/brain/<cascadeId>/` | ✅ GENERATE_IMAGE step 自动拾取 |
-| 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 无自动发布；小图用 media_gallery + data URI（完整请求 ≤1 MiB） |
-| 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 无自动发布；小图用 media_gallery + data URI（完整请求 ≤1 MiB） |
+| 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 无通用按路径图片发布入口，报告交付缺口 |
+| 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 无通用按路径图片发布入口，报告交付缺口 |
 
 ## 原生路径（优先）
 
@@ -242,4 +242,4 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 5. **ChatGPT 图片页面是独立入口**：`/images` 和普通对话 `/` 是分开的
 6. **两个平台都支持 execCommand 注入**
 7. **Gemini 图片更大**（~7MB PNG），ChatGPT 图片更小（~1MB PNG）
-8. **浏览器路径归档**：本地下载小图可通过 `cat_cafe_create_rich_block` 发 `media_gallery`，URL 使用真实 MIME 的 `data:image/...;base64,...`。整个 JSON 请求须 ≤1 MiB，原图约 ≤750 KiB 仅作参考，以编码后完整请求字节数为准，多图合计。图片随宿主消息持久化，不写 uploads；富块 ACK 只代表进 buffer。超限且无已发布 URL 时才报告通用文件发布入口缺口。`publishGeneratedImage()` 是 API 内部函数，猫不能直接调用；F172 自动发布仅覆盖 Codex `image_gen` 和 Antigravity 原生生成图。不要直接写 runtime 上传目录
+8. **浏览器路径归档**：下载图缺少通用按路径发布入口，如实报告交付缺口，不转录大段 base64。data URI 仅考虑极小图标/示意图：工具不读取路径，普通模型直填调用须原样输出约为源文件 4/3 长度的 base64，先核上下文、输出上限、成本与转录可靠性。1 MiB 是整个请求的服务端上限，不是可行目标。富块 ACK 只表示进 buffer，随宿主消息落库后才持久化。`publishGeneratedImage()` 是 API 内部函数；自动发布仅覆盖 Codex `image_gen` / Antigravity 原生路径，不得直写 runtime 上传目录

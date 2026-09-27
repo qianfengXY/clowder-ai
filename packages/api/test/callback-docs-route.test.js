@@ -5,13 +5,14 @@ import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 
-test('current skills do not instruct agents to publish by copying into runtime uploads', async () => {
+test('current skills avoid unsupported publishing instructions', async () => {
   const root = fileURLToPath(new URL('../../../cat-cafe-skills/', import.meta.url));
   const violations = [];
   const unsafeInstructions = [
     /手动 `cp`.*(?:runtime|uploads)/,
     /(?:先(?:显式)?放到|先把视频放到|本地 mp4 先变成).*\/uploads\//,
     /(?:调用|需手动) `publishGeneratedImage\(/,
+    /原图[^\n]*750\s*(?:KiB|KB)/i,
   ];
   async function scan(dir) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {

@@ -48,12 +48,12 @@
 |------|------|------|
 | `/uploads/xxx.png` | `/uploads/opus-happy.png` | API 已发布的图片 URL，不是让猫写入的磁盘目录 |
 | `/api/connector-media/xxx` | `/api/connector-media/img.jpg` | 文件在 `data/connector-media/` |
-| `data:image/png;base64,...` | 完整 base64 编码 | 小图内联，Web 直接渲染；IM 出站可转临时文件，不写 uploads |
+| `data:image/png;base64,...` | 完整 base64 编码 | 仅极小图标/示意图；须先满足工具参数预算与原样传递要求，见下 |
 | `https://...` | `https://example.com/img.png` | 外部链接 |
 
 **禁止**：`/api/connector-media/../assets/...` 等含 `../` 的路径 — 会被路径遍历保护拒绝，前端裂图。
 
-> **发布入口与磁盘路径不能混用**：`/uploads/...` 由 API 管理。猫不得把文件直接复制到 runtime 或源码仓的上传目录，也不得换 provider 绕过保护。已有本地文档使用 `cat_cafe_publish_file`；小图可用 data URI 内联，自动发布的适用范围见下。没有适用交付路径的类型如实报告缺口。
+> **发布入口与磁盘路径不能混用**：`/uploads/...` 由 API 管理。猫不得把文件直接复制到 runtime 或源码仓的上传目录，也不得换 provider 绕过保护。已有本地文档使用 `cat_cafe_publish_file`；自动发布及极小图内联的边界见下。没有适用交付路径的类型如实报告缺口。
 
 ### 关于本地生成图的额外说明（F172 共享发布合约）
 
@@ -62,9 +62,11 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 - Antigravity：`AntigravityAgentService` 自动从工具结果中检测图片路径并发布
 - 两者都通过 `publishGeneratedImage()` 合约，自动解析当前 runtime 的 `uploadDir`、生成幂等文件名、返回 `/uploads/...` URL + `media_gallery` 富块
 
-`publishGeneratedImage()` 是 API 内部函数，没有供猫调用的 MCP/callback。其他来源的本地截图、PPT 预览 PNG、浏览器下载图可用 `cat_cafe_create_rich_block` 发 `media_gallery`，将图片编码为 `items[].url: "data:image/png;base64,..."`（按真实图片 MIME 填写）。整个 JSON 请求须 ≤1 MiB；base64 膨胀约三分之一，原图约 ≤750 KiB 可作参考，最终以编码后的完整请求字节数为准，多图合计。
+`publishGeneratedImage()` 是 API 内部函数，没有供猫调用的 MCP/callback。本地截图、PPT 预览 PNG、浏览器下载图目前缺少通用的按路径发布入口，应如实报告缺口；不要用大段 base64 转录替代它。
 
-内联图片随宿主消息落库，不写 uploads；`create_rich_block` 的 ACK 只表示接收进暂存 buffer，不单独证明消息已持久化或用户已看到。超过请求上限且无已发布 URL 的图片仍缺通用文件发布入口，如实报告，不能转去直写 runtime。
+**data URI 仅用于极小图标/示意图**：`cat_cafe_create_rich_block` 只接收完整 JSON 字符串，不会读取图片路径。普通模型直填调用必须把整串 base64 原样写入工具参数，长度约为原文件的 4/3；上下文、输出上限和成本随之增加，转录错误可能损坏图片。先确认当前载体能可靠承载完整参数。服务端整个 JSON 请求 ≤1 MiB 是硬上限，不是可行目标；多图合计，不能据此推荐大图内联。
+
+Web 直接渲染 data URI；IM 出站可转临时文件，不写 uploads。内联图片随宿主消息落库；富块 ACK 只表示进暂存 buffer，不单独证明持久化或用户已看到。
 
 不要把”源码仓里存在这个文件”和”当前 API 正在服务这个文件”混为一谈。runtime 可能跑在另一套 worktree / 另一份 `packages/api/uploads/`。
 

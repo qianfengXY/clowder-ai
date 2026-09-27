@@ -161,11 +161,13 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 **F172 自动发布仅覆盖以下原生生成路径**：
 - Codex `image_gen`：自动扫描 `~/.codex/generated_images/<sessionId>/`，无需手动操作
 - Antigravity 生成：工具结果中的文件路径自动检测并发布
-- 其他来源：本地截图、PPT 预览 PNG、浏览器下载的小图可用 `cat_cafe_create_rich_block` 发 `media_gallery` + `data:image/...;base64,...`。整个 JSON 请求须 ≤1 MiB，原图约 ≤750 KiB 仅作参考，以编码后完整请求的字节数为准，多图合计。图片随宿主消息持久化，不写 uploads；富块 ACK 只证明进 buffer，不证明已落库或已送达。`publishGeneratedImage()` 是 API 内部函数，不是猫可调用的工具。
+- 其他来源：本地截图、PPT 预览 PNG、浏览器下载图缺少通用的按路径发布入口，如实报告缺口，不转录大段 base64。`publishGeneratedImage()` 是 API 内部函数，不是猫可调用的工具。
+
+仅极小图标/示意图可考虑 `media_gallery` + `data:image/...;base64,...`。工具不会读取图片路径，普通模型直填调用须在参数里原样写出约为源文件 4/3 长度的 base64，受上下文、输出上限、成本和转录可靠性约束。整个 JSON 请求 ≤1 MiB 只是服务端上限，不是可行目标；先核当前载体预算。图片随宿主消息持久化，不写 uploads；富块 ACK 只证明进 buffer，不证明已落库或送达。
 
 上述两条自动路径发布后获得 `/uploads/...` 稳定 URL + `media_gallery` 富块。发布回执不能证明远程用户已下载。
 
-图片超出内联请求上限且没有已发布 URL 时，如实报告通用文件发布入口缺口；不要直接写 runtime 的 uploadDir，也不要换 provider 绕过保护。
+没有可靠交付路径时如实报告缺口；不要直接写 runtime 的 uploadDir，也不要换 provider 绕过保护。
 
 如果你要发的是**已有文件或本地成片视频**：
 
@@ -190,7 +192,7 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 | 不知道自己能发语音 | operator说"发语音"你说"我是文字猫" | 你可以！用 audio block |
 | "发图"只想到 image-generation | 走 Chrome MCP 现场生成，慢且不稳定 | 先看家里有没有已有图片（`/avatars/`、`/uploads/`），有就 media_gallery 直接发 |
 | 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 已发布的视频 URL 用 `file` 富块；本地视频没有正式发布入口时如实报告缺口，不直写 runtime |
-| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | Codex `image_gen` / Antigravity 原生生成图自动发布；其他小图用 `media_gallery` + data URI（整个请求 ≤1 MiB），超限且无已发布 URL 才报告缺口 |
+| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | 原生生成路径自动发布；其他文件缺按路径图片发布器时报告缺口，极小图内联也须先核载体预算 |
 | audio 写长段话 | 合成效果差 | 短句口语化，1-2 句 |
 | 只发 block 不写文字 | 猫猫朋友看不懂上下文 | 先写 1-2 句自然语言摘要，再发 block |
 | `"type"` 而不是 `"kind"` | block 创建失败 | 字段是 `kind` 不是 `type` |

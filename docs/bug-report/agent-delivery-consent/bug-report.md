@@ -52,15 +52,35 @@ Server rules and rich-messaging, rich-blocks, video-forge, anime-forge and
 image-generation now direct supported documents to the publisher, prohibit runtime
 copying and provider switching to bypass protection. API-internal
 `publishGeneratedImage()` is not an MCP/callback tool. Automatic publishing covers
-Codex `image_gen` and Antigravity native generated images only. Other local small
-images (including screenshots, PPT preview PNGs and browser downloads) can use
-`media_gallery` with `data:image/...;base64,...`. The complete callback JSON request
-must fit 1 MiB; approximately 750 KiB of source bytes is a guideline, not a guarantee,
-because base64 and metadata add overhead and multiple images count together.
-The data URI is persisted with the host message; rich-block ACK only means buffered,
-not durable delivery. It does not write uploads. Oversized images without a published
-URL and local videos still lack a general file publisher. Already published media
-URLs remain usable.
+Codex `image_gen` and Antigravity native generated images only. Local screenshots,
+PPT preview PNGs and browser downloads lack a general path-based image publisher.
+Track that implementation in owned task `0001790524992646-000311-ae93f8fa` (砚砚):
+MCP reads file bytes, the authenticated API manages image storage and a durable
+gallery message, and synthetic preview-size fixtures verify the actual carrier.
+Task creation is not implementation or acceptance. Local video also lacks a publisher.
+
+Only tiny icons/diagrams are suitable candidates for inline data URIs. The existing
+tool takes a complete JSON string; it does not read a local path. Ordinary model-filled
+calls must reproduce the entire base64 string (about 4/3 of source size) within
+context/output/cost limits without transcription errors. A host with programmatic
+composition is a separate carrier capability, not a guarantee for all cats. The
+1 MiB HTTP body limit proves server admission only, not practical delivery capacity.
+Data URIs do not write uploads; rich-block ACK only means buffered, and persistence
+requires the host message to be appended. Already published media URLs remain usable.
+
+### Delivery contract audit after repeated review corrections
+
+Invariant: a server-admitted payload is not proof of a usable producer, durable
+message, or remote-user receipt. The earlier image guidance stopped at admission;
+the following edges now govern all document/image/video instructions in this diff.
+
+| Transition | Required evidence / boundary |
+| --- | --- |
+| Local bytes → tool payload | Document MCP reads the path itself; inline media requires complete parameter bytes within the actual carrier's limits. No assumed image path reader. |
+| Payload → server admission | Invocation authentication, supported format and body bound; admission alone says nothing about message persistence. |
+| Admission → durable message | Document publisher appends before ACK; ordinary rich blocks first enter a transient buffer, then attach at host-message append. |
+| Durable message → remote access | Agreed client/download entry readback; never substitute localhost 200 or server ACK. |
+| Message deletion → later retry | Tombstone prevents resurrection; stored upload bytes and original URL remain until authorized storage maintenance. |
 
 Claude guard parity is tracked by persistent task `0001790522982588-000302-63c160ac`,
 owner 砚砚. F306's feature owner remains codex-sol; exact F306 thread discovery on
