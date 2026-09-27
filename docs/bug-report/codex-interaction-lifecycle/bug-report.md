@@ -58,6 +58,15 @@ used an isolated HOME with inherited Redis and Codex home settings removed.
 No runtime, actual CUA tool, permission store or production data was used.
 The full risk gate remains outstanding; these targeted results do not replace it.
 
+Before the full gate, the known baseline Collective route fixture failure was
+reproduced independently on this branch: its session header defaults to
+`owner-user`, while its callback and thread fixture defaulted to `owner_1`.
+The successful owner-route test therefore correctly received 422. The fixture
+now derives the callback owner from the same session header; production ownership
+checks are unchanged. This is the same one-line fixture correction as the
+attachment branch, not a runtime permission change.
+The complete Collective connector route suite then passed 9/9.
+
 ## Remaining acceptance
 
 This is not a repair of persistent Computer Use authorization. Verified connector
