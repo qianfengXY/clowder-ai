@@ -9,6 +9,7 @@ import type {
 } from '@cat-cafe/shared';
 import type { RuntimeInteractionPort } from '../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
 import { isCodexMcpApprovalCompatibilityRequest } from './CodexAppServerEventMapper.js';
+import { computerUseConsent } from './CodexComputerUseConsent.js';
 import {
   commandParamsSchema,
   fileParamsSchema,
@@ -168,19 +169,29 @@ function buildBinding(
   const form = mcpFormParamsSchema.safeParse(params);
   if (form.success) {
     const provider = providerRef(requestId, method, form.data);
+    const consent = computerUseConsent(form.data);
     return {
       request: {
-        ...baseRequest(interactionId, context.owner, provider, now, `${form.data.serverName} 需要补充信息`),
+        ...baseRequest(
+          interactionId,
+          context.owner,
+          consent ? { ...provider, itemId: consent.toolCallId } : provider,
+          now,
+          consent?.title ?? `${form.data.serverName} 需要补充信息`,
+        ),
+        ...(consent ? { description: consent.description } : {}),
         kind: 'elicitation',
         mode: 'form',
         message: form.data.message,
-        requestedSchema: normalizeCodexMcpFormSchema(form.data.requestedSchema),
-        decisions: elicitationDecisions(),
+        requestedSchema: consent?.requestedSchema ?? normalizeCodexMcpFormSchema(form.data.requestedSchema),
+        decisions: consent?.decisions ?? elicitationDecisions(),
       },
-      toProviderResponse: (response) => elicitationResponse(response),
+      toProviderResponse: (response) =>
+        consent ? consent.toProviderResponse(response) : elicitationResponse(response),
     };
   }
   const url = mcpUrlParamsSchema.parse(params);
+  computerUseConsent(url); // A consent marker on another mode must fail closed.
   const provider = providerRef(requestId, method, url);
   return {
     request: {

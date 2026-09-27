@@ -47,6 +47,40 @@ describe('RuntimeInteractionElicitationForm', () => {
     expect(container.textContent).not.toContain('Approval Hub');
   });
 
+  it.each(['session', 'always'])('renders app consent and submits only the explicit %s choice', async (scope) => {
+    const request: RuntimeInteractionRequest = {
+      ...formRequest([]),
+      title: 'Computer Use 应用授权',
+      description: '应用：org.example.ContractTest',
+      message: 'Allow Computer Use for the synthetic test app?',
+      requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+      decisions: [
+        { id: 'accept:session', label: '本次会话允许', outcome: 'accept' },
+        { id: 'accept:always', label: '始终允许此应用', outcome: 'accept' },
+        { id: 'decline', label: '拒绝', outcome: 'decline' },
+        { id: 'cancel', label: '取消', outcome: 'cancel' },
+      ],
+    };
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(request) }));
+    await render(root);
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Computer Use 应用授权');
+    expect(container.textContent).toContain('org.example.ContractTest');
+    const label = scope === 'session' ? '本次会话允许' : '始终允许此应用';
+    const button = [...container.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/api/runtime-interactions/interaction-ui/respond',
+      expect.objectContaining({
+        body: JSON.stringify({ cardRef, response: { kind: 'decision', decisionId: `accept:${scope}`, content: {} } }),
+      }),
+    );
+  });
+
   it('does not render a clickable URL when persisted input has an unsafe scheme', async () => {
     const unsafe = urlRequest('javascript:alert(1)');
     vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(unsafe) }));

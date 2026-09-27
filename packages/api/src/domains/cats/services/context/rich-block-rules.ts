@@ -36,10 +36,11 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - 发送已有文件、导出物、成片视频
   - \`url\` + \`fileName\` 必填，\`mimeType\`/\`fileSize\` 可选
   - \`mimeType\` 以 \`video/\` 开头时，Web UI 渲染内联视频播放器
-  - 本地视频/通用文件需先放到 \`/uploads/...\`；当前自动发布合约只覆盖图片
+  - 已有本地文档（含 PPTX）使用 \`cat_cafe_publish_file\` 上传并自动创建文件卡；返回 URL/大小/SHA256，远程下载另行核验
+  - 已发布的视频可用文件卡；没有正式发布入口的类型如实报告，禁止直接写 runtime 上传目录
 - **media_gallery**（图片展示 — 不一定要现场生成！）
   - 发送已有图片（头像 \`/avatars/\`、照片 \`/uploads/\`、设计稿）
-  - \`/uploads/xxx\` 的磁盘真身是 \`cat-cafe-runtime/packages/api/uploads/\`（运行中 API 的 uploadDir）；不要手动 cp 到源码仓 \`uploads/\` 或 \`packages/api/uploads/\`
+  - 本地图片走共享图片发布合约；\`/uploads/xxx\` 由 API 管理，不手动复制到 runtime 或源码仓的上传目录
   - 截图展示、多图对比
   - 定时任务/主动触发中展示图片
 - **audio**（语音消息 — 你"说出来"的话）

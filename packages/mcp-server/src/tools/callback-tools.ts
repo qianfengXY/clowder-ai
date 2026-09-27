@@ -64,6 +64,7 @@ import {
   createDeferredPersonMemoryTool,
   createProactiveMemoryAbstentionTool,
 } from './proactive-memory-opportunity-tool.js';
+import { prepareFilePublication, publishFileInputSchema } from './publish-file.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -1943,6 +1944,23 @@ export async function handleGenerateDocument(input: {
   return result;
 }
 
+export async function handlePublishFile(input: { sourcePath: string; expectedSha256?: string }): Promise<ToolResult> {
+  const config = getCallbackConfig();
+  if (!config?.invocationId || !config.callbackToken) {
+    return errorResult(
+      'File publication requires an active invocation credential; no agent-key or local-path fallback.',
+    );
+  }
+  try {
+    const payload = await prepareFilePublication(input);
+    // Do not persist confidential file bytes in a callback outbox. An explicit
+    // retry re-reads the source and the server deduplicates the same publication.
+    return await callbackPost('/api/callbacks/publish-file', payload, { enableOutbox: false, retryDelaysMs: [] });
+  } catch (error) {
+    return errorResult(`File publication failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pr_head_changed') }).strict(),
   z
@@ -3748,7 +3766,7 @@ export const callbackTools = [
     description:
       'Generate a document (PDF/DOCX/MD) from Markdown and deliver to IM platforms (Feishu/Telegram). ' +
       'Use when: user asks to "生成报告", "导出文档", "发PDF", "写份文档给我", "export to DOCX", or any document generation request. ' +
-      'NOT for: sending an existing file you already have (use create_rich_block with kind:"file" + url pointing to /uploads/). ' +
+      'NOT for: sending an existing local document (use cat_cafe_publish_file); an already published URL uses create_rich_block. ' +
       'Output: file saved to /uploads/, attached as file RichBlock, automatically delivered to bound IM chats. Web UI shows download link. ' +
       'GOTCHA: Do NOT manually run pandoc + create_rich_block — that skips IM delivery and the file will NOT reach Feishu/Telegram. Always use this tool. ' +
       'Degradation: PDF needs LaTeX engine → falls back to DOCX → falls back to MD. No pandoc → .md only.',
@@ -3758,6 +3776,27 @@ export const callbackTools = [
       implementationExport: 'handleGenerateDocument',
       resourceFamily: 'artifact-surface',
       action: 'derive',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_publish_file',
+    description:
+      'Publish an existing local document as a downloadable attachment in the current chat. ' +
+      'Use when: the user asks to receive/download a completed local PPT/PPTX, PDF, DOC/DOCX, XLS/XLSX, TXT, MD or CSV. ' +
+      'NOT for: generating or editing documents (use generate_document), images, arbitrary runtime writes, or sending to another thread. ' +
+      'Output: uploads exact bytes through invocation authentication, attaches a file card, and returns URL, size and SHA256. ' +
+      'GOTCHA: a local Markdown path is not a remote download. Do not copy into runtime/uploads; use this publisher. ' +
+      'Requires active invocation credentials, a regular file up to 50 MiB, and user authorization to share that file. ' +
+      'Publication receipt does not prove the remote client downloaded it; verify that separately.',
+    inputSchema: publishFileInputSchema,
+    handler: handlePublishFile,
+    governance: {
+      implementationExport: 'handlePublishFile',
+      resourceFamily: 'artifact-surface',
+      action: 'publish',
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],

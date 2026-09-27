@@ -163,16 +163,18 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 - Antigravity 生成：工具结果中的文件路径自动检测并发布
 - 其他来源：调用 `publishGeneratedImage({ sourcePath, mimeType, publicationKey, provider, toolName })` 手动发布
 
-发布后自动获得 `/uploads/...` 稳定 URL + `media_gallery` 富块，无需手动复制或验证。
+发布后自动获得 `/uploads/...` 稳定 URL + `media_gallery` 富块。发布成功和远程用户可访问分别核验。
 
-**仅当共享合约不可用时**才手动复制到 runtime 的 uploadDir。
+共享合约不可用时如实报告缺口；不要直接写 runtime 的 uploadDir，也不要换 provider 绕过保护。
 
 如果你要发的是**已有文件或本地成片视频**：
 
 - 用 `kind:"file"`，不是 `media_gallery`
 - `url` 必须是 `/uploads/...`、`/api/...` 或 `https://...`
 - `mimeType` 以 `video/` 开头时，Web UI 会渲染内联 `<video>` 播放器
-- **当前自动发布合约只覆盖图片**；本地视频/通用文件没有 `publishGeneratedVideo()`，需要你先显式放到 `/uploads/...`
+- 已有本地文档（PPT/PPTX、PDF、DOC/DOCX、XLS/XLSX、TXT、MD、CSV）用 `cat_cafe_publish_file({ sourcePath, expectedSha256? })`；工具通过当前 invocation 的认证上传原始字节并自动附文件卡，无需另调 `create_rich_block`。
+- 上述工具只接受最多 50 MiB 的普通文件，不接受符号链接或代发其他 thread。上传回执含大小与 SHA256，但不是远程下载验收；仍须读回正式附件并核对字节及用户访问链路。
+- 已发布 URL 可直接用文件卡；本地视频等尚无正式发布入口的类型如实报告，不直写 runtime、不伪装 MIME、不用本机链接或临时 preview 冒充交付。
 
 ## 三条纪律
 

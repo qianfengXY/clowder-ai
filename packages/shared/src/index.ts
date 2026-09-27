@@ -7,6 +7,7 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+export * from './agent-file-publication.js';
 // F246 Phase I: shared Approval Hub producer metadata (API + Web single source).
 export * from './approval-producer-catalog.js';
 // Export avatar size limits (shared between API route bodyLimit and frontend size gate)

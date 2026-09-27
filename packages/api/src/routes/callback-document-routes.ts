@@ -19,6 +19,7 @@ import { PandocService } from '../infrastructure/document/PandocService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { registerCallbackFilePublication } from './callback-file-publication.js';
 import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 
 const generateDocumentSchema = z.object({
@@ -36,8 +37,10 @@ export function registerCallbackDocumentRoutes(
     registry: InvocationRegistry;
     socketManager: SocketManager;
     threadStore?: Pick<IThreadStore, 'get'>;
+    uploadDir?: string;
   },
 ): void {
+  registerCallbackFilePublication(app, deps);
   const pandocService = new PandocService(app.log);
 
   app.post('/api/callbacks/generate-document', async (request, reply) => {
