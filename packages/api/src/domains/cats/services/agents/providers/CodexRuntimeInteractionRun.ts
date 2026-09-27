@@ -31,6 +31,7 @@ export function createCodexRuntimeInteractionRunState(
   const controller = new AbortController();
   let closed = false;
   let providerTurn: { threadId: string; turnId: string } | null = null;
+  const seenRequestIds = new Set<number>();
   const context: CodexRuntimeInteractionContext = { ...input, signal: controller.signal };
 
   const close = (reasonCode: CodexRuntimeInteractionCloseReason): void => {
@@ -46,6 +47,7 @@ export function createCodexRuntimeInteractionRunState(
     },
     close,
     dispatch: (request, write, onFailure) => {
+      if (closed) return;
       const task = (async () => {
         if (isCodexRuntimeInteractionMethod(request.method) && !matchesProviderTurn(request, providerTurn)) {
           if (!closed && typeof request.id === 'number') {
@@ -55,6 +57,16 @@ export function createCodexRuntimeInteractionRunState(
             });
           }
           return;
+        }
+        if (isCodexRuntimeInteractionMethod(request.method) && typeof request.id === 'number') {
+          if (seenRequestIds.has(request.id)) {
+            // Do not race two responses for one wire id. Invalidate any first
+            // waiter before failing the carrier, so a late answer cannot grant.
+            close('transport_lost');
+            onFailure(new Error('Duplicate runtime interaction request id'));
+            return;
+          }
+          seenRequestIds.add(request.id);
         }
         if (isCodexApprovalInteractionMethod(request.method) && approvalsReviewer !== 'user') {
           // auto_review and guardian_subagent own permission decisions upstream.

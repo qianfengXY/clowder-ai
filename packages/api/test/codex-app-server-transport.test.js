@@ -616,6 +616,41 @@ test('app-server timeout remains disabled at zero and positive opt-in uses proto
   assert.equal(timeoutWire.terminateCalls, 1, 'timeout-interrupted hosts must also be evicted from the warm pool');
 });
 
+test('opt-in timeout invalidates runtime interactions before interrupt grace permits a late answer', async () => {
+  const wire = new ProtocolWire();
+  const invalidations = [];
+  const client = new CodexAppServerClient({ wire });
+  const run = collect(
+    client.run({
+      prompt: frozenPrompt('work'),
+      thread: { kind: 'start' },
+      timeoutMs: 10,
+      interruptGraceMs: 1_000,
+      runtimeInteraction: {
+        owner: { userId: 'u', threadId: 'chat', catId: 'codex', invocationId: 'inv-timeout' },
+        port: {
+          request: async () => ({ kind: 'decision', decisionId: 'cancel' }),
+          invalidateInvocation: async (...args) => {
+            invalidations.push(args);
+            return [];
+          },
+        },
+      },
+    }),
+  );
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/interrupt'));
+  const atInterrupt = [...invalidations];
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', status: 'interrupted' },
+    },
+  });
+  await run;
+  assert.deepEqual(atInterrupt, [['inv-timeout', 'transport_lost']]);
+});
+
 test('authoritative terminal result survives a cleanup failure', async () => {
   const wire = new ProtocolWire();
   wire.close = async () => {

@@ -225,6 +225,7 @@ export class CodexAppServerClient {
       void this.lifecycle.interrupt(activeThreadId, activeTurnId, 'user_cancel', interruptGraceMs);
     };
     const timeoutHandler = (): void => {
+      runtimeInteraction?.close('transport_lost');
       void this.lifecycle.interrupt(activeThreadId, activeTurnId, 'timeout', interruptGraceMs);
     };
     input.signal?.addEventListener('abort', abortHandler, { once: true });
