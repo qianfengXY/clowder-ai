@@ -67,34 +67,26 @@ async function collect(iterable) {
 }
 
 describe('invokeSingleCat durable child execution lifecycle', () => {
-  test('a cancellation-only terminal never succeeds or schedules a freshness invocation', async () => {
+  test('a cancellation-only terminal stays canceled and emits one truthful terminal', async () => {
     const store = new InMemoryTurnExecutionStore();
-    let reinvokes = 0;
-    await collect(
-      invokeSingleCat(
-        {
-          ...makeDeps(store, 'child-cancelled'),
-          freshnessReinvokeCheck: async () => {
-            reinvokes++;
-            return null;
+    const messages = await collect(
+      invokeSingleCat(makeDeps(store, 'child-cancelled'), {
+        catId: 'codex',
+        service: {
+          async *invoke() {
+            yield { type: 'done', catId: 'codex', errorCode: 'INVOCATION_CANCELLED', timestamp: Date.now() };
           },
         },
-        {
-          catId: 'codex',
-          service: {
-            async *invoke() {
-              yield { type: 'done', catId: 'codex', errorCode: 'INVOCATION_CANCELLED', timestamp: Date.now() };
-            },
-          },
-          prompt: 'cancelled request',
-          userId: 'user-1',
-          threadId: 'thread-1',
-          isLastCat: true,
-        },
-      ),
+        prompt: 'cancelled request',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        isLastCat: true,
+      }),
     );
     assert.equal((await store.get('child-cancelled')).status, 'canceled');
-    assert.equal(reinvokes, 0);
+    const terminals = messages.filter((message) => message.type === 'done');
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].errorCode, 'INVOCATION_CANCELLED');
   });
 
   test('creates running before prompt exposure/provider and terminalizes success', async () => {

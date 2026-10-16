@@ -2,11 +2,13 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 
 const AUTH = { 'x-cat-cafe-user': 'test-user' };
+const skillHost = fileURLToPath(new URL('../../../', import.meta.url));
 
 async function fixture(deployment, run) {
   assert.equal(process.env.CAT_CAFE_TEST_SANDBOX, '1', 'run through scripts/with-test-home.sh');
@@ -57,7 +59,9 @@ async function fixture(deployment, run) {
       CAT_CAFE_DEPLOYMENT_ID: deployment,
       CAT_CAFE_RUNTIME_ROOT: runtime,
       CAT_CAFE_WORKSPACE_ROOT: main,
-      PROJECT_ALLOWED_ROOTS: dir,
+      // The route reads built-in skills from its module's worktree, while all
+      // writable project/config roots remain in this fixture and sandbox HOME.
+      PROJECT_ALLOWED_ROOTS: [dir, skillHost].join(delimiter),
       DEFAULT_OWNER_USER_ID: 'you',
     });
     process.chdir(runtime);
@@ -100,7 +104,7 @@ test('F324 Alpha authenticated capabilities GET reads the mapped workspace witho
     const files = paths(main);
     const before = await bytes(files);
     const res = await app.inject({ method: 'GET', url: '/api/capabilities', headers: AUTH });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     assert.ok(res.json().items.some((item) => item.id === 'cat-cafe-memory'));
     await unchanged(files, before);
   });
@@ -115,7 +119,7 @@ test('F324 Alpha external-project GET preserves project, main and HOME configura
       url: `/api/capabilities?projectPath=${encodeURIComponent(external)}`,
       headers: AUTH,
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     await unchanged(files, before);
   });
 });
@@ -138,7 +142,7 @@ test('F324 runtime GET heals canonical discovery without rewriting retired provi
     const files = paths(main);
     const before = await bytes(files);
     const res = await app.inject({ method: 'GET', url: '/api/capabilities', headers: AUTH });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     const after = await bytes(files);
     assert.deepEqual(
       after.map((value, index) => value.equals(before[index])),

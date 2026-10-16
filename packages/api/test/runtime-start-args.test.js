@@ -104,7 +104,7 @@ for (const script of ['start', 'runtime:start']) {
     const root = createFixture(t);
     const result = runStart(root, script, []);
     assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
-    assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), launchPrefix);
+    assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--quick\n--daemon\n`);
   });
 
   for (const args of [['--daemon'], ['--', '--daemon']]) {
@@ -112,7 +112,7 @@ for (const script of ['start', 'runtime:start']) {
       const root = createFixture(t);
       const result = runStart(root, script, args);
       assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
-      assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--daemon\n`);
+      assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--daemon\n--quick\n`);
     });
   }
 
@@ -122,7 +122,7 @@ for (const script of ['start', 'runtime:start']) {
         const root = createFixture(t);
         const result = runStart(root, script, [...separator, ...shaArgs, '--daemon']);
         assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
-        assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--daemon\n`);
+        assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--daemon\n--quick\n`);
       });
     }
   }
@@ -139,7 +139,10 @@ for (const script of ['start', 'runtime:start']) {
       'child path',
     ]);
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.equal(readFileSync(join(root, 'started-args.txt'), 'utf8'), `${launchPrefix}--daemon\n--dir\nchild path\n`);
+    assert.equal(
+      readFileSync(join(root, 'started-args.txt'), 'utf8'),
+      `${launchPrefix}--daemon\n--dir\nchild path\n--quick\n`,
+    );
   });
 
   test(`pnpm ${script} rejects malformed or mismatched explicit targets after --`, (t) => {

@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import Fastify from 'fastify';
 import { registerInvocationTrajectoryRoutes } from '../dist/routes/invocation-trajectory-routes.js';
 
-function createApp(readSessionEvents) {
+function createApp(listInvocationSummaries) {
   const app = Fastify();
   const thread = { id: 't', createdBy: 'user' };
   const sessions = [0, 1, 2].map((seq) => ({ id: `s${seq}`, threadId: 't', catId: 'c', seq, status: 'active' }));
@@ -15,29 +15,33 @@ function createApp(readSessionEvents) {
       sessionChainStore: { getChainByThread: async () => sessions },
       invocationRecordStore: { get: async () => null },
     },
-    readSessionEvents,
+    listInvocationSummaries,
     readInvocationEvents: async () => [],
   });
   return app;
 }
 
-test('list releases each full transcript before reading the next, retaining total and newest ordering', async () => {
-  let active = 0;
-  let peak = 0;
-  const app = createApp(async (session) => {
-    active++;
-    peak = Math.max(peak, active);
-    await delay(5);
-    active--;
-    return [{ v: 1, t: session.seq, eventNo: 0, invocationId: `i${session.seq}`, event: { type: 'done' } }];
+// Whole-session payload avoidance and bounded worker cancellation are exercised
+// against the real indexed reader in transcript-invocation-read-liveness.test.js.
+test('list delegates scoped sessions and pagination to the indexed owner without reading full transcripts', async () => {
+  const calls = [];
+  const app = createApp(async (sessions, limit, signal) => {
+    calls.push({ sessions, limit, signal });
+    return { total: 3, invocations: [{ invocationId: 'i2' }] };
   });
   try {
     const result = await app.inject({
       url: '/api/threads/t/invocations?limit=1',
       headers: { 'x-cat-cafe-user': 'user' },
     });
-    assert.equal(result.statusCode, 200);
-    assert.equal(peak, 1);
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      calls[0].sessions.map(({ id }) => id),
+      ['s0', 's1', 's2'],
+    );
+    assert.equal(calls[0].limit, 1);
+    assert.ok(calls[0].signal instanceof AbortSignal);
     assert.equal(result.json().total, 3);
     assert.equal(result.json().invocations[0].invocationId, 'i2');
   } finally {
@@ -45,7 +49,7 @@ test('list releases each full transcript before reading the next, retaining tota
   }
 });
 
-test('disconnect cancels the in-progress read and never starts the remaining sessions', { timeout: 5000 }, async () => {
+test('disconnect cancels the indexed owner read without starting another read', { timeout: 5000 }, async () => {
   let started;
   const reading = new Promise((resolve) => {
     started = resolve;
@@ -55,7 +59,7 @@ test('disconnect cancels the in-progress read and never starts the remaining ses
     sawAbort = resolve;
   });
   let reads = 0;
-  const app = createApp(async (_session, signal) => {
+  const app = createApp(async (_sessions, _limit, signal) => {
     reads++;
     started();
     await new Promise((resolve) =>
@@ -69,16 +73,16 @@ test('disconnect cancels the in-progress read and never starts the remaining ses
       ),
     );
     signal.throwIfAborted();
-    return [];
+    return { invocations: [], total: 0 };
   });
   let request;
   try {
     const origin = await app.listen({ host: '127.0.0.1', port: 0 });
     request = get(`${origin}/api/threads/t/invocations`, { headers: { 'x-cat-cafe-user': 'user' } });
     request.on('error', () => {});
-    await reading;
+    await Promise.race([reading, delay(1000).then(() => assert.fail('indexed list owner was never called'))]);
     request.destroy();
-    await aborted;
+    await Promise.race([aborted, delay(1000).then(() => assert.fail('disconnect did not abort the indexed read'))]);
     assert.equal(reads, 1);
   } finally {
     request?.destroy();

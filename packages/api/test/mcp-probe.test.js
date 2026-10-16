@@ -63,11 +63,12 @@ describe('probeMcpCapability', () => {
         { projectRoot: process.cwd(), timeoutMs: 100 },
       );
       if (result.connectionStatus !== 'disconnected') process.exitCode = 2;
+      process.send({ stage: 'probe-complete' }, () => process.disconnect());
     `;
     const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
       cwd: process.cwd(),
       env: { ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' },
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
     let stderr = '';
     child.stderr.setEncoding('utf8');
@@ -76,10 +77,20 @@ describe('probeMcpCapability', () => {
     });
 
     const exit = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer = setTimeout(() => {
         child.kill('SIGKILL');
-        reject(new Error(`failed probe retained an active handle past 1500ms: ${stderr}`));
-      }, 1500);
+        reject(new Error(`probe did not finish startup within 5000ms: ${stderr}`));
+      }, 5000);
+      // Module loading is outside the resource-release contract. Keep the
+      // original 1500ms exit bound, starting when the probe actually returns.
+      child.once('message', (message) => {
+        if (message?.stage !== 'probe-complete') return;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`failed probe retained an active handle past 1500ms: ${stderr}`));
+        }, 1500);
+      });
       child.once('exit', (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal });

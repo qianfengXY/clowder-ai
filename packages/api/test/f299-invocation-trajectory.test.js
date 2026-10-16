@@ -1389,7 +1389,7 @@ describe('F299 active and sealed invocation routes', () => {
     const { TranscriptInvocationReader } = await import(
       '../dist/domains/cats/services/session/transcript-index/TranscriptInvocationReader.js'
     );
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
+    const { TranscriptReader } = await import('../dist/domains/cats/services/session/transcript/TranscriptReader.js');
     const record = await sessionChainStore.create({
       threadId: 'thread-f299',
       catId: 'codex-sol',

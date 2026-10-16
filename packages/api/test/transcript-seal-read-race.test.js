@@ -4,8 +4,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { TranscriptReader } from '../dist/domains/cats/services/session/TranscriptReader.js';
-import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptReader } from '../dist/domains/cats/services/session/transcript/TranscriptReader.js';
+import { TranscriptWriter } from '../dist/domains/cats/services/session/transcript/TranscriptWriter.js';
 import { readTranscriptInvocationIndex } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-index-worker.js';
 
 for (const hasNewSuffix of [false, true]) {

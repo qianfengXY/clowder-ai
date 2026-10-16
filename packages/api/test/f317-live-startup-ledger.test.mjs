@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
-import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptWriter } from '../dist/domains/cats/services/session/transcript/TranscriptWriter.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { wireFixture } from './helpers/f317-live-wire-fixture.mjs';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
@@ -53,7 +53,6 @@ for (const [phase, disposition] of [
     };
     const durable = [];
     let readyCalls = 0;
-    let freshnessReinvokes = 0;
     writer.appendDurableEvent = async (session, event, invocationId) => {
       await append(session, event, invocationId);
       durable.push(event);
@@ -106,10 +105,6 @@ for (const [phase, disposition] of [
             }),
             observeCompaction: async () => assert.fail('unexpected compaction'),
             confirmColdConsumed: async () => {},
-          },
-          freshnessReinvokeCheck: async () => {
-            freshnessReinvokes++;
-            return null;
           },
           threadStore: null,
           apiUrl: 'http://127.0.0.1:3004',
@@ -181,7 +176,9 @@ for (const [phase, disposition] of [
             ? 'PROVIDER_EXECUTION_FAILED'
             : undefined,
       );
-      assert.equal(freshnessReinvokes, disposition === 'accepted' ? 1 : 0);
+      // Follow-up work is owned by the canonical Queue, not the retired
+      // invokeSingleCat freshnessReinvokeCheck dependency. Startup acceptance
+      // remains proven by the native turn, ledger, execution and done above.
       if (disposition === 'closed')
         assert.equal(
           messages.filter((message) => message.type === 'error').length,

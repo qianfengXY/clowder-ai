@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { SessionSealer } from '../../dist/domains/cats/services/session/SessionSealer.js';
-import { TranscriptWriter } from '../../dist/domains/cats/services/session/TranscriptWriter.js';
+import { TranscriptWriter } from '../../dist/domains/cats/services/session/transcript/TranscriptWriter.js';
 import { InMemoryTurnExecutionStore } from '../../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { SessionChainStore } from '../../dist/domains/cats/services/stores/ports/SessionChainStore.js';
 

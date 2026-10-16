@@ -676,7 +676,7 @@ describe('GET /api/messages', () => {
     const content = '@gpt\n@kimi\nF289 automatic review — independent stage.\nProject: project-1\nReviewRound: rr-1';
     messageStore.append({
       userId: 'default-user',
-      catId: null,
+      from: { kind: 'system', service: 'review-orchestration' },
       content,
       mentions: ['gpt', 'kimi'],
       timestamp: 3100,
@@ -685,7 +685,7 @@ describe('GET /api/messages', () => {
     });
     messageStore.append({
       userId: 'default-user',
-      catId: null,
+      from: { kind: 'user', userId: 'default-user' },
       content: content.replace('rr-1', 'rr-user-authored-lookalike'),
       mentions: ['gpt', 'kimi'],
       timestamp: 3200,

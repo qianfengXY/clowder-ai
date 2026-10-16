@@ -67,8 +67,8 @@ function buildDeps(overrides = {}) {
     queueProcessor.processNext(threadId, userId),
   );
   const managedCommandWakeRecovery = {
-    retireCarrier: mock.fn(async () => 0),
-    retireThread: mock.fn(async () => ({ retired: 0, messageIds: [] })),
+    retireProducerTasksForMessages: mock.fn(async () => 0),
+    retireProducerTasksForThread: mock.fn(async () => ({ retired: 0, messageIds: [] })),
   };
   deps = {
     threadStore: {
@@ -1309,10 +1309,12 @@ describe('Queue Management API', () => {
 
   it('DELETE /queue retires each exact managed-wake producer after durable carrier withdrawal', async () => {
     const events = [];
-    deps.managedCommandWakeRecovery.retireCarrier.mock.mockImplementation(async (messageIds, reason) => {
-      events.push(`retire:${messageIds.join(',')}:${reason}`);
-      return 1;
-    });
+    deps.managedCommandWakeRecovery.retireProducerTasksForMessages.mock.mockImplementation(
+      async (messageIds, reason) => {
+        events.push(`retire:${messageIds.join(',')}:${reason}`);
+        return 1;
+      },
+    );
     const { entry } = enqueueEntry(deps.invocationQueue, {
       targetCats: ['codex-sol'],
       messageId: 'message-managed-wake',

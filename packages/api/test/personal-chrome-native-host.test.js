@@ -122,7 +122,8 @@ function appendRequest(overrides = {}) {
   };
 }
 
-async function waitForPath(path, child, getSpawnError, timeoutMs = 2_000) {
+// Cold module startup is separate from the bounded exit/socket cleanup checks.
+async function waitForPath(path, child, getSpawnError, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const spawnError = getSpawnError();

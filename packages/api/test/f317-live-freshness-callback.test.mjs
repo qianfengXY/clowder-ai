@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.ts';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
-import { callbacksRoutes } from '../src/routes/callbacks.ts';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
 
-test('only an authenticated server-owned Live binding suppresses duplicate B1 notices', async () => {
+test('the retired stateless callback cannot create a parallel freshness notice source', async () => {
   const registry = new InvocationRegistry();
   const identity = await registry.create('owner', 'codex-astra', 'home');
-  const queries = [];
-  let live = true;
   let redisCalls = 0;
   const app = Fastify();
   await app.register(callbacksRoutes, {
@@ -26,10 +24,6 @@ test('only an authenticated server-owned Live binding suppresses duplicate B1 no
         },
       },
     ),
-    isLiveCarrierInvocation: async (query) => {
-      queries.push(query);
-      return live;
-    },
   });
   const request = {
     method: 'POST',
@@ -38,14 +32,11 @@ test('only an authenticated server-owned Live binding suppresses duplicate B1 no
     headers: { 'x-invocation-id': identity.invocationId, 'x-callback-token': identity.callbackToken },
   };
   try {
-    assert.equal((await app.inject({ ...request, headers: {} })).statusCode, 401);
-    assert.equal(queries.length, 0);
-    assert.equal((await app.inject(request)).statusCode, 200);
-    assert.deepEqual(queries[0], { invocationId: identity.invocationId, catId: 'codex-astra', threadId: 'home' });
-    assert.equal(redisCalls, 0, 'Live D2 owns its exact exposure query, not the stateless B1 query');
-    live = false;
-    assert.equal((await app.inject(request)).statusCode, 200);
-    assert.ok(redisCalls > 0, 'ordinary authenticated calls keep B1 behavior');
+    // Upstream #1398 removed this endpoint. Native/Live broker coverage lives
+    // in f254-provider-native-freshness and f317-idle-freshness tests.
+    assert.equal((await app.inject({ ...request, headers: {} })).statusCode, 404);
+    assert.equal((await app.inject(request)).statusCode, 404);
+    assert.equal(redisCalls, 0, 'an old callback must not query or mint freshness beside the current owner');
   } finally {
     await app.close();
   }
