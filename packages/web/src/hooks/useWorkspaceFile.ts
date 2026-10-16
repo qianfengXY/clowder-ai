@@ -18,7 +18,7 @@ export function useWorkspaceFile(worktreeId: string, path: string, openRequest: 
   const requestSeq = useRef(0);
 
   const acceptFile = useCallback((nextFile: FileData, replaceDraft: boolean, revision: number) => {
-    if (dirtyRef.current && (!replaceDraft || revision !== editRevision.current)) {
+    if (fileRef.current && dirtyRef.current && (!replaceDraft || revision !== editRevision.current)) {
       setPendingExternalSha(nextFile.sha256 === fileRef.current?.sha256 ? null : nextFile.sha256);
       return false;
     }
@@ -41,7 +41,13 @@ export function useWorkspaceFile(worktreeId: string, path: string, openRequest: 
           { cache: 'no-store' },
           { afterCurrentGet: true },
         );
-        if (!response.ok) throw new Error(`File read failed: ${response.status}`);
+        if (!response.ok) {
+          if (seq === requestSeq.current && [401, 403, 404].includes(response.status)) {
+            fileRef.current = null;
+            setFile(null);
+          }
+          throw new Error(`File read failed: ${response.status}`);
+        }
         const nextFile = (await response.json()) as FileData;
         if (seq !== requestSeq.current) return false;
         setError(null);

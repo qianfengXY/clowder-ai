@@ -321,6 +321,17 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.ok(ids.indexOf(t2.id) < ids.indexOf(t1.id));
   });
 
+  it('list() rejects a wrong-type participants key paired with a missing thread detail', async () => {
+    await store.get('default');
+    await store.create('alice', 'Visible thread');
+    const orphanId = 'thread_batch_orphan';
+    await redis.zadd(userListKey('alice'), '1', orphanId);
+    await redis.set(threadParticipantsKey(orphanId), 'not a set');
+
+    await assert.rejects(store.list('alice'), /WRONGTYPE/);
+    assert.deepEqual(await redis.hgetall(threadDetailKey(orphanId)), {});
+  });
+
   it('list() self-heals when the user thread index zset is fully lost', async () => {
     const userId = 'self-heal-full';
     const first = await store.create(userId, 'Thread A');
@@ -419,32 +430,13 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(updated?.backlogItemId, 'blg_123');
   });
 
-  it('unlinkBacklogItem() only clears the expected reverse backlog reference', async () => {
-    const thread = await store.create('user1', 'Backlog unlink');
+  it('updateBacklogItem() can replace and clear the persisted reverse backlog reference', async () => {
+    const thread = await store.create('user1', 'Post-create feature');
     await redis.hset(backlogDetailKey('blg_123'), 'id', 'blg_123', 'userId', 'user1');
-    await store.linkBacklogItem(thread.id, 'blg_123');
-
-    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_other'), false);
+    await store.updateBacklogItem(thread.id, 'blg_123');
     assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_123');
-
-    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_123'), true);
+    await store.updateBacklogItem(thread.id, null);
     assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
-  });
-
-  it('linkBacklogItem() rejects a missing or cross-owner backlog target', async () => {
-    const thread = await store.create('user1', 'Guarded backlog link');
-    await assert.rejects(store.linkBacklogItem(thread.id, 'missing'), /backlog missing not found/);
-    await redis.hset(backlogDetailKey('foreign'), 'id', 'foreign', 'userId', 'user2');
-    await assert.rejects(store.linkBacklogItem(thread.id, 'foreign'), /across owners/);
-    assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
-  });
-
-  it('linkBacklogItem() accepts an owner-indexed system feature thread', async () => {
-    const thread = await store.ensureThread('project-feature-plan:test', 'Feature plan');
-    await store.indexForUser(thread.id, 'user1');
-    await redis.hset(backlogDetailKey('blg_system'), 'id', 'blg_system', 'userId', 'user1');
-    await store.linkBacklogItem(thread.id, 'blg_system');
-    assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_system');
   });
 
   it('set/consumeMentionRoutingFeedback() returns one-shot payload', async () => {
@@ -871,6 +863,34 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     } finally {
       redis.pipeline = originalPipeline;
     }
+  });
+
+  it('unlinkBacklogItem() only clears the expected reverse backlog reference', async () => {
+    const thread = await store.create('user1', 'Backlog unlink');
+    await redis.hset(backlogDetailKey('blg_123'), 'id', 'blg_123', 'userId', 'user1');
+    await store.linkBacklogItem(thread.id, 'blg_123');
+
+    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_other'), false);
+    assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_123');
+
+    assert.equal(await store.unlinkBacklogItem(thread.id, 'blg_123'), true);
+    assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
+  });
+
+  it('linkBacklogItem() rejects a missing or cross-owner backlog target', async () => {
+    const thread = await store.create('user1', 'Guarded backlog link');
+    await assert.rejects(store.linkBacklogItem(thread.id, 'missing'), /backlog missing not found/);
+    await redis.hset(backlogDetailKey('foreign'), 'id', 'foreign', 'userId', 'user2');
+    await assert.rejects(store.linkBacklogItem(thread.id, 'foreign'), /across owners/);
+    assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
+  });
+
+  it('linkBacklogItem() accepts an owner-indexed system feature thread', async () => {
+    const thread = await store.ensureThread('project-feature-plan:test', 'Feature plan');
+    await store.indexForUser(thread.id, 'user1');
+    await redis.hset(backlogDetailKey('blg_system'), 'id', 'blg_system', 'userId', 'user1');
+    await store.linkBacklogItem(thread.id, 'blg_system');
+    assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_system');
   });
 });
 

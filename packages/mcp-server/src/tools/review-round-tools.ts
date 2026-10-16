@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('review-round-tools.ts', undefined, {
+const defineTool = defineMcpCanonicalFactory('review-round-tools.ts', undefined, {
   resourceFamily: 'review-round',
   authority: 'callback-thread',
 });
@@ -165,6 +165,11 @@ export const reviewRoundTools = [
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewRoundRead,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewRoundRead',
       action: 'read-round',
       risk: { level: 'read', openWorld: false },
@@ -181,6 +186,11 @@ export const reviewRoundTools = [
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewPrivateDraftRead,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewPrivateDraftRead',
       action: 'read-private-draft',
       risk: { level: 'read', openWorld: false },
@@ -198,6 +208,11 @@ export const reviewRoundTools = [
     inputSchema: reviewDraftSubmitInputSchema,
     handler: handleReviewDraftSubmit,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewDraftSubmit',
       action: 'submit-draft',
       risk: { level: 'write', openWorld: false },
@@ -215,6 +230,11 @@ export const reviewRoundTools = [
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewIndependentFinish,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewIndependentFinish',
       action: 'finish-independent',
       risk: { level: 'write', openWorld: false },
@@ -231,6 +251,11 @@ export const reviewRoundTools = [
     inputSchema: reviewRoundReadInputSchema,
     handler: handleReviewBarrierDraftsRead,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewBarrierDraftsRead',
       action: 'read-barrier-drafts',
       risk: { level: 'read', openWorld: false },
@@ -248,6 +273,11 @@ export const reviewRoundTools = [
     inputSchema: reviewStageFinishInputSchema,
     handler: handleReviewCrossFinish,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewCrossFinish',
       action: 'finish-cross-review',
       risk: { level: 'write', openWorld: false },
@@ -265,6 +295,11 @@ export const reviewRoundTools = [
     inputSchema: reviewConsensusPublishInputSchema,
     handler: handleReviewConsensusPublish,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:review-coordination',
+      },
       implementationExport: 'handleReviewConsensusPublish',
       action: 'publish-consensus',
       risk: { level: 'write', openWorld: false },

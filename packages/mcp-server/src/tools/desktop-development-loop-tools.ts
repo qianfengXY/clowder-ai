@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('desktop-development-loop-tools.ts', undefined, {
+const defineTool = defineMcpCanonicalFactory('desktop-development-loop-tools.ts', undefined, {
   resourceFamily: 'desktop-development-loop',
   authority: 'provider-runtime',
 });
@@ -323,6 +323,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentProjectReadInputSchema,
     handler: handleDevelopmentProjectRead,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentProjectRead',
       action: 'read-project',
       risk: { level: 'read', openWorld: false },
@@ -339,6 +344,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentWorkReadInputSchema,
     handler: handleDevelopmentWorkRead,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentWorkRead',
       action: 'read-work',
       risk: { level: 'read', openWorld: false },
@@ -355,6 +365,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentReviewWaitInputSchema,
     handler: handleDevelopmentReviewWait,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentReviewWait',
       action: 'wait-review',
       risk: { level: 'read', openWorld: false },
@@ -372,6 +387,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentWorkConnectInputSchema,
     handler: handleDevelopmentWorkConnect,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentWorkConnect',
       action: 'connect-work',
       risk: { level: 'write', openWorld: false },
@@ -388,6 +408,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentWorkHeartbeatInputSchema,
     handler: handleDevelopmentWorkHeartbeat,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentWorkHeartbeat',
       action: 'heartbeat-work',
       risk: { level: 'write', openWorld: false },
@@ -404,6 +429,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentImplementationReportInputSchema,
     handler: handleDevelopmentImplementationReport,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentImplementationReport',
       action: 'report-implementation',
       risk: { level: 'write', openWorld: false },
@@ -420,6 +450,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentMergeConfirmationInputSchema,
     handler: handleDevelopmentMergeConfirmationRecord,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentMergeConfirmationRecord',
       action: 'record-merge-confirmation',
       risk: { level: 'write', openWorld: false },
@@ -436,6 +471,11 @@ export const desktopDevelopmentLoopTools = [
     inputSchema: developmentMergeReportInputSchema,
     handler: handleDevelopmentMergeReport,
     governance: {
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:desktop-development-loop',
+      },
       implementationExport: 'handleDevelopmentMergeReport',
       action: 'report-merge',
       risk: { level: 'write', openWorld: false },

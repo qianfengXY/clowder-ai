@@ -86,7 +86,6 @@ const mockStoreState = {
   setThreadLoading: vi.fn(),
   setThreadHasActiveInvocation: vi.fn(),
   setQueue: vi.fn(),
-  setQueuePaused: vi.fn(),
   setQueueFull: vi.fn(),
   setThreadIntentMode: vi.fn(),
   setThreadTargetCats: vi.fn(),
@@ -128,6 +127,7 @@ vi.mock('@/utils/userId', () => ({
 // Mock apiFetch to simulate server response
 const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({
+  refreshApiSession: vi.fn(async () => {}),
   API_URL: 'http://localhost:3100',
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
@@ -515,7 +515,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
   });
 
   describe('foreground network recovery', () => {
-    it('reconnects a disconnected socket and requests catch-up when the page becomes visible', () => {
+    it('reconnects a disconnected socket and requests catch-up when the page becomes visible', async () => {
       mockStoreState.hasActiveInvocation = false;
       mockSocket.connected = false;
 
@@ -524,7 +524,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
         root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
       });
 
-      act(() => {
+      await act(async () => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
 
@@ -532,7 +532,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
     });
 
-    it('reconnects a disconnected socket and requests catch-up when the network comes online', () => {
+    it('reconnects a disconnected socket and requests catch-up when the network comes online', async () => {
       mockStoreState.hasActiveInvocation = false;
       mockSocket.connected = false;
 
@@ -541,7 +541,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
         root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
       });
 
-      act(() => {
+      await act(async () => {
         window.dispatchEvent(new Event('online'));
       });
 

@@ -28,6 +28,7 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
   await writeFile(filePath, '# version-1\n');
   registerWorktrees([{ id: 'refresh-fixture', root: dir, branch: 'main', head: 'fixture' }]);
   let bundle = '';
+  let stylesheet = '';
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://fixture');
     response.setHeader('cache-control', 'no-store');
@@ -38,6 +39,17 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
     if (url.pathname === '/api/session') return json({ userId: 'test-user' });
     if (url.pathname === '/api/workspace/edit-session') return json({ token: 'fixture-token', expiresIn: 3600 });
     if (url.pathname === '/api/workspace/file') {
+      if (request.method === 'PUT') {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        assert.equal(input.worktreeId, 'refresh-fixture');
+        assert.equal(input.path, 'README.md');
+        assert.equal(input.editSessionToken, 'fixture-token');
+        assert.equal(input.baseSha256, (await readWorkspaceFilePreview(filePath)).sha256);
+        await writeFile(filePath, input.content);
+        return json({ path: 'README.md', sha256: (await readWorkspaceFilePreview(filePath)).sha256 });
+      }
       assert.equal(url.searchParams.get('worktreeId'), 'refresh-fixture');
       assert.equal(url.searchParams.get('path'), 'README.md');
       return json({ path: 'README.md', ...(await readWorkspaceFilePreview(filePath)) });
@@ -47,9 +59,16 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
       response.end(bundle);
       return;
     }
+    if (url.pathname === '/app.css') {
+      response.setHeader('content-type', 'text/css');
+      response.end(stylesheet);
+      return;
+    }
     if (url.pathname === '/') {
       response.setHeader('content-type', 'text/html');
-      response.end('<html><body><main id="root"></main><script type="module" src="/app.js"></script></body></html>');
+      response.end(
+        '<html><head><link rel="stylesheet" href="/app.css"></head><body><main id="root"></main><script type="module" src="/app.js"></script></body></html>',
+      );
       return;
     }
     response.statusCode = 404;
@@ -92,6 +111,7 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
       loader: { '.css': 'empty' },
       bundle: true,
       write: false,
+      outfile: path.join(dir, 'app.js'),
       format: 'esm',
       platform: 'browser',
       jsx: 'automatic',
@@ -102,7 +122,8 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
       },
       logLevel: 'silent',
     });
-    bundle = result.outputFiles[0].text;
+    bundle = result.outputFiles.find((file) => file.path.endsWith('.js')).text;
+    stylesheet = result.outputFiles.find((file) => file.path.endsWith('.css'))?.text ?? '';
     browser = await chromium.launch({ headless: true, executablePath: process.env.CAT_CAFE_TEST_CHROMIUM_PATH });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -159,15 +180,28 @@ test('visible Workspace body follows disk, reconnects, reopen and dirty editing'
     await writeFile(filePath, '# newest-while-dirty\n');
     await page.getByText('文件已被外部修改', { exact: true }).waitFor();
     await page.getByRole('button', { name: '重新加载', exact: true }).click();
-    await page.waitForFunction(() =>
-      document.querySelector('.cm-content')?.textContent?.includes('newest-while-dirty'),
-    );
+    // The upstream persistent draft survives reload; the new disk version is
+    // read-only until the operator resolves the explicit draft/version conflict.
+    const comparison = page.getByRole('region', { name: '当前文件与编辑草稿对比' });
+    await comparison.waitFor();
+    assert.match(await comparison.innerText(), /my unsaved draft/);
+    assert.match(await comparison.innerText(), /newest-while-dirty/);
+    await page.getByRole('button', { name: '丢弃未保存编辑', exact: true }).click();
     assert.equal((await editor.innerText()).trim(), (await readFile(filePath, 'utf8')).trim());
+    await editor.fill('# saved-through-owner\n');
+    const saved = page.waitForResponse(
+      (response) => response.url().endsWith('/api/workspace/file') && response.request().method() === 'PUT',
+    );
+    await page.getByTitle('保存 (Cmd+S)', { exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    await page.getByTitle('退出编辑', { exact: true }).click();
+    await expectVersion('saved-through-owner');
     assert.deepEqual(errors, []);
     console.log(
       JSON.stringify({
         url,
-        versions: 8,
+        versions: 9,
+        savedFromOwner: true,
         atomicRename: true,
         reconnect: true,
         samePathReopen: true,
