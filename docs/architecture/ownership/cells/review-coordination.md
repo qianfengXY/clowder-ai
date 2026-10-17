@@ -1,5 +1,15 @@
 ---
 cell_id: review-coordination
+mcp_admission_status: accepted
+mcp_admission_ref: "architecture-cell:review-coordination"
+mcp_admission_claims:
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_round_read, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_private_draft_read, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_draft_submit, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_independent_finish, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_barrier_drafts_read, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_cross_finish, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:review-coordination", toolName: cat_cafe_review_consensus_publish, resourceFamily: review-round, boundaryKind: resource-entry, decision: accepted}
 title: Review Coordination
 summary: Durable exact-SHA independent review, private-draft barrier, cross-review, consensus findings, and latest-round provenance for the ChatGPT-authored lane.
 description: F253-owned review semantics and persisted carrier consumed by EXT-001 without making a visible thread or Git ledger the truth root.
@@ -26,6 +36,17 @@ cited_by:
 # Review Coordination
 
 Architecture cell: review-coordination
+
+## Fork MCP Admission Continuity
+
+The resource-entry claims above preserve the existing fork surface from
+`f20b505d05d0c9f111270bb75145e67ca17dd8cb`; they add no tool, schema, profile,
+action or risk authority. The upstream synchronization was explicitly authorized
+to retain all custom capabilities in `thread_mvao2enytzz6tpfh`, source message
+`0001792138480569-001693-98bab44f`. These established fork names are canonical
+entries when compared with the upstream baseline, where they were absent.
+Authorization remains enforced by the existing project/session or reviewer
+boundary; this continuity record does not grant merge, shell or data access.
 
 ## Canonical Owner
 

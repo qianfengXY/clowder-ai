@@ -1,5 +1,16 @@
 ---
 cell_id: desktop-development-loop
+mcp_admission_status: accepted
+mcp_admission_ref: "architecture-cell:desktop-development-loop"
+mcp_admission_claims:
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_project_read, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_work_read, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_review_wait, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_work_connect, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_work_heartbeat, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_implementation_report, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_merge_confirmation_record, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
+  - {ref: "architecture-cell:desktop-development-loop", toolName: cat_cafe_development_merge_report, resourceFamily: desktop-development-loop, boundaryKind: resource-entry, decision: accepted}
 title: Desktop Development Loop
 summary: Optional EXT-001 Desktop policy, design authority, task/session projection, and user acceptance adapter over an existing Mission Hub project and managed-work/review truth.
 description: Opt-in bridge between an existing Mission Hub project and ChatGPT Desktop implementation, without owning project registration or becoming a second workflow engine.
@@ -31,6 +42,17 @@ cited_by:
 # Desktop Development Loop
 
 Architecture cell: desktop-development-loop
+
+## Fork MCP Admission Continuity
+
+The resource-entry claims above preserve the existing fork surface from
+`f20b505d05d0c9f111270bb75145e67ca17dd8cb`; they add no tool, schema, profile,
+action or risk authority. The upstream synchronization was explicitly authorized
+to retain all custom capabilities in `thread_mvao2enytzz6tpfh`, source message
+`0001792138480569-001693-98bab44f`. These established fork names are canonical
+entries when compared with the upstream baseline, where they were absent.
+Authorization remains enforced by the existing project/session or reviewer
+boundary; this continuity record does not grant merge, shell or data access.
 
 ## Canonical Owner
 

@@ -1,104 +1,148 @@
 #!/usr/bin/env node
 
 /**
- * F056 debt-freeze guard: reject raw emoji added to production Web JSX/TSX.
+ * F056 UI pictograph debt-freeze guard.
  *
- * Existing glyphs are intentionally outside this incremental gate. Tests,
- * fixtures, and non-rendering TS/JS helpers are also outside its UI boundary.
+ * Existing raw pictographs remain legacy debt, but a changed production UI line
+ * may not introduce another one. Designed SVG icons are the canonical replacement.
+ * Compatibility parsers must live in non-TSX modules; production JSX/TSX has no
+ * parser escape because a diff line cannot prove that an expression is not rendered.
+ * Non-semantic paw copy has its own narrowly-scoped annotation.
  */
 
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const RAW_EMOJI = /\p{Extended_Pictographic}/u;
-const UI_EXTENSION = /\.(?:jsx|tsx)$/u;
-const NON_PRODUCTION_SEGMENT = /\/(?:__fixtures__|__tests__|fixtures|test|tests)\//u;
-const NON_PRODUCTION_BASENAME = /\.(?:fixture|spec|stories|story|test)\.(?:jsx|tsx)$/u;
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
+const PICTOGRAPH_PATTERN = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+const REASONED_PAW_EXPRESSION_ALLOW = /cafe-ui-paw-expression-allow:\s+\S.{8,}$/u;
 
-function requestedBase() {
-  const baseIndex = process.argv.indexOf('--base');
-  if (baseIndex === -1) return process.env.NO_NEW_UI_EMOJI_BASE || 'origin/main';
-  const base = process.argv[baseIndex + 1];
-  if (!base || base.startsWith('--')) throw new Error('--base requires a Git revision');
-  return base;
+function isProductionUiPath(file) {
+  if (!file || !/^packages\/web\/src\/.+\.(?:jsx|tsx)$/u.test(file)) return false;
+  return !/(?:^|\/)(?:__tests__|__fixtures__)(?:\/|$)|\.(?:spec|test|stories)\.[jt]sx$/u.test(file);
 }
 
-function git(args) {
-  return execFileSync('git', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 30_000,
-  });
+function uniquePictographs(text) {
+  return [...new Set(text.match(PICTOGRAPH_PATTERN) ?? [])];
 }
 
-function isProductionUiPath(filePath) {
-  return (
-    filePath.startsWith('packages/web/src/') &&
-    UI_EXTENSION.test(filePath) &&
-    !NON_PRODUCTION_SEGMENT.test(filePath) &&
-    !NON_PRODUCTION_BASENAME.test(filePath)
-  );
+function isAllowedPawExpression(text, pictographs) {
+  if (!REASONED_PAW_EXPRESSION_ALLOW.test(text) || !pictographs.every((glyph) => glyph === '🐾')) {
+    return false;
+  }
+
+  const renderedCopy = text.match(/>([^<]*🐾[^<]*)<\//u)?.[1] ?? '';
+  return /[\p{Letter}\p{Number}]/u.test(renderedCopy.replaceAll('🐾', ''));
 }
 
-function changedProductionUiFiles(base) {
-  return git(['diff', '--name-only', '-z', '--diff-filter=ACMR', `${base}...HEAD`, '--', 'packages/web/src'])
-    .split('\0')
-    .filter(Boolean)
-    .filter(isProductionUiPath);
+function selectDiffFile(state, diffLine) {
+  const match = diffLine.match(/^\+\+\+ b\/(.+)$/u);
+  if (!match) return false;
+  state.currentFile = match[1];
+  state.newLine = null;
+  return true;
 }
 
-function addedEmojiLines(base, filePath) {
-  const diff = git(['diff', '--unified=0', '--no-color', `${base}...HEAD`, '--', filePath]);
+function selectDiffHunk(state, diffLine) {
+  const match = diffLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
+  if (!match) return false;
+  state.newLine = Number(match[1]);
+  return true;
+}
+
+function consumeDiffContentLine(state, diffLine) {
+  if (state.newLine === null || diffLine.startsWith('\\')) return null;
+  if (diffLine.startsWith('-') && !diffLine.startsWith('---')) return null;
+
+  const isAdded = diffLine.startsWith('+') && !diffLine.startsWith('+++');
+  const line = state.newLine;
+  if (!diffLine.startsWith('-')) state.newLine += 1;
+  if (!isAdded) return null;
+
+  return { file: state.currentFile, line, text: diffLine.slice(1) };
+}
+
+export function findAddedUiPictographs(diffText) {
   const findings = [];
-  let newLineNumber = 0;
+  const state = { currentFile: null, newLine: null };
 
-  for (const line of diff.split('\n')) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u.exec(line);
-    if (hunk) {
-      newLineNumber = Number.parseInt(hunk[1], 10);
-      continue;
+  for (const diffLine of diffText.split('\n')) {
+    if (selectDiffFile(state, diffLine) || selectDiffHunk(state, diffLine)) continue;
+    const addedLine = consumeDiffContentLine(state, diffLine);
+    if (!addedLine || !isProductionUiPath(addedLine.file)) continue;
+
+    const pictographs = uniquePictographs(addedLine.text);
+    const isNarrowlyAllowed = isAllowedPawExpression(addedLine.text, pictographs);
+    if (pictographs.length > 0 && !isNarrowlyAllowed) {
+      findings.push({ ...addedLine, pictographs, text: addedLine.text.trim() });
     }
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) {
-      continue;
-    }
-    if (line.startsWith('+')) {
-      const content = line.slice(1);
-      if (RAW_EMOJI.test(content)) findings.push({ filePath, lineNumber: newLineNumber, content: content.trim() });
-      newLineNumber += 1;
-      continue;
-    }
-    if (!line.startsWith('-') && line.length > 0) newLineNumber += 1;
   }
 
   return findings;
 }
 
-function main() {
+// A long-lived branch diff easily exceeds Node's 1 MiB default and would fail closed as "unreadable".
+export const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
+export function runGit(args, { cwd = REPO_ROOT, maxBuffer = GIT_MAX_BUFFER } = {}) {
   try {
-    const base = requestedBase();
-    const files = changedProductionUiFiles(base);
-    const findings = files.flatMap((filePath) => addedEmojiLines(base, filePath));
-
-    if (findings.length === 0) {
-      console.log(`✅ No new raw UI emoji detected (${files.length} production JSX/TSX file(s) inspected).`);
-      return;
-    }
-
-    console.error('❌ New raw emoji detected in production Web UI:');
-    for (const finding of findings) {
-      console.error(`  ${finding.filePath}:${finding.lineNumber}  ${finding.content}`);
-    }
-    console.error('Use a designed SVG/asset, or keep parser/test fixtures outside production JSX/TSX.');
-    process.exitCode = 1;
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10_000,
+      maxBuffer,
+    });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Unable to inspect UI diff: ${detail}`);
-    process.exitCode = 1;
+    const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr ?? '').trim() : '';
+    const code = error && typeof error === 'object' && 'code' in error && error.code ? ` (${error.code})` : '';
+    throw new Error(`git ${args.join(' ')} failed${code}${stderr ? `: ${stderr}` : ''}`, { cause: error });
   }
 }
 
-main();
+function readDiff(base) {
+  if (base) return runGit(['diff', '--unified=0', `${base}...HEAD`]);
+
+  const staged = runGit(['diff', '--cached', '--unified=0']);
+  const unstaged = runGit(['diff', '--unified=0']);
+  const workingTree = [staged, unstaged].filter(Boolean).join('\n');
+  if (workingTree.trim()) return workingTree;
+
+  return runGit(['diff', '--unified=0', 'origin/main...HEAD']);
+}
+
+function parseBase(argv) {
+  const index = argv.indexOf('--base');
+  if (index === -1) return null;
+  return argv[index + 1] ?? null;
+}
+
+function main() {
+  let diffText;
+  try {
+    diffText = readDiff(parseBase(process.argv.slice(2)));
+  } catch (error) {
+    console.error('[check:no-new-ui-emoji] FAIL — unable to read git diff');
+    console.error(`  ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const findings = findAddedUiPictographs(diffText);
+  if (findings.length === 0) {
+    console.log('[check:no-new-ui-emoji] PASS — no new raw UI pictographs');
+    return;
+  }
+
+  console.error('[check:no-new-ui-emoji] FAIL — production UI must use designed SVG icons');
+  for (const finding of findings) {
+    console.error(`  ${finding.file}:${finding.line} ${finding.pictographs.join(' ')}  ${finding.text}`);
+  }
+  console.error('  Replace semantic glyphs with project SVG icons.');
+  console.error('  Move compatibility parsing to a non-TSX module; expressive paw copy has its own narrow annotation.');
+  process.exitCode = 1;
+}
+
+if (resolve(process.argv[1] ?? '') === SCRIPT_PATH) main();

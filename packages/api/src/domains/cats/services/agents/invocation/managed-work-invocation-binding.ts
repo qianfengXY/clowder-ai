@@ -9,7 +9,7 @@ export async function resolveManagedWorkInvocationBinding(input: {
   ownerUserId: string;
   threadId: string;
   executorCatId: CatId;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore?: Pick<IMessageStore, 'getById'>;
   triggerMessageId?: string;
   /** Server-owned A2A source; ordinary causal/reply ids do not grant peer scope. */
   a2aTriggerMessageId?: string;
@@ -147,10 +147,10 @@ function isPersistedPeerTrigger(message: StoredMessage | null, input: Invocation
 }
 
 async function readTriggerMessage(
-  messageStore: Pick<IMessageStore, 'getById'>,
+  messageStore: Pick<IMessageStore, 'getById'> | undefined,
   triggerMessageId: string | undefined,
 ): Promise<StoredMessage | null> {
-  if (!triggerMessageId) return null;
+  if (!triggerMessageId || !messageStore) return null;
   try {
     return await messageStore.getById(triggerMessageId);
   } catch {

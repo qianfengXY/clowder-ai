@@ -9,6 +9,14 @@ export function codexAppServerErrorMessage(value: unknown): string {
   return typeof record?.message === 'string' ? record.message : 'Codex app-server request failed';
 }
 
+function codexErrorDetails(value: unknown): CodexAppServerJsonObject {
+  const record = asCodexAppServerRecord(value);
+  return {
+    message: codexAppServerErrorMessage(value),
+    ...(typeof record?.additionalDetails === 'string' ? { additionalDetails: record.additionalDetails } : {}),
+  };
+}
+
 function mapItem(itemValue: unknown): CodexAppServerJsonObject | null {
   const item = asCodexAppServerRecord(itemValue);
   if (!item || typeof item.type !== 'string') return null;
@@ -49,7 +57,14 @@ type CodexAppServerNotificationMapper = (
 
 const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (method, params) => {
   const item = mapItem(params?.item);
-  return item ? { type: method.replace('/', '.'), item } : null;
+  return item
+    ? {
+        type: method.replace('/', '.'),
+        item,
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof params?.turnId === 'string' ? { turn_id: params.turnId } : {}),
+      }
+    : null;
 };
 
 const mapCodexAppServerAgentMessageDelta: CodexAppServerNotificationMapper = (_method, params) => {
@@ -113,7 +128,14 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
     'item/agentMessage/delta': mapCodexAppServerAgentMessageDelta,
     'item/started': mapCodexAppServerItemNotification,
     'item/completed': mapCodexAppServerItemNotification,
-    'turn/started': () => ({ type: 'turn.started' }),
+    'turn/started': (_method, params) => {
+      const turn = asCodexAppServerRecord(params?.turn);
+      return {
+        type: 'turn.started',
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
+    },
     'thread/goal/updated': mapCodexAppServerGoalUpdated,
     'thread/goal/cleared': mapCodexAppServerGoalCleared,
     'turn/plan/updated': (_method, params) => {
@@ -131,14 +153,23 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
         return {
           type: 'turn.failed',
           status,
-          error: { message: codexAppServerErrorMessage(asCodexAppServerRecord(turn?.error)) },
+          error: codexErrorDetails(turn?.error),
+          ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+          ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
         };
       }
-      return { type: 'turn.completed', ...(typeof status === 'string' ? { status } : {}) };
+      return {
+        type: 'turn.completed',
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
     },
     error: (_method, params) => ({
       type: 'error',
-      message: codexAppServerErrorMessage(params?.error ?? params),
+      ...codexErrorDetails(params?.error ?? params),
+      ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+      ...(typeof params?.turnId === 'string' ? { turn_id: params.turnId } : {}),
     }),
   } satisfies Record<string, CodexAppServerNotificationMapper>),
 );

@@ -1,6 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -45,6 +46,64 @@ describe('resolveProbeTimeoutMs', () => {
 });
 
 describe('probeMcpCapability', () => {
+  it('does not retain the MCP SDK default request timer after a failed probe', async () => {
+    const script = `
+      const { probeMcpCapability } = await import('./dist/routes/mcp-probe.js');
+      const result = await probeMcpCapability(
+        {
+          id: 'exits-before-initialize',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            command: process.execPath,
+            args: ['--eval', 'process.exit(0)'],
+          },
+        },
+        { projectRoot: process.cwd(), timeoutMs: 100 },
+      );
+      if (result.connectionStatus !== 'disconnected') process.exitCode = 2;
+      process.send({ stage: 'probe-complete' }, () => process.disconnect());
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' },
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    const exit = await new Promise((resolve, reject) => {
+      let timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error(`probe did not finish startup within 5000ms: ${stderr}`));
+      }, 5000);
+      // Module loading is outside the resource-release contract. Keep the
+      // original 1500ms exit bound, starting when the probe actually returns.
+      child.once('message', (message) => {
+        if (message?.stage !== 'probe-complete') return;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`failed probe retained an active handle past 1500ms: ${stderr}`));
+        }, 1500);
+      });
+      child.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+      child.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+
+    assert.deepEqual(exit, { code: 0, signal: null }, stderr);
+  });
+
   it('returns unknown when pencil resolver-backed capability cannot resolve a local binary', async () => {
     const originalBin = process.env.PENCIL_MCP_BIN;
     const originalApp = process.env.PENCIL_MCP_APP;

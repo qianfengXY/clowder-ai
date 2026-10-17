@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
+import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { AgentRouter } from '../dist/domains/cats/services/agents/routing/AgentRouter.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -87,6 +89,28 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
     return result;
   });
   const events = [];
+  let queueProcessor;
+  const invocationQueue = new InvocationQueue(undefined, {
+    onAdmitted: ({ threadId }) => {
+      void queueProcessor.requestDrain(threadId);
+    },
+  });
+  const socketManager = {
+    broadcastAgentMessage: (event) => events.push(event),
+    broadcastToRoom() {},
+    emitToUser() {},
+  };
+  queueProcessor = new QueueProcessor({
+    queue: invocationQueue,
+    messageStore,
+    threadStore,
+    invocationTracker,
+    invocationRecordStore,
+    turnExecutionStore,
+    socketManager,
+    router,
+    log: { debug() {}, info() {}, warn() {}, error() {} },
+  });
   const app = Fastify();
   t.after(() => app.close());
   await app.register(messagesRoutes, {
@@ -96,11 +120,9 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
     threadStore,
     invocationRecordStore,
     invocationTracker,
-    socketManager: {
-      broadcastAgentMessage: (event) => events.push(event),
-      broadcastToRoom() {},
-      emitToUser() {},
-    },
+    invocationQueue,
+    queueProcessor,
+    socketManager,
   });
   const response = await app.inject({
     method: 'POST',
@@ -108,15 +130,15 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
     headers: { 'x-cat-cafe-user': 'owner' },
     payload: { threadId: thread.id, content: '@codex please continue our discussion' },
   });
-  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.statusCode, 202, response.body);
   const accepted = response.json();
-  assert.equal(accepted.status, 'processing');
+  assert.equal(accepted.status, 'queued');
   assert.equal((await terminal.promise).status, 'succeeded', JSON.stringify(events));
   assert.equal(providerCalls, 1);
   assert.equal(binds.mock.callCount(), 0);
   assert.deepEqual(bundle, originalBundle);
   const source = messageStore.getById(accepted.userMessageId);
-  assert.equal(source.catId, null);
+  assert.deepEqual(source.from, { kind: 'user', userId: 'owner' });
   assert.deepEqual(source.mentions, ['codex']);
   const call = creations.mock.calls[0];
   assert.equal(call.arguments[4], undefined, 'HTTP user ingress must not acquire A2A provenance');

@@ -677,11 +677,20 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 31 total rules in development.yaml (including ChatGPT Review governance and F303 design-gate evidence)
-    assert.equal(results.length, 31, `expected 31 rules, got ${results.length}`);
+    // The real catalog is the coverage oracle: each rule must be evaluated once.
+    const rules = DEVELOPMENT_SOP_DEFINITION.stages.flatMap((stage) => [...stage.hardRules, ...stage.pitfalls]);
+    assert.deepEqual(results.map((result) => result.ruleId).sort(), rules.map((rule) => rule.id).sort());
 
-    // 17 manual_only rules -> skipped (semantic governance requires external evidence)
-    assert.equal(skipped.length, 17, `expected 17 skipped (manual_only), got ${skipped.length}`);
+    // Successful commands cannot certify manual judgments; preserve their reasons.
+    assert.deepEqual(
+      skipped.map(({ ruleId, reason }) => ({ ruleId, reason })).sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+      rules
+        .filter((rule) => rule.predicate.type === 'manual_only')
+        .map((rule) => ({ ruleId: rule.id, reason: rule.predicate.reason }))
+        .sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+    );
+    const testValueRule = results.find((result) => result.ruleId === 'quality-gate-confirmed-test-value');
+    assert.equal(testValueRule?.status, 'skipped', 'test detection power requires judgment despite passing commands');
 
     // Nominal trace should produce 0 violations
     assert.equal(

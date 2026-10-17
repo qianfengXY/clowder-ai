@@ -192,6 +192,17 @@ describe('visible Workspace file owner freshness', () => {
     expect(body()).toBe('version-1');
     expect(draft()).toBe('my unsaved draft');
   });
+  it('closes the readable owner surface when refreshed access is denied', async () => {
+    await render();
+    await click('edit draft');
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Response('{}', { status: 403 }));
+    await event('connect');
+    expect(body()).toBeUndefined();
+    expect(container.textContent).toContain('这个文件目前无法恢复');
+    disk = 'after-access-restored';
+    await event('connect');
+    expect(body()).toBe(disk);
+  });
   it('explicit reload discards a draft even if disk has returned to the original content', async () => {
     await render();
     await click('edit draft');

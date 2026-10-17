@@ -49,8 +49,8 @@ async function createNativeHostBridge(options) {
               ...message,
               observedRevisions: {
                 helper: helperArtifactRevision,
-                extension: '0.2.10',
-                pageAdapter: '2026-09-02.1',
+                extension: '0.2.12',
+                pageAdapter: '2026-09-19.1',
               },
             }
           : message;
@@ -115,14 +115,15 @@ function appendRequest(overrides = {}) {
     idempotencyKey: 'source-message-9',
     expectedRevisions: {
       helper: helperArtifactRevision,
-      extension: '0.2.10',
-      pageAdapter: '2026-09-02.1',
+      extension: '0.2.12',
+      pageAdapter: '2026-09-19.1',
     },
     ...overrides,
   };
 }
 
-async function waitForPath(path, child, getSpawnError, timeoutMs = 2_000) {
+// Cold module startup is separate from the bounded exit/socket cleanup checks.
+async function waitForPath(path, child, getSpawnError, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const spawnError = getSpawnError();
@@ -293,8 +294,8 @@ describe('personal Chrome native host bridge', () => {
       conversationId: 'conversation-7',
       expectedRevisions: {
         helper: helperArtifactRevision,
-        extension: '0.2.10',
-        pageAdapter: '2026-09-02.1',
+        extension: '0.2.12',
+        pageAdapter: '2026-09-19.1',
       },
     });
 
@@ -1521,8 +1522,8 @@ describe('native host install plan', () => {
         );
         const expectedRevisions = {
           helper: plan.artifactDigest,
-          extension: '0.2.10',
-          pageAdapter: '2026-09-02.1',
+          extension: '0.2.12',
+          pageAdapter: '2026-09-19.1',
         };
         const outboundPromise = readOneNativeMessage(child.stdout);
         const localResultPromise = localAppend(plan.socketPath, pairingSecret, appendRequest({ expectedRevisions }));
