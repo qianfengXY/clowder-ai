@@ -1,4 +1,5 @@
 import type { CatId, ManagedWorkBinding, WorkflowSopAdmissionBundle } from '@cat-cafe/shared';
+import { messageFrom } from '../../stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
@@ -114,13 +115,18 @@ async function isNonExecutorParticipant(
 }
 
 function isPersistedOwnerTrigger(message: StoredMessage | null, input: InvocationTriggerScope): boolean {
-  // Direct ingress persists the owner and resolved targets on this exact user
-  // message. A causal id alone, prompt text, or a system/connector carrier is
-  // not proof of an owner addressing a participant.
+  // Conversation fallback routes unmentioned owner replies (including card
+  // answers) without adding synthetic @mentions to the immutable source.
+  // Verify the exact persisted owner message; an explicit mention of another
+  // cat still cannot authorize this participant. Canonical sender identity
+  // keeps system/connector/plugin carriers outside this owner-only path.
+  const from = message ? messageFrom(message) : undefined;
   return Boolean(
     !input.a2aTriggerMessageId &&
       input.triggerMessageId &&
       message?.id === input.triggerMessageId &&
+      from?.kind === 'user' &&
+      from.userId === input.ownerUserId &&
       message.userId === input.ownerUserId &&
       message.threadId === input.threadId &&
       message.catId === null &&
@@ -129,7 +135,7 @@ function isPersistedOwnerTrigger(message: StoredMessage | null, input: Invocatio
       !message.sourceParseFailure &&
       message.extra?.systemKind === undefined &&
       message.extra?.scheduler === undefined &&
-      message.mentions.includes(input.executorCatId),
+      (message.mentions.length === 0 || message.mentions.includes(input.executorCatId)),
   );
 }
 
