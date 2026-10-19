@@ -71,6 +71,16 @@ test('owner prose does not grant implementation identity to another participant'
   assert.deepEqual(calls, []);
 });
 
+test('an owner reply without mentions can continue a server-routed participant', async () => {
+  const { input, bundle, message, calls } = fixture();
+  message.mentions = [];
+  message.content = '输入回答：我 F001 已经跑完了，但 F002 怎么用呢？';
+  const before = structuredClone(bundle);
+  assert.equal(await resolveManagedWorkInvocationBinding(input), undefined);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(bundle, before);
+});
+
 test('direct calls of the incumbent retain its exact managed binding', async () => {
   const { input, message, calls } = fixture();
   input.executorCatId = 'author';
@@ -123,9 +133,9 @@ for (const [name, mutate] of [
     },
   ],
   [
-    'untargeted user message',
+    'message explicitly addressed to a different participant',
     ({ message }) => {
-      message.mentions = [];
+      message.mentions = ['other'];
       message.extra.targetCats = ['reviewer'];
     },
   ],
@@ -198,6 +208,19 @@ for (const [name, mutate] of [
       bundle.attempt.executorCatId = 'reviewer';
     },
   ],
+  ...[
+    { kind: 'system', service: 'review-orchestration' },
+    { kind: 'external', connectorId: 'feishu' },
+    { kind: 'plugin', instanceId: 'test' },
+    { kind: 'agent', catId: 'author' },
+    { kind: 'user', userId: 'other' },
+  ].map((from) => [
+    `canonical ${from.kind} sender ${JSON.stringify(from)}`,
+    ({ message }) => {
+      message.from = from;
+      message.mentions = [];
+    },
+  ]),
 ]) {
   test(`${name} cannot bypass implementation binding`, async () => {
     const f = fixture();

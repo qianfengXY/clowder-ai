@@ -17,7 +17,7 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { messagesRoutes } from '../dist/routes/messages.js';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
-test('owner HTTP mention reaches the provider and a reloadable reply without taking parent custody', async (t) => {
+async function verifyOwnerHttpWake(t, content, expectedMentions) {
   const isolatedRoot = await mkdtemp(join(tmpdir(), 'owner-http-wake-'));
   for (const [key, value] of Object.entries({
     AUDIT_LOG_DIR: isolatedRoot,
@@ -39,6 +39,14 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
   const invocationTracker = new InvocationTracker();
   const thread = threadStore.create('owner', 'Owner wake acceptance', isolatedRoot);
   threadStore.linkBacklogItem(thread.id, 'backlog');
+  await messageStore.append({
+    from: { kind: 'user', userId: 'owner' },
+    userId: 'owner',
+    threadId: thread.id,
+    content: '@codex how do I use F002?',
+    mentions: ['codex'],
+    timestamp: Date.now() - 1_000,
+  });
   const bundle = {
     admission: {
       ownerUserId: 'owner',
@@ -75,7 +83,12 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
       codexService: {
         async *invoke() {
           providerCalls++;
-          yield { type: 'text', catId: 'codex', content: 'I can respond to your direct call.', timestamp: Date.now() };
+          yield {
+            type: 'text',
+            catId: 'codex',
+            content: 'I can respond to your direct call.',
+            timestamp: Date.now(),
+          };
           yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         },
       },
@@ -91,6 +104,7 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
   const events = [];
   let queueProcessor;
   const invocationQueue = new InvocationQueue(undefined, {
+    resolveTargets: (...args) => router.resolveSendTargets(...args),
     onAdmitted: ({ threadId }) => {
       void queueProcessor.requestDrain(threadId);
     },
@@ -128,7 +142,7 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
     method: 'POST',
     url: '/api/messages',
     headers: { 'x-cat-cafe-user': 'owner' },
-    payload: { threadId: thread.id, content: '@codex please continue our discussion' },
+    payload: { threadId: thread.id, content },
   });
   assert.equal(response.statusCode, 202, response.body);
   const accepted = response.json();
@@ -139,7 +153,7 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
   assert.deepEqual(bundle, originalBundle);
   const source = messageStore.getById(accepted.userMessageId);
   assert.deepEqual(source.from, { kind: 'user', userId: 'owner' });
-  assert.deepEqual(source.mentions, ['codex']);
+  assert.deepEqual(source.mentions, expectedMentions);
   const call = creations.mock.calls[0];
   assert.equal(call.arguments[4], undefined, 'HTTP user ingress must not acquire A2A provenance');
   assert.equal(call.arguments[6], source.id);
@@ -164,4 +178,13 @@ test('owner HTTP mention reaches the provider and a reloadable reply without tak
     events.some((event) => event.type === 'error'),
     false,
   );
-});
+}
+
+for (const [name, content, expectedMentions] of [
+  ['mention', '@codex please continue our discussion', ['codex']],
+  ['card answer without mentions', '输入回答：我 F001 已经跑完了，但 F002 怎么用呢？', []],
+]) {
+  test(`owner HTTP ${name} reaches the provider and a reloadable reply without taking parent custody`, async (t) => {
+    await verifyOwnerHttpWake(t, content, expectedMentions);
+  });
+}
