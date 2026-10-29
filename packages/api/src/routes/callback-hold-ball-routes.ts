@@ -816,21 +816,14 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         : null;
     const reuseManagedSubmission = (job: DurableManagedGateJob) => {
       const current = managedJobs.get(managedPrincipal, job.jobId);
-      const originTaskPresent = !!deps.dynamicTaskStore.getById(job.originTaskId);
-      if (!current.admissionMessageId || !originTaskPresent) {
+      if (!current.admissionMessageId || !deps.dynamicTaskStore.getById(job.originTaskId)) {
         reply.status(409);
         return {
           error: 'The original command admission has no complete visible carrier',
           code: 'managed_job_admission_incomplete',
           held: false,
           jobId: job.jobId,
-          taskId: job.originTaskId,
           state: current.state,
-          admission: {
-            // This records the ledger's reference, not a fresh History existence check.
-            waitingMessageIdRecorded: !!current.admissionMessageId,
-            originTaskPresent,
-          },
           action:
             current.state === 'queued'
               ? 'No worker was admitted. Retry this lookup after recovery; do not assume the command started.'
@@ -1178,30 +1171,6 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
       taskRunner.unregister(taskId);
       dynamicTaskStore.remove(taskId);
-      // This new job has not reached waiting History/admit or any worker. Reject
-      // through the existing terminal owner, without touching the prior producer.
-      let durableJobTerminalPersisted: boolean | null = null;
-      if (durableJob) {
-        try {
-          durableJobTerminalPersisted = settleNoSpawnDurableGate(
-            durableJob,
-            taskId,
-            'carrier_retirement_unavailable',
-            false,
-          );
-        } catch (err) {
-          durableJobTerminalPersisted = false;
-          log.error({ err, taskId }, 'Managed job replacement rollback terminal is unconfirmed');
-        }
-      }
-      // Exact compensation is independent of terminal persistence: even a
-      // fenced/failed receipt must not strand this request's quota reservation.
-      let quotaReleased = false;
-      try {
-        quotaReleased = await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
-      } catch (err) {
-        log.error({ err, taskId }, 'Managed job replacement rollback quota release is unconfirmed');
-      }
       log.warn(
         { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId },
         'F167: managed-command replacement rejected because exact carrier retirement is unavailable',
@@ -1210,10 +1179,6 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return {
         error: 'Prior managed-command carrier could not be retired safely',
         code: 'MANAGED_COMMAND_CARRIER_RETIREMENT_UNAVAILABLE',
-        held: false,
-        taskId,
-        ...(durableJob ? { jobId: durableJob.jobId } : {}),
-        rollback: { durableJobTerminalPersisted, quotaReleased },
       };
     }
 
